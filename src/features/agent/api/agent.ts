@@ -1,7 +1,12 @@
-import { ToolLoopAgent, isStepCount, tool, type InferUITools, type UIMessage } from 'ai';
+import { ToolLoopAgent, isStepCount, tool, type InferUITools, type Tool, type UIMessage } from 'ai';
 import { z } from 'zod';
 import { DEFAULT_MODEL, isModelKey } from '../constants/models';
-import { getSkill } from '../constants/skills';
+import {
+  AGENT_TOOL_NAMES,
+  getSkill,
+  type AgentToolName,
+  type SkillExample
+} from '../constants/skills';
 import { ASPECT_KEYS, ASPECT_PRESETS, type AspectKey } from '../constants/image-models';
 import { DEFAULT_I2V_MODEL, VIDEO_ASPECT_KEYS } from '../constants/video-models';
 import { resolveModel } from './provider';
@@ -751,9 +756,24 @@ export interface UsageSink {
 }
 
 /**
+ * 把技能示例渲染为 system 内的「示范」段落（few-shot，空则返回 ''）。
+ * 示例随 system 每次请求发送，总长控制见 skills.ts 约定（每技能 ≤2 条、单条精简）。
+ */
+function renderExamples(examples?: readonly SkillExample[]): string {
+  if (!examples?.length) return '';
+  const rendered = examples
+    .map((example) => `用户：${example.input}\n你：${example.output}`)
+    .join('\n\n');
+  return `\n\n## 示范（模仿以下输出结构与风格，不要照搬内容）\n\n${rendered}`;
+}
+
+/**
  * 每请求构建一个 Agent（serverless 无状态，上下文经闭包注入工具）。
- * skillId：会话级技能（专家模式）；命中注册表时把技能指令追加到基础指令后。
- * 防御：未知/已下架 id（getSkill → undefined）回退基础指令，不报错。
+ * skillId：会话级技能（专家模式）；命中注册表时把技能指令 + 示例追加到基础指令后，
+ * 并按 skill.tools 白名单过滤注册给模型的工具（未声明技能或技能未声明 tools = 全量）。
+ * 注意：agentValidationTools 恒为全量不随技能过滤 —— 会话中途切技能后，
+ * 旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。
+ * 防御：未知/已下架 id（getSkill → undefined）回退基础指令 + 全量工具，不报错。
  */
 export function buildAgent(params: {
   userId: string;
@@ -765,23 +785,31 @@ export function buildAgent(params: {
 }) {
   const modelKey = isModelKey(params.modelKey) ? params.modelKey : DEFAULT_MODEL;
   const skill = getSkill(params.skillId);
-  const instructions = skill
-    ? `${AGENT_INSTRUCTIONS}\n\n# 当前技能：${skill.name}\n${skill.instructions}`
-    : AGENT_INSTRUCTIONS;
+  const skillBlock = skill
+    ? `\n\n# 当前技能：${skill.name}\n${skill.instructions}${renderExamples(skill.examples)}`
+    : '';
+  const instructions = `${AGENT_INSTRUCTIONS}${skillBlock}`;
+  // 工具名 → 工厂（与 agentValidationTools 的 9 工具一一对应）；按技能白名单懒构建，
+  // 未声明技能或技能未声明 tools 时回退全量（向后兼容，无技能 = 通用兜底）
+  const toolFactories: Record<AgentToolName, () => Tool> = {
+    createAsset: () => createAssetTool(params),
+    createImageAsset: () => createImageAssetTool(params),
+    editImageAsset: () => editImageAssetTool(params),
+    createVideoAsset: () => createVideoAssetTool(params),
+    createVideoFromImageAsset: () => createVideoFromImageAssetTool(params),
+    findAssets: () => findAssetsTool(params),
+    readAsset: () => readAssetTool(params),
+    knowledgeSearch: () => knowledgeSearchTool(params),
+    composeDesign: () => composeDesignTool(params)
+  };
+  const allowedTools = skill?.tools ?? AGENT_TOOL_NAMES;
+  const tools = Object.fromEntries(
+    allowedTools.map((name) => [name, toolFactories[name]()])
+  ) as Record<string, Tool>;
   return new ToolLoopAgent({
     model: resolveModel(modelKey),
     instructions,
-    tools: {
-      createAsset: createAssetTool(params),
-      createImageAsset: createImageAssetTool(params),
-      editImageAsset: editImageAssetTool(params),
-      createVideoAsset: createVideoAssetTool(params),
-      createVideoFromImageAsset: createVideoFromImageAssetTool(params),
-      findAssets: findAssetsTool(params),
-      readAsset: readAssetTool(params),
-      knowledgeSearch: knowledgeSearchTool(params),
-      composeDesign: composeDesignTool(params)
-    },
+    tools,
     stopWhen: isStepCount(6),
     // totalMs 必须 ≥ 视频轮询上限（VIDEO_POLL_TIMEOUT_MS=280s）+ 转存/落库开销，
     // 否则长视频会被 Agent 总超时提前中止；上限仍 < Route Handler maxDuration=300（平台硬杀）。

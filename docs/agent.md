@@ -177,18 +177,19 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 
 > 区分：`findAssets` 按标题找「作品」（复用/改写/改图）；`knowledgeSearch` 按语义找「资料」（基于内容作答并标注来源）。对话中的 `[引用资产]` 块给出的 id 可直接使用，无需再检索。
 
-工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，全部 9 个工具均同时登记到 validation 集与 `buildAgent.tools`），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。
+工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 9 工具、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的 `tools` 白名单过滤注册（见 §5.1）——两者必须分离：会话中途切技能后，旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。
 
 ### 5.1 技能系统（专家模式）
 
-会话级「专家模式」：用户为一段会话选定一个技能，服务端在 `buildAgent` 处把技能指令**追加**到基础指令后（不新增工具、不做渐进披露）。
+会话级「专家模式」：用户为一段会话选定一个技能，服务端在 `buildAgent` 处把技能指令与示例**追加**到基础指令后，并按技能的 `tools` 白名单过滤注册给模型的工具（能力边界，防误调昂贵工具）。
 
 - **注册表**（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：v1 全部在代码中定义（全局预置、非用户私有数据）；后续增删技能只改本文件。`id` 是存库的稳定 key（`conversations.active_skill_id`），改名不影响已持久化的会话。
-- **当前 3 个技能**：`ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。
-- **数据结构** `SkillRegistryEntry`：`{ id, name, description, instructions, placeholder? }`。`instructions` 是覆盖进 system 的专家人设 + 工作流；`placeholder` 是激活后输入框引导语。
-- **UI**（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）：输入区一枚 pill（当前技能名或「通用」）+ 下拉列表（搜索 + 名称 + 何时用）。与模型选择器同构：选中即回调持久化（会话级）；激活后 pill 带 ✕ 一键清除回「通用」。
+- **当前 3 个技能**：`ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，均声明 7 工具白名单（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量兜底）。
+- **数据结构** `SkillRegistryEntry`：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是覆盖进 system 的专家人设 + 工作流；`placeholder` 是激活后输入框引导语；`tools` 是工具白名单（`AgentToolName[]`，**未声明 = 全量**，声明时必须覆盖工作流所需全部工具且与 instructions 提到的工具一致）；`examples` 是 few-shot 示范（`{ input, output }[]`，经 `renderExamples` 渲染为「示范」段落追加进 system，每技能 ≤2 条、单条精简控制 token）。
+- **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界，如需则显式加入对应技能的 tools）。
+- **UI**（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）：输入区一枚 pill（当前技能名或「通用」）+ 下拉列表（搜索 + 名称 + 何时用）。与模型选择器同构：选中即回调持久化（会话级）；激活后 pill 带 ✕ 一键清除回「通用」。工具集/示例不在 UI 展示。
 - **持久化**：`conversations.activeSkillId` 列（text，可空）；`createConversation` / `updateConversation` 支持传入；`chat` 路由读会话的 `activeSkillId` 传入 `buildAgent`。
-- **防御**：未知 / 已下架 id（`getSkill` → undefined）回退基础指令，不报错（`isSkillId` 校验）。
+- **防御**：未知 / 已下架 id（`getSkill` → undefined）回退基础指令 + 全量工具，不报错（`isSkillId` 校验）；工具过滤只影响「模型能调什么」，不影响「历史消息能否被校验」（`agentValidationTools` 恒全量，见 §5）。
 
 ---
 
