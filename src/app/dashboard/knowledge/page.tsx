@@ -1,6 +1,7 @@
 import PageContainer from '@/components/layout/page-container';
 import { AddDocumentButton } from '@/features/knowledge/components/add-document-button';
 import KnowledgeListing from '@/features/knowledge/components/knowledge-listing';
+import { KnowledgeSearchPanel } from '@/features/knowledge/components/knowledge-search-panel';
 import { searchParamsCache } from '@/lib/searchparams';
 import type { SearchParams } from 'nuqs/server';
 
@@ -20,7 +21,12 @@ export default async function KnowledgePage(props: PageProps) {
     <PageContainer
       pageTitle='知识库'
       pageDescription='沉淀你的资料，Agent 会按语义检索后作答并标注来源。'
-      pageHeaderAction={<AddDocumentButton />}
+      pageHeaderAction={
+        <div className='flex items-center gap-2'>
+          <KnowledgeSearchPanel />
+          <AddDocumentButton />
+        </div>
+      }
     >
       <KnowledgeListing />
     </PageContainer>

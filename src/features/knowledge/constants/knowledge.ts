@@ -61,5 +61,10 @@ export const DEFAULT_SEARCH_TOP_K = 5;
 /** knowledgeSearch 返回条数上限 */
 export const MAX_SEARCH_TOP_K = 8;
 
-/** 检索相似度阈值（score = 1 - cosine 距离）：低于此值视为未命中，避免无关片段污染上下文 */
-export const SEARCH_MIN_SCORE = 0.25;
+/**
+ * 检索相似度阈值（score = 1 - cosine 距离）：低于此值视为未命中，避免无关片段污染上下文。
+ * 2026-09 真实语料标定（text-embedding-v4）：无关查询的噪声带顶部 ~0.36，真实语义查询
+ * 命中相关文档 0.56+（原文回查 0.67~0.95）；取两带分界 0.45（宁漏召不误导）。
+ * 语料规模或 embedding 模型变化时需重新标定。
+ */
+export const SEARCH_MIN_SCORE = 0.45;

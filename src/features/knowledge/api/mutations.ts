@@ -2,7 +2,12 @@ import { mutationOptions } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { getQueryClient } from '@/lib/query-client';
 import { knowledgeKeys } from './queries';
-import type { CreateDocumentRequest, DocumentIngestResult } from './types';
+import type {
+  CreateDocumentRequest,
+  DocumentIngestResult,
+  KnowledgeSearchRequest,
+  KnowledgeSearchResponse
+} from './types';
 
 /** 文档域失效：写操作成功后重查列表（摄取为同步，回来即是终态） */
 function invalidateDocuments(): void {
@@ -45,4 +50,16 @@ export const retryKnowledgeDocumentMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<DocumentIngestResult>(`/agent/knowledge/documents/${id}/retry`, { method: 'POST' }),
   onSuccess: invalidateDocuments
+});
+
+/**
+ * 检索测试：与 Agent `knowledgeSearch` 工具同链路（服务端复用 searchKnowledgeByText）；
+ * 每次提交都实拉实检（属调试语义），无缓存失效动作。
+ */
+export const searchKnowledgeMutation = mutationOptions({
+  mutationFn: (data: KnowledgeSearchRequest) =>
+    apiClient<KnowledgeSearchResponse>('/agent/knowledge/search', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
 });

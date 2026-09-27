@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_SEARCH_TOP_K } from '../constants/knowledge';
 import type { KnowledgeSource, KnowledgeStatus } from '../constants/knowledge';
 
 /**
@@ -54,6 +55,26 @@ export interface KnowledgeSearchHit {
 }
 
 // ---------------------------------------------------------------------------
+// 预览（文档详情）
+// ---------------------------------------------------------------------------
+
+/** 文档详情（预览用）：列表字段 + 入库原文（只读快照，不做原文编辑） */
+export interface KnowledgeDocumentDetail extends KnowledgeDocument {
+  content: string;
+}
+
+/** 切分片段（预览用）：不返回 embedding（1024 维向量无展示价值且响应体巨大） */
+export interface KnowledgeChunk {
+  chunkIndex: number;
+  content: string;
+}
+
+export interface KnowledgeDocumentDetailResponse {
+  document: KnowledgeDocumentDetail;
+  chunks: KnowledgeChunk[];
+}
+
+// ---------------------------------------------------------------------------
 // 写操作请求体（Route Handler 校验用）
 // ---------------------------------------------------------------------------
 
@@ -76,6 +97,21 @@ export const createDocumentRequestSchema = z.discriminatedUnion('source', [
 ]);
 
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
+
+/**
+ * 检索测试请求体：与 Agent `knowledgeSearch` 工具的参数范围一致
+ * （query 1..500；topK 1..8 可选，缺省同工具默认 5），保证「测试所见 = 对话所得」。
+ */
+export const knowledgeSearchRequestSchema = z.object({
+  query: z.string().min(1).max(500),
+  topK: z.number().int().min(1).max(MAX_SEARCH_TOP_K).optional()
+});
+
+export type KnowledgeSearchRequest = z.infer<typeof knowledgeSearchRequestSchema>;
+
+export interface KnowledgeSearchResponse {
+  results: KnowledgeSearchHit[];
+}
 
 /** 写入类端点（创建 / 重试）的应答：同步摄取完成后的文档态 */
 export interface DocumentIngestResult {

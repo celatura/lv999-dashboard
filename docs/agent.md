@@ -282,6 +282,8 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | POST | `/api/agent/knowledge/documents/upload` | 上传文件新增文档（multipart；anydoc 解析 PDF/Office/Markdown 为结构化文本后同步摄取）——见 knowledge-base.md §4.1 |
 | DELETE | `/api/agent/knowledge/documents/[id]` | 删除文档（片段级联删除）|
 | POST | `/api/agent/knowledge/documents/[id]/retry` | 重新摄取（失败文档重试）|
+| GET | `/api/agent/knowledge/documents/[id]` | 文档详情（**预览用**：元信息 + 入库原文 + 片段列表，不 select embedding）——见 knowledge-base.md §7 |
+| POST | `/api/agent/knowledge/search` | **检索测试**（复用 `searchKnowledgeByText` 同链路同阈值；零计费；限流 scope `knowledge` 30/分）——见 knowledge-base.md §5 |
 
 ---
 

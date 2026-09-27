@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertModal } from '@/components/modal/alert-modal';
@@ -20,16 +21,24 @@ import {
 } from '../../api/mutations';
 import type { KnowledgeDocument } from '../../api/types';
 
+/** 预览弹窗按需加载：不打开预览则不下载该 chunk（bundle-dynamic-imports，与资产预览同策略） */
+const KnowledgePreviewDialog = dynamic(
+  () => import('../knowledge-preview-dialog').then((m) => m.KnowledgePreviewDialog),
+  { ssr: false }
+);
+
 interface CellActionProps {
   data: KnowledgeDocument;
 }
 
 /**
- * 行操作：重新摄取（重试）+ 删除。
+ * 行操作：预览（全文/片段）+ 重新摄取（重试）+ 删除。
  * 重试对任意状态可用（含卡在 processing 的文档），服务端整体替换片段，幂等。
  */
 export function CellAction({ data }: CellActionProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [previewMounted, setPreviewMounted] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const deleteMutation = useMutation(deleteKnowledgeDocumentMutation);
   const retryMutation = useMutation(retryKnowledgeDocumentMutation);
 
@@ -48,6 +57,13 @@ export function CellAction({ data }: CellActionProps) {
 
   return (
     <>
+      {previewMounted && (
+        <KnowledgePreviewDialog
+          documentId={data.id}
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+        />
+      )}
       <AlertModal
         isOpen={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -75,6 +91,14 @@ export function CellAction({ data }: CellActionProps) {
             <DropdownMenuLabel>操作</DropdownMenuLabel>
           </DropdownMenuGroup>
           <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => {
+                setPreviewMounted(true);
+                setPreviewOpen(true);
+              }}
+            >
+              <Icons.eye className='mr-2 h-4 w-4' /> 预览
+            </DropdownMenuItem>
             <DropdownMenuItem disabled={retryMutation.isPending} onClick={handleRetry}>
               {retryMutation.isPending ? (
                 <Icons.spinner className='mr-2 h-4 w-4 animate-spin' />

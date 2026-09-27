@@ -64,8 +64,9 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 5. 检索 + Agent 集成
 
-- [`search.ts`](../src/features/knowledge/lib/search.ts) `searchKnowledgeByText`：`embedQuery` → `searchKnowledge`（[`service.ts`](../src/features/knowledge/api/service.ts)）用 `embedding <=> queryVec::vector` cosine 距离升序取 topK，**仅检索 `status='ready'` 的片段**，`score = 1 - 距离`；再按 `SEARCH_MIN_SCORE=0.25` 过滤低相关片段（避免噪声污染上下文、诱导"强行引用"）。
+- [`search.ts`](../src/features/knowledge/lib/search.ts) `searchKnowledgeByText`：`embedQuery` → `searchKnowledge`（[`service.ts`](../src/features/knowledge/api/service.ts)）用 `embedding <=> queryVec::vector` cosine 距离升序取 topK，**仅检索 `status='ready'` 的片段**，`score = 1 - 距离`；再按 `SEARCH_MIN_SCORE=0.45` 过滤低相关片段（避免噪声污染上下文、诱导"强行引用"；阈值经真实语料标定，见 `constants/knowledge.ts`）。
 - Agent 工具 [`agent.ts`](../src/features/agent/api/agent.ts) `knowledgeSearch`（与 `findAssets`/`readAsset` 并列，同时登记进 `agentValidationTools` 与 `buildAgent.tools`）：输入 `{ query, topK?(1..8 默认 5) }`，返回 `results: [{ documentId, documentTitle, chunkIndex, content, score }]`；空结果提示"知识库中未找到相关资料，不要编造"。
+- **检索测试（调试台面板）**：知识库页「检索测试」→ `POST /api/agent/knowledge/search` → 复用同一 `searchKnowledgeByText`（同一 `embedQuery` + 同 `SEARCH_MIN_SCORE` 过滤 + 同 topK 上限），保证「测试所见 = 对话所得」；零计费（`embedQuery` 已豁免，见 [docs/credits.md](./credits.md) §6.3）。
 - 指令区分：`findAssets` 按**标题**找「作品」（复用/改写）；`knowledgeSearch` 按**语义**找「资料」（问答/综述）。
 
 ---
@@ -81,6 +82,8 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 | POST | `/api/agent/knowledge/documents/upload` | **上传文件**新增文档（multipart：`file` 必填 + `title` 可选）→ 解析（anydoc）→ 同步摄取 → 返回同构 `{ id, status, chunkCount }`；`runtime=nodejs`、`maxDuration=60`、限流同 scope `knowledge` |
 | DELETE | `/api/agent/knowledge/documents/[id]` | 删除（chunks 经外键级联清理）|
 | POST | `/api/agent/knowledge/documents/[id]/retry` | 重新摄取（失败文档重试）|
+| GET | `/api/agent/knowledge/documents/[id]` | 文档详情（**预览用**）：元信息 + 入库原文 + 片段列表（**不 select embedding 列**）→ `{ document, chunks }`；越权/不存在同返 404 |
+| POST | `/api/agent/knowledge/search` | **检索测试**：`{ query(1..500), topK?(1..8 默认 5) }` → `{ results }`；复用 `searchKnowledgeByText`（同链路同阈值）；限流同 scope `knowledge`；零计费 |
 
 客户端契约在 `src/features/knowledge/api/{types,queries,mutations}.ts`（`knowledgeKeys` 查询键工厂，mutation 成功失效列表）。
 
@@ -88,7 +91,9 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 7. 前端
 
-- `/dashboard/knowledge`：文档 data-table（标题/来源/状态/片段数/时间；行操作：预览/删除/重试）。组件在 `src/features/knowledge/components/`（`add-document-dialog` 支持**三来源 tab**：粘贴文本 / 从资产导入 / **上传文件**；资产选择复用 `assetsQueryOptions`，文件上传复用本地化后的 [`FileUploader`](../src/components/file-uploader.tsx)；`knowledge-tables/*`、`knowledge-listing`）。
+- `/dashboard/knowledge`：文档 data-table（标题/来源/状态/片段数/时间；行操作：预览/重新摄取/删除）。组件在 `src/features/knowledge/components/`（`add-document-dialog` 支持**三来源 tab**：粘贴文本 / 从资产导入 / **上传文件**；资产选择复用 `assetsQueryOptions`，文件上传复用本地化后的 [`FileUploader`](../src/components/file-uploader.tsx)；`knowledge-tables/*`、`knowledge-listing`）。
+- **预览弹窗**（`knowledge-preview-dialog`）：头部元信息（状态/来源/片段数/更新时间）+「全文 / 片段」Tab；数据来自 `GET /documents/[id]`（`staleTime=0` 每次打开重拉；只读快照，不做原文编辑）；processing/failed 文档给出状态提示，片段 Tab 按 `chunkIndex` 升序展示（序号 + 字符数 + 内容）。
+- **检索测试入口**（`knowledge-search-panel`，页面头部与「新增文档」同栏）：输入 query + topK → 结果列表（相似度 3 位小数 + 可视化条 + 文档标题 + 片段截断可展开）；空结果给「未命中」引导文案，429 给中文提示。
 - **文件上传 tab**：`FileUploader`（`accept=KNOWLEDGE_FILE_ACCEPT`、`maxFiles=1`、`maxSize=10MB`）+ 可选标题；走 `uploadKnowledgeDocumentMutation`（multipart，[`apiClient`](../src/lib/api-client.ts) 对 FormData 自动省略 Content-Type 以保留 boundary）；`add-document-dialog` 用 `hasFile` 字段做「未选文件」校验，离开 tab 清空已选文件。`FileUploader` 对**非图片文件不建 object-URL 预览**（PDF/office blob 无法被 `<Image>` 渲染会破图），改用类型图标。
 - 导航：`src/config/nav-config.ts` 「概览」组「知识库」→ `/dashboard/knowledge`。
 
@@ -105,4 +110,4 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 9. 明确延后（未实现）
 
-扫描件/图片型 PDF 的 OCR（anydoc 报 `needsOcr` 即拒，未启用其 `ocr:'hosted'` 联网 OCR）、重排（rerank）、多知识库分组、chunk 参数调优 UI、独立的非 Agent 检索 UI、异步摄取（当前同步 + 100KB 上限）、原始文件存 OSS 与下载、多文件批量上传、非 UTF-8 编码探测、Markdown 标题感知切分。
+扫描件/图片型 PDF 的 OCR（anydoc 报 `needsOcr` 即拒，未启用其 `ocr:'hosted'` 联网 OCR）、重排（rerank）、多知识库分组、chunk 参数调优 UI、异步摄取（当前同步 + 100KB 上限）、原始文件存 OSS 与下载、多文件批量上传、非 UTF-8 编码探测、Markdown 标题感知切分。

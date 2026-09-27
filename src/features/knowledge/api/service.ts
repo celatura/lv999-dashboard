@@ -4,7 +4,9 @@ import { assets, knowledgeChunks, knowledgeDocuments } from '@/lib/db/schema';
 import { toVectorLiteral } from '@/lib/db/vector';
 import { MAX_SEARCH_TOP_K } from '../constants/knowledge';
 import type {
+  KnowledgeChunk,
   KnowledgeDocument,
+  KnowledgeDocumentDetail,
   KnowledgeDocumentFilters,
   KnowledgeDocumentsResponse,
   KnowledgeSearchHit,
@@ -149,6 +151,40 @@ export async function getDocumentContent(
     .where(and(eq(knowledgeDocuments.id, documentId), eq(knowledgeDocuments.userId, userId)))
     .limit(1);
   return rows[0];
+}
+
+/** 文档详情（预览用）：列表字段 + 入库原文；不存在与越权同样返回 undefined（归属即权限） */
+export async function getDocumentDetail(
+  userId: string,
+  documentId: string
+): Promise<KnowledgeDocumentDetail | undefined> {
+  const db = getDb();
+  // 来源资产标题与 listDocuments 同模式：leftJoin 一次带出（资产已删则为 null）
+  const rows = await db
+    .select({
+      document: knowledgeDocuments,
+      sourceAssetTitle: assets.title
+    })
+    .from(knowledgeDocuments)
+    .leftJoin(assets, eq(knowledgeDocuments.sourceAssetId, assets.id))
+    .where(and(eq(knowledgeDocuments.id, documentId), eq(knowledgeDocuments.userId, userId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return undefined;
+  return { ...toDocument(row.document, row.sourceAssetTitle), content: row.document.content };
+}
+
+/** 片段列表（预览用）：按 chunkIndex 升序；不 select embedding 列（1024 维向量无展示价值且响应体巨大） */
+export async function listChunks(userId: string, documentId: string): Promise<KnowledgeChunk[]> {
+  const db = getDb();
+  return db
+    .select({
+      chunkIndex: knowledgeChunks.chunkIndex,
+      content: knowledgeChunks.content
+    })
+    .from(knowledgeChunks)
+    .where(and(eq(knowledgeChunks.documentId, documentId), eq(knowledgeChunks.userId, userId)))
+    .orderBy(asc(knowledgeChunks.chunkIndex));
 }
 
 /** 删除文档（chunks 由外键 ON DELETE CASCADE 级联清理） */
