@@ -41,7 +41,7 @@ src/features/agent/
 ├── constants/
 │   ├── models.ts           # 对话模型注册表（4 个文本模型）
 │   ├── image-models.ts     # 图像模型注册表（2 个）+ 比例预设 ASPECT_PRESETS
-│   ├── video-models.ts     # 视频模型注册表（wan3.0-video 默认 + prime 优速 + wan2.6 后备）
+│   ├── video-models.ts     # 视频模型注册表（wan3.0-video 默认 + prime 优速）
 │   ├── skills.ts           # 技能注册表（专家模式，3 个预置技能）
 │   ├── kinds.ts            # 资产类型元数据（markdown / html / image / design / video）
 │   ├── conversation.ts     # 默认标题与标题生成
@@ -217,7 +217,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | key | label | providerModelId | 默认 |
 | --- | --- | --- | --- |
 | `deepseek-flash` | DeepSeek V4.1 Flash | `deepseek-v4.1-flash` | ✅ |
-| `deepseek-v4-pro` | DeepSeek V4 Pro | `deepseek-v4-pro-0813` | |
+| `deepseek-v4-pro` | DeepSeek V4 Pro | `deepseek-v4-pro` | |
 | `qwen3.8-flash` | Qwen3.8 Flash | `qwen3.8-flash` | |
 | `qwen3.8-max` | Qwen3.8 Max | `qwen3.8-max` | |
 
@@ -238,9 +238,19 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | --- | --- | --- | --- |
 | `wan3.0-video` | 万相 3.0（官方推荐最新，原生音画同步，2-30s）| 统一 T2V+I2V | ✅ |
 | `wan3.0-video-prime` | 万相 3.0 优速版（生成更快）| 统一 T2V+I2V | |
-| `wan2.6-t2v` / `wan2.6-i2v-flash` | 万相 2.6（后备）| t2v / i2v | |
+
+> 2026-09-30：移除 wan2.6-t2v / wan2.6-i2v-flash 两个「后备」条目（官方已推荐 Wan 3.0，且注册表无调用路径），避免扩大老旧模型退役批次的排查面。
 
 视频生成走 AI SDK v7 `experimental_generateVideo` + `@ai-sdk/alibaba` 的 `videoModel()`（provider 内置异步任务轮询），经**独立单例** `getAlibabaVideoProvider()` 配置国内 `videoBaseURL='https://dashscope.aliyuncs.com'`（默认指向 intl 新加坡，国内 key 必须覆盖）。完整架构与封面截帧机制见 [docs/video-generation.md](./video-generation.md)。
+
+### 模型下线与可用性自查
+
+百炼会按迭代不定期下线老旧模型：**主线模型提前 3 个月、带日期的快照模型仅提前 30 天**通知（[官方下线机制](https://help.aliyun.com/zh/model-studio/model-depreciation)）。由此定下两条约定：
+
+- **注册表优先用主线名**，不用快照名（例：`deepseek-v4-pro` 而不是 `deepseek-v4-pro-0813`）——下线通知窗口相差 3 倍。
+- **收到下线公告就跑一次** `bun run scripts/model-audit.ts`（对话 + embedding，成本约几分钱）；覆盖图片 / 视频加 `--image` / `--video` / `--all`。退出码非 0 即有模型不可用，输出会直接给出要改哪个注册表文件。
+
+已下线（或账号未开通）的模型调用返回 **403 + `access_denied`**，报错文案不含「已下线」字样；模型名不存在返回 **404**。[`api/model-availability.ts`](../src/features/agent/api/model-availability.ts) 的 `detectModelUnavailable()` 把这两类从「鉴权失败」里摘出来，输出可操作中文（`MODEL_RETIRED_MESSAGE` / `MODEL_NOT_FOUND_MESSAGE`，服务端与客户端共用同一常量）并统一打 `[agent] model unavailable` 日志——**可按该前缀配 403 告警**，否则批量退役在监控里表现为一堆看似无关的权限异常。反向误报同样要防：`AllocationQuota.FreeTierOnly`（免费额度耗尽）、`Workspace.AccessDenied`（子空间无权限）、`isv.OUTOFSERVICE`/`Arrearage`（停服/欠费）与 Key 失效均**不**进该日志（换模型无用），仍走原有鉴权/欠费/配额提示——保证该告警信号不被日常错误污染。三个接入点：对话（`chat/route.ts` 的 `toUIMessageStream({ onError })` → `chat-window.tsx` 原样透传）、图片（`image-generation.ts`）、视频（`video-generation.ts`）；均属于上游明确失败 → `billable: false`，不扣 credits。
 
 ---
 
@@ -348,6 +358,6 @@ bun scripts/db-apply-sql.ts
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`db-apply-sql.ts`（应用迁移 SQL）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`db-apply-sql.ts`（应用迁移 SQL）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。

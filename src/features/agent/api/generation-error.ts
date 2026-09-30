@@ -28,3 +28,38 @@ export class GenerationError extends Error {
 export function isBillableError(error: unknown): boolean {
   return error instanceof GenerationError && error.billable;
 }
+
+/**
+ * 汇集错误链上的 name/message/responseBody/code，供关键词匹配（详情仍走日志）。
+ * AI SDK 的上游错误（APICallError 等）把 HTTP 状态与响应体放在子类字段上，
+ * 逐层沿 cause 上溯才能拿到完整信号（视频模块的错误映射与模型可用性识别共用）。
+ */
+export function errorHaystack(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    if (current instanceof Error) {
+      parts.push(current.name, current.message);
+      const withBody = current as {
+        responseBody?: unknown;
+        code?: unknown;
+        cause?: unknown;
+      };
+      if (typeof withBody.responseBody === 'string') {
+        parts.push(withBody.responseBody);
+      } else if (withBody.responseBody != null) {
+        try {
+          parts.push(JSON.stringify(withBody.responseBody));
+        } catch {
+          // 忽略无法序列化的 responseBody
+        }
+      }
+      if (withBody.code != null) parts.push(String(withBody.code));
+      current = withBody.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join(' ');
+}

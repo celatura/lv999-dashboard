@@ -28,6 +28,7 @@ import {
   touchConversation
 } from '@/features/agent/api/service';
 import { requestAgentStop, watchAgentStop } from '@/features/agent/api/stop-signal';
+import { detectModelUnavailable } from '@/features/agent/api/model-availability';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
 import { chargeCredits, checkBalance } from '@/features/credits/api/service';
@@ -187,6 +188,20 @@ export async function POST(request: Request) {
       generateMessageId: generateId,
       // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）
       messageMetadata: ({ part }) => (part.type === 'start' ? { streamId } : undefined),
+      // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
+      // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
+      // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；
+      // 其余错误保持与客户端兜底文案一致的通用提示，详情只进服务端日志
+      onError: (error: unknown) => {
+        const unavailable = detectModelUnavailable({
+          channel: 'chat',
+          error,
+          detail: { conversationId, model: conversation.model }
+        });
+        if (unavailable) return unavailable;
+        console.error('[agent] chat stream failed', { conversationId, error });
+        return '生成出错了，请重试。';
+      },
       onEnd: async ({ messages: finalMessages, isAborted, outcome }) => {
         stopWatching();
         // 按所有权更新：仅本轮新消息允许冲突更新，旧消息（客户端视图）不覆盖（见 service.ts）

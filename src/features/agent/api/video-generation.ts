@@ -7,7 +7,8 @@ import {
   type VideoResolutionTier
 } from '../constants/video-models';
 import { resolveVideoModel } from './provider';
-import { GenerationError } from './generation-error';
+import { errorHaystack, GenerationError } from './generation-error';
+import { detectModelUnavailable } from './model-availability';
 
 /**
  * 视频生成通道（server-only）：复用 AI SDK v7 的 experimental_generateVideo +
@@ -51,37 +52,6 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-/** 汇集错误链上的 name/message/responseBody/code，供关键词匹配（详情仍走日志） */
-function errorHaystack(error: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = error;
-  for (let depth = 0; current && depth < 6; depth += 1) {
-    if (current instanceof Error) {
-      parts.push(current.name, current.message);
-      const withBody = current as {
-        responseBody?: unknown;
-        code?: unknown;
-        cause?: unknown;
-      };
-      if (typeof withBody.responseBody === 'string') {
-        parts.push(withBody.responseBody);
-      } else if (withBody.responseBody != null) {
-        try {
-          parts.push(JSON.stringify(withBody.responseBody));
-        } catch {
-          // 忽略无法序列化的 responseBody
-        }
-      }
-      if (withBody.code != null) parts.push(String(withBody.code));
-      current = withBody.cause;
-    } else {
-      parts.push(String(current));
-      break;
-    }
-  }
-  return parts.join(' ');
-}
-
 /**
  * 视频生成错误映射为用户可读中文（仿图片模块 toUserFacingError；详情走日志）。
  * billable 判据（见 docs/credits.md §7，百炼「失败不计费、仅对成功生成计费」）：
@@ -92,6 +62,13 @@ function toUserFacingVideoError(error: unknown, signal: AbortSignal | undefined)
   // 用户停止优先（区别于服务端超时/失败）：任务已提交、上游可能已 SUCCEEDED 计费 → 照扣
   if (signal?.aborted || isAbortError(error)) {
     return new GenerationError('视频生成已停止。', { cause: error, billable: true });
+  }
+
+  // 模型已下线 / 未开通 / 不存在优先判定（百炼 403 access_denied 文案不含「已下线」，
+  // 落到下方的鉴权分支会误查 API Key）；上游明确失败 → 不扣
+  const unavailable = detectModelUnavailable({ channel: 'video', error });
+  if (unavailable) {
+    return new GenerationError(unavailable, { cause: error, billable: false });
   }
 
   const haystack = errorHaystack(error);

@@ -12,7 +12,7 @@ import { createConversationMutation, updateConversationMutation } from '../../ap
 import { agentKeys } from '../../api/queries';
 import type { Conversation } from '../../api/types';
 import { ConversationDrawer } from '../conversations/conversation-sidebar';
-import { DEFAULT_MODEL } from '../../constants/models';
+import { DEFAULT_MODEL, MODEL_UNAVAILABLE_MESSAGES } from '../../constants/models';
 import { buildAssetReferenceText, type ReferencedAsset } from '../../lib/asset-reference';
 import {
   clearPendingFirstMessage,
@@ -28,9 +28,14 @@ import { INSUFFICIENT_CREDITS_MESSAGE } from '@/features/credits/constants/credi
  * 解析对话流错误文案。
  * DefaultChatTransport 对非 2xx 响应抛 `new Error(await response.text())`，
  * 故 402 时 error.message 为错误信封 JSON 串；解析出 insufficient_credits 映射为余额不足文案。
+ * 流内错误（服务端 toUIMessageStream 的 onError）以 errorText 抵达本组件：
+ * 模型已下线/不存在这类已是可操作中文的文案直接原样展示，不再退化为通用提示。
+ * 注意：下方是「精确匹配」而非模糊匹配 —— 服务端 onError 必须原样返回常量文案
+ * （chat/route.ts 已注明），一旦被包装/加前缀就会静默退化，等于放弃可操作性。
  */
 function resolveChatErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
+  if ((MODEL_UNAVAILABLE_MESSAGES as readonly string[]).includes(raw)) return raw;
   try {
     const parsed = JSON.parse(raw) as { error?: { code?: string } };
     if (parsed?.error?.code === 'insufficient_credits') return INSUFFICIENT_CREDITS_MESSAGE;

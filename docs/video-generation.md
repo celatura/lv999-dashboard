@@ -10,7 +10,7 @@ LV999 Dashboard 的动态内容创作能力：在「文本 / 图片 / 设计」�
 
 - **入口**：仅在 Agent 对话内（`/dashboard/agent/[conversationId]`）；产出在 `/dashboard/assets`（我的资产）统一管理。**MVP 无直连视频端点**（不走聊天）。
 - **两类生成**：T2V（纯文本 prompt）/ I2V（以已有图片资产作首帧，记录血缘）。
-- **模型**：默认 `wan3.0-video`（官方推荐最新，统一 T2V + I2V，原生音画同步）；`wan3.0-video-prime`（优速版）与 wan2.6 系列作后备。
+- **模型**：默认 `wan3.0-video`（官方推荐最新，统一 T2V + I2V，原生音画同步）；`wan3.0-video-prime`（优速版）可显式指定。
 - **落库**：复用 `assets` 表，`kind='video'` / `mime='video/mp4'` / `storageKey`（OSS `.mp4`）/ `content`（生成 prompt，可溯源）。
 - **封面**：OSS 视频截帧（`x-oss-process=video/snapshot`）动态生成，经 `/raw?snapshot=1` 同源代理；列表/卡片**不渲染 `<video>`**，只渲染封面图。
 
@@ -74,14 +74,14 @@ result = await generateVideo({
 
 ## 5. 模型注册表（`src/features/agent/constants/video-models.ts`）
 
-与图片（`image-models.ts`）、对话（`models.ts`）注册表隔离。2026-09 模型审计（以百炼官方最新为准）：
+与图片（`image-models.ts`）、对话（`models.ts`）注册表隔离。2026-09 模型审计（以百炼官方最新为准），2026-09-30 配合下线名单自查移除 wan2.6 后备条目：
 
 | key | 展示名 | 模式 | 音画同步 | 时长 | 分辨率 | 定位 |
 | --- | --- | --- | :-: | :-: | --- | --- |
 | `wan3.0-video` | 万相 3.0 视频（推荐）| unified | ✅ | 2-30s | 480P/720P/1080P | **默认**（T2V + I2V）|
 | `wan3.0-video-prime` | 万相 3.0 视频·优速 | unified | ✅ | 2-30s | 480P/720P/1080P | 优速版（生成更快）|
-| `wan2.6-t2v` | 万相 2.6 文生视频（后备）| t2v | ❌ | 2-15s | 720P/1080P | 后备 |
-| `wan2.6-i2v-flash` | 万相 2.6 图生视频·快速（后备）| i2v | ✅ | 2-15s | 720P/1080P | 后备 |
+
+> 已移除 `wan2.6-t2v` / `wan2.6-i2v-flash`：官方已推荐 Wan 3.0，且两个条目没有任何调用路径（`agent.ts` 只传 `DEFAULT_VIDEO_MODEL` / `DEFAULT_I2V_MODEL`），留着只会扩大后续老旧模型退役批次的排查面。需要后备时按当时官方推荐重新登记，并用 `bun run scripts/model-audit.ts --video` 实测（480P×2s ≈ 0.6 元/条）。
 
 - `DEFAULT_VIDEO_MODEL = DEFAULT_I2V_MODEL = 'wan3.0-video'`（统一模型，传首帧即走 I2V）。
 - `VIDEO_ASPECT_KEYS = ['16:9','9:16','1:1','4:3','3:4','adaptive']`。

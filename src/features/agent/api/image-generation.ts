@@ -4,6 +4,7 @@ import {
   type ImageModelRegistryEntry
 } from '../constants/image-models';
 import { GenerationError } from './generation-error';
+import { detectModelUnavailable } from './model-availability';
 
 /**
  * 图片生成通道（server-only）：直连百炼 REST API，不引入任何新依赖（fetch + Buffer 已足够）。
@@ -78,6 +79,17 @@ function toUserFacingError(
   const output = body.output as Record<string, unknown> | undefined;
   const code = (body.code ?? output?.code) as string | undefined;
   const message = (body.message ?? output?.message) as string | undefined;
+
+  // 模型已下线 / 未开通 / 不存在优先判定：百炼返回 403 access_denied 且文案不含「已下线」，
+  // 若落到下面的鉴权分支会把排查引向 API Key（实际要改的是模型注册表）；上游明确失败 → 不扣
+  const unavailable = detectModelUnavailable({
+    channel: 'image',
+    status: httpStatus,
+    body,
+    detail: { context, code }
+  });
+  if (unavailable) return new GenerationError(unavailable, { billable: false });
+
   console.error('[agent] image generation failed', { context, httpStatus, code, message });
 
   if (

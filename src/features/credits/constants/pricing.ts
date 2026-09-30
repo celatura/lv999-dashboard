@@ -19,6 +19,11 @@ export const CREDIT_PRICING = {
   /** 对话：按模型每 1K token 的 credits；未列模型回退 chatFallback */
   chatPerModel: {
     'deepseek-flash': { inputPer1k: 0.2, outputPer1k: 0.6 },
+    /**
+     * ⚠️ 待按账单校准：上游曾公告「v4-pro 请求路由至 V4.1 Flash 并按 flash 单价计费」
+     * （后又收回，口径反复）。一旦百炼侧发生同样路由，本档（0.5/1.5）就高于真实成本、
+     * 会多扣用户 credits。改注册表后跑 `bun run scripts/model-audit.ts` 并对照控制台账单确认。
+     */
     'deepseek-v4-pro': { inputPer1k: 0.5, outputPer1k: 1.5 },
     'qwen3.8-flash': { inputPer1k: 0.2, outputPer1k: 0.6 },
     'qwen3.8-max': { inputPer1k: 0.8, outputPer1k: 2.4 }

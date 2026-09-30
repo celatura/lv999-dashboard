@@ -7,7 +7,11 @@
  * 2026-09 模型审计（以百炼官方最新为准）：
  * - wan3.0-video（官方推荐最新，统一 T2V + I2V）：480P/720P/1080P，6 种比例，2-30s，原生音画同步
  * - wan3.0-video-prime（优速版）：同上，生成更快、质量保持 high
- * - wan2.6-t2v / wan2.6-i2v-flash：上一代（官方已标注「推荐使用 Wan 3.0」），作为后备
+ *
+ * 2026-09-30（下线名单自查）：移除 wan2.6-t2v / wan2.6-i2v-flash 两个「后备」条目 ——
+ * 官方已标注「推荐使用 Wan 3.0」，且注册表无任何调用路径（agent.ts 只传 DEFAULT_VIDEO_MODEL /
+ * DEFAULT_I2V_MODEL），留着只会扩大后续老旧模型退役批次的排查面。
+ * 需要后备时再按当时的官方推荐重新登记（见 scripts/model-audit.ts）。
  *
  * provider 契约要点（@ai-sdk/alibaba@2.0.44）：
  * - videoModel(id) 返回 Experimental_VideoModelV4，仅实现 doStart/doStatus（异步任务 + 轮询），
@@ -19,11 +23,7 @@
  * 红线：临时 video_url 24h 有效，必须立即下载转存 OSS，任何持久化字段不得存临时 URL。
  */
 
-export type VideoModelKey =
-  | 'wan3.0-video'
-  | 'wan3.0-video-prime'
-  | 'wan2.6-t2v'
-  | 'wan2.6-i2v-flash';
+export type VideoModelKey = 'wan3.0-video' | 'wan3.0-video-prime';
 
 export type VideoMode = 't2v' | 'i2v' | 'unified';
 
@@ -67,25 +67,6 @@ export const VIDEO_MODEL_REGISTRY: Record<VideoModelKey, VideoModelRegistryEntry
     maxDuration: 30,
     resolutions: ['480P', '720P', '1080P'],
     isPrime: true
-  },
-  // 后备（wan2.6 系列，官方已标注「推荐使用 Wan 3.0」）
-  'wan2.6-t2v': {
-    key: 'wan2.6-t2v',
-    label: '万相 2.6 文生视频（后备）',
-    providerModelId: 'wan2.6-t2v',
-    mode: 't2v',
-    supportsAudio: false,
-    maxDuration: 15,
-    resolutions: ['720P', '1080P']
-  },
-  'wan2.6-i2v-flash': {
-    key: 'wan2.6-i2v-flash',
-    label: '万相 2.6 图生视频·快速（后备）',
-    providerModelId: 'wan2.6-i2v-flash',
-    mode: 'i2v',
-    supportsAudio: true,
-    maxDuration: 15,
-    resolutions: ['720P', '1080P']
   }
 };
 

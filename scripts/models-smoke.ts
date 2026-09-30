@@ -1,6 +1,7 @@
 /* oxlint-disable no-console */
 /**
- * 模型通道冒烟脚本：验证百炼 4 个模型可用且支持工具调用。
+ * 模型通道冒烟脚本：验证百炼 4 个对话模型可用且支持工具调用。
+ * （想一并自查图片/视频/embedding 通道与「模型已下线」识别，跑 scripts/model-audit.ts）
  *
  * 运行：bun run scripts/models-smoke.ts
  * 前置：.env.local 中配置 DASHSCOPE_API_KEY
@@ -43,6 +44,6 @@ for (const key of MODEL_KEYS) {
 console.log(
   failed === 0
     ? '\n全部模型可用。'
-    : `\n${failed} 个模型失败：请检查 DASHSCOPE_API_KEY，以及百炼控制台中的实际 model ID（如 deepseek-v4.1-flash / deepseek-v4-pro-0813）。`
+    : `\n${failed} 个模型失败：请检查 DASHSCOPE_API_KEY，以及百炼控制台中的实际 model ID（如 deepseek-v4.1-flash / deepseek-v4-pro）；若报 403 access_denied，优先怀疑模型已下线或未开通。`
 );
 process.exit(failed === 0 ? 0 : 1);
