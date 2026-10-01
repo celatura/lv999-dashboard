@@ -5,7 +5,8 @@ export function formatDate(
   if (!date) return '';
 
   try {
-    return new Intl.DateTimeFormat('en-US', {
+    // 全站为中文 UI，日期统一按 zh-CN 本地化（如「2026年10月2日」）
+    return new Intl.DateTimeFormat('zh-CN', {
       month: opts.month ?? 'long',
       day: opts.day ?? 'numeric',
       year: opts.year ?? 'numeric',
