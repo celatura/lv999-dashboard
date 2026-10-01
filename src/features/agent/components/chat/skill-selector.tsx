@@ -1,15 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import { SKILL_IDS, SKILL_REGISTRY, getSkill } from '../../constants/skills';
+import { useSkillList } from '../../hooks/use-skill-list';
 
 interface SkillSelectorProps {
-  /** 当前技能 id（null = 通用） */
+  /** 当前技能 id（null = 通用；预置 key 或自定义 uuid） */
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
@@ -18,11 +20,14 @@ interface SkillSelectorProps {
 /**
  * 技能选择器：输入区一枚 pill（当前技能名或「通用」）+ 下拉列表（搜索 + 名称 + 何时用）。
  * 与模型选择器同构：选中即回调持久化（会话级）；激活后 pill 带 ✕ 一键清除回「通用」。
+ * 数据源为合并列表（预置 + 用户自定义，见 useSkillList）；自定义技能带「自定义」标识，
+ * 底部提供「管理技能…」入口跳转技能管理页。
  */
 export function SkillSelector({ value, onChange, disabled }: SkillSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const skill = getSkill(value);
+  const { skills, getById } = useSkillList();
+  const skill = getById(value);
 
   // 每次打开重置搜索草稿
   useEffect(() => {
@@ -31,14 +36,13 @@ export function SkillSelector({ value, onChange, disabled }: SkillSelectorProps)
 
   const filtered = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    const entries = SKILL_IDS.map((id) => SKILL_REGISTRY[id]);
-    if (!keyword) return entries;
-    return entries.filter(
+    if (!keyword) return skills;
+    return skills.filter(
       (entry) =>
         entry.name.toLowerCase().includes(keyword) ||
         entry.description.toLowerCase().includes(keyword)
     );
-  }, [search]);
+  }, [search, skills]);
 
   const handlePick = (next: string | null) => {
     onChange(next);
@@ -110,7 +114,14 @@ export function SkillSelector({ value, onChange, disabled }: SkillSelectorProps)
                   )}
                 >
                   <span className='min-w-0'>
-                    <span className='block font-medium'>{entry.name}</span>
+                    <span className='flex items-center gap-1.5'>
+                      <span className='truncate font-medium'>{entry.name}</span>
+                      {entry.source === 'custom' && (
+                        <Badge variant='secondary' className='h-4 shrink-0 px-1.5 text-[10px]'>
+                          自定义
+                        </Badge>
+                      )}
+                    </span>
                     <span className='text-muted-foreground mt-0.5 block'>{entry.description}</span>
                   </span>
                   {active && <Icons.check className='size-3.5 shrink-0' />}
@@ -122,6 +133,20 @@ export function SkillSelector({ value, onChange, disabled }: SkillSelectorProps)
                 没有匹配的技能，换个关键词试试。
               </div>
             )}
+          </div>
+          <div className='border-t pt-1'>
+            <Link
+              href='/dashboard/skills'
+              onClick={() => setOpen(false)}
+              className={cn(
+                'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                'focus-visible:ring-ring flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs',
+                'focus-visible:ring-2 focus-visible:outline-none'
+              )}
+            >
+              <Icons.settings className='size-3.5 shrink-0' />
+              管理技能…
+            </Link>
           </div>
         </PopoverContent>
       </Popover>

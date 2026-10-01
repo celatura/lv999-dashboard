@@ -10,6 +10,8 @@
  * 历史消息校验用的 agentValidationTools 恒为全量（不随技能过滤），只有 buildAgent 的 tools 受限。
  */
 
+import { isUuid } from '@/lib/utils';
+
 /** Agent 工具名（与 agent.ts 注册的工具 key 一一对应；定义在此避免反向 import） */
 export const AGENT_TOOL_NAMES = [
   'createAsset',
@@ -24,6 +26,22 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+
+/**
+ * 工具中文名（自定义技能表单的工具白名单勾选用；与 AGENT_TOOL_NAMES 一一对应）。
+ * 新增工具时需同步补充本表，否则表单勾选框缺标签。
+ */
+export const AGENT_TOOL_LABELS: Record<AgentToolName, string> = {
+  createAsset: '保存作品（Markdown / HTML）',
+  createImageAsset: '文生图',
+  editImageAsset: '图片编辑（改图）',
+  createVideoAsset: '文生视频',
+  createVideoFromImageAsset: '图生视频',
+  findAssets: '检索我的资产',
+  readAsset: '读取资产正文',
+  knowledgeSearch: '知识库检索',
+  composeDesign: '整版设计（封面 / 海报）'
+};
 
 export interface SkillExample {
   /** 用户输入（示范场景） */
@@ -159,4 +177,14 @@ export function isSkillId(value: unknown): value is string {
 
 export function getSkill(id?: string | null): SkillRegistryEntry | undefined {
   return isSkillId(id) ? SKILL_REGISTRY[id] : undefined;
+}
+
+/**
+ * 是否为合法「技能引用」：预置 key（在注册表内）或用户自定义技能 uuid。
+ * 供会话创建/切换技能时校验 activeSkillId。uuid 的归属在解析时按 userId 过滤
+ * （getSkillForUser）——非法/越权/已删除的 uuid 解析为 undefined → 回退通用，
+ * 故此处的语法校验足以安全接受自定义技能 id（不泄漏存在性、无需写路径查库）。
+ */
+export function isSkillReference(value: unknown): value is string {
+  return typeof value === 'string' && (isSkillId(value) || isUuid(value));
 }

@@ -6,12 +6,18 @@ import type {
   Conversation,
   CreateConversationPayload,
   EditImageRequest,
+  SkillMutationPayload,
   UpdateConversationPayload
 } from './types';
 
 /** 会话域失效：仅会话列表（标题/时间戳）变化，不连带资产查询 */
 function invalidateConversations(): void {
   void getQueryClient().invalidateQueries({ queryKey: agentKeys.conversations() });
+}
+
+/** 技能域失效：合并列表（预置 + 自定义）变化，selector 与管理页同步刷新 */
+function invalidateSkills(): void {
+  void getQueryClient().invalidateQueries({ queryKey: agentKeys.skills() });
 }
 
 /** 资产域失效：列表 + 详情 */
@@ -78,4 +84,34 @@ export const batchDeleteAssetsMutation = mutationOptions({
       body: JSON.stringify({ ids })
     }),
   onSuccess: invalidateAssets
+});
+
+/** 创建自定义技能 */
+export const createSkillMutation = mutationOptions({
+  mutationFn: (data: SkillMutationPayload) =>
+    apiClient<{ id: string }>('/agent/skills', { method: 'POST', body: JSON.stringify(data) }),
+  onSuccess: invalidateSkills
+});
+
+/** 更新自定义技能（仅 uuid + 归属；预置只读） */
+export const updateSkillMutation = mutationOptions({
+  mutationFn: ({ id, values }: { id: string; values: SkillMutationPayload }) =>
+    apiClient<{ success: boolean }>(`/agent/skills/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(values)
+    }),
+  onSuccess: invalidateSkills
+});
+
+/**
+ * 删除自定义技能：服务端同时把引用它的会话 activeSkillId 置 null，
+ * 故除技能列表外一并失效会话列表（侧边栏技能标识/回退需刷新）。
+ */
+export const deleteSkillMutation = mutationOptions({
+  mutationFn: (id: string) =>
+    apiClient<{ success: boolean }>(`/agent/skills/${id}`, { method: 'DELETE' }),
+  onSuccess: () => {
+    invalidateSkills();
+    invalidateConversations();
+  }
 });

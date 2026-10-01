@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai';
 import { z } from 'zod';
 import { ASPECT_KEYS } from '../constants/image-models';
+import { AGENT_TOOL_NAMES, type AgentToolName, type SkillExample } from '../constants/skills';
 
 export interface Conversation {
   id: string;
@@ -156,3 +157,55 @@ export const batchDeleteRequestSchema = z.object({
 });
 
 export type BatchDeleteRequest = z.infer<typeof batchDeleteRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// 技能系统 2.0（用户自定义技能）
+// ---------------------------------------------------------------------------
+
+export type { AgentToolName, SkillExample };
+
+/**
+ * 技能列表项：预置（source='builtin'，只读）与用户自定义（source='custom'，可编辑/删除）
+ * 合并同构，供会话选择器与技能管理页共用一份查询。字段与 SkillRegistryEntry 对齐，
+ * 另加 source / updatedAt 供 UI 区分与展示。
+ */
+export interface SkillListItem {
+  id: string;
+  name: string;
+  description: string;
+  /** builtin = 代码内预置（只读）；custom = 用户自定义（可编辑/删除） */
+  source: 'builtin' | 'custom';
+  instructions: string;
+  placeholder: string | null;
+  /** 工具白名单；null = 全量 */
+  tools: AgentToolName[] | null;
+  /** few-shot 示例；[] = 无 */
+  examples: SkillExample[];
+  /** 自定义技能的更新时间；预置为 null（无 DB 行） */
+  updatedAt: string | null;
+}
+
+export interface SkillsResponse {
+  skills: SkillListItem[];
+}
+
+export const skillExampleSchema = z.object({
+  input: z.string().trim().min(1, '示例输入不能为空').max(300, '示例输入不超过 300 字'),
+  output: z.string().trim().min(1, '示例输出不能为空').max(500, '示例输出不超过 500 字')
+});
+
+/**
+ * 创建/更新自定义技能的请求体校验（Route Handler 用）。
+ * 约束见 docs/agent.md §5.1：instructions ≤8000 字（控 system token）、tools 元素必须 ∈ AGENT_TOOL_NAMES
+ * （防非法工具名进入 toolFactories 查找）、examples ≤2 条。tools null/缺省 = 全量。
+ */
+export const skillMutationSchema = z.object({
+  name: z.string().trim().min(1, '技能名称不能为空').max(50, '技能名称不超过 50 字'),
+  description: z.string().trim().min(1, '一句话描述不能为空').max(200, '描述不超过 200 字'),
+  instructions: z.string().trim().min(1, '专家指令不能为空').max(8000, '专家指令不超过 8000 字'),
+  placeholder: z.string().trim().max(100, '输入框引导语不超过 100 字').nullish(),
+  tools: z.array(z.enum(AGENT_TOOL_NAMES)).max(9, '工具最多 9 个').nullish(),
+  examples: z.array(skillExampleSchema).max(2, '示例最多 2 条').default([])
+});
+
+export type SkillMutationPayload = z.infer<typeof skillMutationSchema>;

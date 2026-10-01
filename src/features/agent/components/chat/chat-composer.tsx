@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
-import { getSkill } from '../../constants/skills';
+import { useSkillList } from '../../hooks/use-skill-list';
 import type { ReferencedAsset } from '../../lib/asset-reference';
 import { ModelSelector } from './model-selector';
 import { SkillSelector } from './skill-selector';
@@ -69,7 +69,8 @@ export function ChatComposer({
 
   // 已选引用但还没输入时，用 placeholder 引导下一步（否则发送禁用会让人以为按钮坏了）；
   // 无引用但技能激活时，用技能引导语（引用优先：它更贴近即将发送的这条消息）
-  const skill = getSkill(skillId);
+  const { getById } = useSkillList();
+  const skill = getById(skillId);
   const placeholder =
     referencedAssets.length > 0
       ? `想基于《${referencedAssets[0].title.replace(/\s+/g, ' ').trim()}》${

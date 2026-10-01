@@ -17,6 +17,7 @@ import {
   type AgentValidationUIMessage,
   type UsageSink
 } from '@/features/agent/api/agent';
+import { getSkillForUser } from '@/features/agent/api/skill-service';
 import {
   applyAutoTitle,
   cleanupSupersededResponses,
@@ -117,7 +118,12 @@ export async function POST(request: Request) {
   }
 
   // 计费入口拦截：限流后、建流前；余额 ≤0 直接 402（不发起上游调用，杜绝陌生人刷爆 API）
-  if (!(await checkBalance(userId))) {
+  // 并行：技能解析（uuid → 查 DB 归属 / 预置 key → 常量 / 无 → undefined）与余额校验互不依赖
+  const [skill, hasBalance] = await Promise.all([
+    getSkillForUser(userId, conversation.activeSkillId),
+    checkBalance(userId)
+  ]);
+  if (!hasBalance) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
 
@@ -128,7 +134,7 @@ export async function POST(request: Request) {
     userId,
     conversationId,
     modelKey: conversation.model,
-    skillId: conversation.activeSkillId,
+    skill,
     usageSink
   });
   type AgentUIMessage = InferAgentUIMessage<typeof agent>;

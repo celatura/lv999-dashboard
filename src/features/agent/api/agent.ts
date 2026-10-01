@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { DEFAULT_MODEL, isModelKey } from '../constants/models';
 import {
   AGENT_TOOL_NAMES,
-  getSkill,
   type AgentToolName,
-  type SkillExample
+  type SkillExample,
+  type SkillRegistryEntry
 } from '../constants/skills';
 import { ASPECT_KEYS, ASPECT_PRESETS, type AspectKey } from '../constants/image-models';
 import { DEFAULT_I2V_MODEL, VIDEO_ASPECT_KEYS } from '../constants/video-models';
@@ -769,22 +769,24 @@ function renderExamples(examples?: readonly SkillExample[]): string {
 
 /**
  * 每请求构建一个 Agent（serverless 无状态，上下文经闭包注入工具）。
- * skillId：会话级技能（专家模式）；命中注册表时把技能指令 + 示例追加到基础指令后，
- * 并按 skill.tools 白名单过滤注册给模型的工具（未声明技能或技能未声明 tools = 全量）。
+ * skill：会话级技能对象（专家模式），由 chat route 经 getSkillForUser 解析后传入（预置或用户自定义同构）；
+ * 传入时把技能指令 + 示例追加到基础指令后，并按 skill.tools 白名单过滤注册给模型的工具
+ * （未传技能或技能未声明 tools = 全量）。buildAgent 保持纯函数不碰 DB（解析在服务层完成）。
  * 注意：agentValidationTools 恒为全量不随技能过滤 —— 会话中途切技能后，
  * 旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。
- * 防御：未知/已下架 id（getSkill → undefined）回退基础指令 + 全量工具，不报错。
+ * 防御：skill 为 null/undefined（含技能被删除后回退）时用基础指令 + 全量工具，不报错。
  */
 export function buildAgent(params: {
   userId: string;
   conversationId: string;
   modelKey: string;
-  skillId?: string | null;
+  /** 会话级技能（专家模式）对象；null/缺省 = 通用（无技能） */
+  skill?: SkillRegistryEntry | null;
   /** 可变 usage 累加器：onStepEnd 累加每步 usage，供 route 的 onEnd 结算扣费（每请求新建，无跨请求污染） */
   usageSink?: UsageSink;
 }) {
   const modelKey = isModelKey(params.modelKey) ? params.modelKey : DEFAULT_MODEL;
-  const skill = getSkill(params.skillId);
+  const skill = params.skill ?? undefined;
   const skillBlock = skill
     ? `\n\n# 当前技能：${skill.name}\n${skill.instructions}${renderExamples(skill.examples)}`
     : '';

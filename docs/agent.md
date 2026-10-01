@@ -181,15 +181,17 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 
 ### 5.1 技能系统（专家模式）
 
-会话级「专家模式」：用户为一段会话选定一个技能，服务端在 `buildAgent` 处把技能指令与示例**追加**到基础指令后，并按技能的 `tools` 白名单过滤注册给模型的工具（能力边界，防误调昂贵工具）。
+会话级「专家模式」：用户为一段会话选定一个技能，服务端在 `buildAgent` 处把技能指令与示例**追加**到基础指令后，并按技能的 `tools` 白名单过滤注册给模型的工具（能力边界，防误调昂贵工具）。**技能系统 2.0** 起，技能 = 代码内**预置**（builtin，全局只读）+ 用户**自建**（custom，私有可 CRUD）两类，同构混用、被 Agent 同等对待。
 
-- **注册表**（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：v1 全部在代码中定义（全局预置、非用户私有数据）；后续增删技能只改本文件。`id` 是存库的稳定 key（`conversations.active_skill_id`），改名不影响已持久化的会话。
-- **当前 3 个技能**：`ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，均声明 7 工具白名单（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量兜底）。
-- **数据结构** `SkillRegistryEntry`：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是覆盖进 system 的专家人设 + 工作流；`placeholder` 是激活后输入框引导语；`tools` 是工具白名单（`AgentToolName[]`，**未声明 = 全量**，声明时必须覆盖工作流所需全部工具且与 instructions 提到的工具一致）；`examples` 是 few-shot 示范（`{ input, output }[]`，经 `renderExamples` 渲染为「示范」段落追加进 system，每技能 ≤2 条、单条精简控制 token）。
-- **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界，如需则显式加入对应技能的 tools）。
-- **UI**（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）：输入区一枚 pill（当前技能名或「通用」）+ 下拉列表（搜索 + 名称 + 何时用）。与模型选择器同构：选中即回调持久化（会话级）；激活后 pill 带 ✕ 一键清除回「通用」。工具集/示例不在 UI 展示。
-- **持久化**：`conversations.activeSkillId` 列（text，可空）；`createConversation` / `updateConversation` 支持传入；`chat` 路由读会话的 `activeSkillId` 传入 `buildAgent`。
-- **防御**：未知 / 已下架 id（`getSkill` → undefined）回退基础指令 + 全量工具，不报错（`isSkillId` 校验）；工具过滤只影响「模型能调什么」，不影响「历史消息能否被校验」（`agentValidationTools` 恒全量，见 §5）。
+- **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是覆盖进 system 的专家人设 + 工作流；`placeholder` 是激活后输入框引导语；`tools` 是工具白名单（`AgentToolName[]`，**未声明 / null = 全量**）；`examples` 是 few-shot 示范（`{ input, output }[]`，经 `renderExamples` 渲染为「示范」段落追加进 system，每技能 ≤2 条、单条精简控制 token）。预置与自定义技能**映射为同一结构**，零重复复用注入 / 过滤逻辑。
+- **预置注册表** `SKILL_REGISTRY`（constants/skills.ts）：3 个内置技能 `ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，各声明 7 工具白名单（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量兜底）。`id` 为稳定字符串 key、只读（增删改需改代码）。
+- **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量（与预置未声明同语义）。
+- **id 命名空间分流**：`conversations.activeSkillId`（text 可空）存预置 key（字符串）或自定义技能 uuid；`isUuid` 分流「查 DB / 查常量」，无需额外标记列。会话创建 / 切换技能用 `isSkillReference`（预置 key **或** uuid）校验，uuid 的归属在解析时按 `userId` 过滤。
+- **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量与中文名表 `AGENT_TOOL_LABELS`；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界）。
+- **解析链**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，server-only）：`getSkillForUser(userId, skillId)` → uuid 查 DB（`userId` 归属过滤）映射为 `SkillRegistryEntry`、非 uuid 查预置常量 `getSkill`、无匹配 → `undefined`；`listSkillsForUser(userId)` 返回合并列表（预置 `source='builtin'` + 自定义 `source='custom'`）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skill?: SkillRegistryEntry | null`（不再是 `skillId`），由 `chat` 路由先 `await getSkillForUser(userId, conversation.activeSkillId)` 再传入。
+- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（合并列表 `{ skills }`，选择器与管理页共用）/ `POST`（创建，Zod 校验 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除 + 把引用会话 `activeSkillId` 置 null 回退通用）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000`（控 system token）/ `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
+- **UI**：会话选择器（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）经 `useSkillList`（合并列表 `useQuery` + 预置兜底，非 suspense）渲染，自定义技能带「自定义」badge、底部「管理技能…」入口跳转管理页；技能管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（内置只读、可「复制为草稿」+ 自定义可编辑 / 删除）+ 创建 / 编辑对话框（名称 / 描述 / 专家指令 + 撰写提示 / 引导语 / 9 工具勾选 / 0-2 组示例）。
+- **防御**：技能被删除或非法 / 越权 id → `getSkillForUser` 返回 undefined，`buildAgent` 回退基础指令 + 全量工具，不报错（双保险：删除时已置空引用会话的 `activeSkillId`）；工具过滤只影响「模型能调什么」，不影响「历史消息能否被校验」（`agentValidationTools` 恒全量，见 §5）。
 
 ---
 

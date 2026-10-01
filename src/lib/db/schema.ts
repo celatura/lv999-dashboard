@@ -10,6 +10,8 @@ import {
   uuid
 } from 'drizzle-orm/pg-core';
 import { vector1024 } from './vector';
+// type-only：仅为 jsonb 列标注类型（运行时被擦除，drizzle-kit 无需解析该路径，无循环 import）
+import type { AgentToolName, SkillExample } from '../../features/agent/constants/skills';
 
 /**
  * Agent 创作模块数据表
@@ -20,6 +22,8 @@ import { vector1024 } from './vector';
  *   文本内容存 content 列，二进制走 OSS 只存 storage_key；
  *   会话删除时 conversationId 置空（SET NULL）、资产保留；
  *   图片编辑（I2I）产出的新资产通过 sourceAssetId 指向源资产（源删除时置空）
+ * - skills: 用户自定义技能（技能系统 2.0，用户私有）；与代码内预置技能同构，
+ *   会话 active_skill_id 存预置 key（字符串）或自定义技能 uuid，解析时 isUuid 分流
  *
  * RAG 知识库（语义检索增强）
  * - knowledge_documents: 知识库文档（手动粘贴 source='manual' / 从文本资产导入 source='asset'）；
@@ -90,6 +94,31 @@ export const assets = pgTable(
     index('assets_user_created_idx').on(table.userId, table.createdAt),
     index('assets_conversation_idx').on(table.conversationId)
   ]
+);
+
+/**
+ * 用户自定义技能（技能系统 2.0）：与代码内预置技能（SkillRegistryEntry）同构，
+ * 用户私有（按 userId 隔离）。会话 active_skill_id 引用其 uuid；解析映射为
+ * SkillRegistryEntry 后复用 buildAgent 的指令注入与工具白名单过滤（零重复实现）。
+ * tools 为 null = 全量（与预置技能未声明 tools 同语义）；examples null/空 = 无示例。
+ */
+export const skills = pgTable(
+  'skills',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    instructions: text('instructions').notNull(),
+    placeholder: text('placeholder'),
+    /** 工具白名单；null = 全量（与预置技能 tools 未声明同语义） */
+    tools: jsonb('tools').$type<AgentToolName[] | null>(),
+    /** few-shot 示例（0-2 条）；null/空 = 无 */
+    examples: jsonb('examples').$type<SkillExample[] | null>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [index('skills_user_created_idx').on(table.userId, table.createdAt)]
 );
 
 export const knowledgeDocuments = pgTable(

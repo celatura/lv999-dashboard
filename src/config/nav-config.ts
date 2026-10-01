@@ -54,6 +54,14 @@ export const navGroups: NavGroup[] = [
         items: []
       },
       {
+        title: '技能',
+        url: '/dashboard/skills',
+        icon: 'badgeCheck',
+        shortcut: ['s', 'k'],
+        isActive: false,
+        items: []
+      },
+      {
         title: '我的资产',
         url: '/dashboard/assets',
         icon: 'post',

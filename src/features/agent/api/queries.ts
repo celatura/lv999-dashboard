@@ -1,6 +1,12 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
-import type { AssetDetail, AssetFilters, AssetsResponse, ConversationsResponse } from './types';
+import type {
+  AssetDetail,
+  AssetFilters,
+  AssetsResponse,
+  ConversationsResponse,
+  SkillsResponse
+} from './types';
 
 export const agentKeys = {
   all: ['agent'] as const,
@@ -10,7 +16,9 @@ export const agentKeys = {
   assets: (filters: AssetFilters) => [...agentKeys.assetsRoot(), filters] as const,
   /** 资产详情域根 key */
   assetRoot: () => [...agentKeys.all, 'asset'] as const,
-  asset: (id: string) => [...agentKeys.assetRoot(), id] as const
+  asset: (id: string) => [...agentKeys.assetRoot(), id] as const,
+  /** 技能域 key：合并列表（预置 + 自定义），会话选择器与技能管理页共用一份缓存 */
+  skills: () => [...agentKeys.all, 'skills'] as const
 };
 
 export function buildAssetQuery(filters: AssetFilters): string {
@@ -40,4 +48,11 @@ export const assetQueryOptions = (id: string) =>
   queryOptions({
     queryKey: agentKeys.asset(id),
     queryFn: () => apiClient<AssetDetail>(`/agent/assets/${id}`)
+  });
+
+/** 合并技能列表（预置 + 自定义）：selector 与管理页共用，写操作后按 agentKeys.skills() 失效 */
+export const skillsQueryOptions = () =>
+  queryOptions({
+    queryKey: agentKeys.skills(),
+    queryFn: () => apiClient<SkillsResponse>('/agent/skills')
   });

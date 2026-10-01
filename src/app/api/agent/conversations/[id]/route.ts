@@ -7,7 +7,7 @@ import {
   updateConversation
 } from '@/features/agent/api/service';
 import { isModelKey } from '@/features/agent/constants/models';
-import { isSkillId } from '@/features/agent/constants/skills';
+import { isSkillReference } from '@/features/agent/constants/skills';
 
 export const runtime = 'nodejs';
 
@@ -60,11 +60,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     patch.model = body.model;
   }
-  // 技能切换：null = 清除回「通用」；字符串必须是注册表内的已知 id
+  // 技能切换：null = 清除回「通用」；字符串必须是预置 key 或自定义技能 uuid
   if (body.activeSkillId !== undefined) {
     if (body.activeSkillId === null) {
       patch.activeSkillId = null;
-    } else if (isSkillId(body.activeSkillId)) {
+    } else if (isSkillReference(body.activeSkillId)) {
       patch.activeSkillId = body.activeSkillId;
     } else {
       return apiError(400, 'invalid_request', 'Unknown skill id');

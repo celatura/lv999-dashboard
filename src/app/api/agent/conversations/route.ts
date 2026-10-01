@@ -2,7 +2,7 @@ import { auth } from '@clerk/nextjs/server';
 import { apiError } from '@/lib/api-error';
 import { createConversation, listConversations } from '@/features/agent/api/service';
 import { DEFAULT_MODEL, isModelKey } from '@/features/agent/constants/models';
-import { isSkillId } from '@/features/agent/constants/skills';
+import { isSkillReference } from '@/features/agent/constants/skills';
 
 export const runtime = 'nodejs';
 
@@ -30,9 +30,9 @@ export async function POST(request: Request) {
   }
 
   const model = isModelKey(body.model) ? body.model : DEFAULT_MODEL;
-  // 技能可缺省（null = 通用）；传了就必须是注册表内的已知 id
+  // 技能可缺省（null = 通用）；传了就必须是预置 key 或自定义技能 uuid（归属在解析时过滤）
   const activeSkillId = body.activeSkillId ?? null;
-  if (activeSkillId !== null && !isSkillId(activeSkillId)) {
+  if (activeSkillId !== null && !isSkillReference(activeSkillId)) {
     return apiError(400, 'invalid_request', 'Unknown skill id');
   }
   const conversation = await createConversation(userId, model, { activeSkillId });
