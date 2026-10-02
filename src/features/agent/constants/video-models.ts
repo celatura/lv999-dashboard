@@ -13,7 +13,7 @@
  * DEFAULT_I2V_MODEL），留着只会扩大后续老旧模型退役批次的排查面。
  * 需要后备时再按当时的官方推荐重新登记（见 scripts/model-audit.ts）。
  *
- * provider 契约要点（@ai-sdk/alibaba@2.0.44）：
+ * provider 契约要点（@ai-sdk/alibaba；升级依赖后须对照实际安装版本源码复核）：
  * - videoModel(id) 返回 Experimental_VideoModelV4，仅实现 doStart/doStatus（异步任务 + 轮询），
  *   必须传 poll 或依赖 SDK 的 start/status 回退；返回的临时 video_url 由 SDK 内部下载，不外泄。
  * - 顶层 resolution 需为 `${number}x${number}` 像素格式，provider 内部经 resolutionTierMap 映射回
