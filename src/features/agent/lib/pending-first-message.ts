@@ -8,6 +8,9 @@
  *
  * 真实导航会重挂载 ChatWindow（初始消息为空），因此用本模块把待发送的首条消息
  * 交给目标页消费发送。幂等消费可安全应对 StrictMode 开发态的双执行。
+ * 注意：消费时机在 chat-window 的挂载宏任务（setTimeout 0）内而非 effect 同步体——
+ * StrictMode 模拟卸载的 useChat 清理（chat.stop()）会中止 effect 同步发出的发送，
+ * 详见 chat-window.tsx 交接 effect 注释。
  */
 
 interface PendingFirstMessage {

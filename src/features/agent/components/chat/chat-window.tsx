@@ -97,15 +97,25 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
 
   // 新会话首页 → 会话页的一次性首条消息交接（真实导航完成后由本页发送）。
   // 回到新会话首页（无 id）时丢弃未消费的交接，避免陈旧消息被误发送。
+  // 发送必须放进宏任务（setTimeout 0）：开发态 StrictMode 挂载时会模拟卸载
+  // （setup → cleanup → setup），其中 useChat 的卸载清理 chat.stop() 会 abort
+  // 挂载 effect 同步发出的 sendMessage——它在消息准备阶段的 await 点被中止后
+  // 静默返回（不推消息、不发请求），交接消息凭空消失（余额不足 402 等错误
+  // 也因此永不出现）。延迟一个宏任务可避开模拟卸载窗口；cleanup 的
+  // clearTimeout 保证真实卸载时不误发（交接保留，由同会话下次挂载消费，
+  // 时效窗口兜底）。
   useEffect(() => {
     if (!initialConversationId) {
       clearPendingFirstMessage();
       return;
     }
-    const pendingText = takePendingFirstMessage(initialConversationId);
-    if (pendingText) {
-      void sendMessage({ text: pendingText });
-    }
+    const timer = setTimeout(() => {
+      const pendingText = takePendingFirstMessage(initialConversationId);
+      if (pendingText) {
+        void sendMessage({ text: pendingText });
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [initialConversationId, sendMessage]);
 
   const isGenerating = status === 'submitted' || status === 'streaming';
