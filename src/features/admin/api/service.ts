@@ -85,9 +85,13 @@ export async function listUsers(filters: AdminUserFilters): Promise<AdminUsersRe
   const query = filters.query?.trim();
   const db = getDb();
 
-  // 每用户最近一次会话创建时间 = 最近登录（user 表无 lastSignInAt 列，从 session 派生）
+  // 每用户最近一次会话创建时间 = 最近登录（user 表无 lastSignInAt 列，从 session 派生）。
+  // 注意：聚合字段 max(...) 必须单独 .as('别名')，否则外层子查询无法按名引用该 raw SQL 列。
   const lastActive = db
-    .select({ userId: session.userId, lastSignInAt: max(session.createdAt) })
+    .select({
+      userId: session.userId,
+      lastSignInAt: max(session.createdAt).as('last_sign_in_at')
+    })
     .from(session)
     .groupBy(session.userId)
     .as('last_active');
