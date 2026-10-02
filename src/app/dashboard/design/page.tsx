@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { DesignEditorIsland } from '@/features/design/components/design-editor-island';
 import { createEmptyDocument } from '@/features/design/constants/canvas';
 import { getAsset } from '@/features/agent/api/service';
@@ -24,7 +24,7 @@ export default async function DesignNewPage(props: PageProps) {
 
   let initialImageAssetId: string | null = null;
   if (typeof rawImageAssetId === 'string' && isUuid(rawImageAssetId)) {
-    const { userId } = await auth();
+    const userId = await requireUserId();
     // 归属 + 类型校验：越权/非图片/已删除一律忽略参数（回退空白画布，不 404）
     const asset = userId ? await getAsset(userId, rawImageAssetId) : undefined;
     if (asset && asset.kind === 'image' && asset.storageKey) {

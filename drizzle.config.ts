@@ -10,7 +10,8 @@ try {
 }
 
 export default defineConfig({
-  schema: './src/lib/db/schema.ts',
+  // 业务表（schema.ts）+ Better Auth 认证表（auth-schema.ts，由 `npx auth generate` 产出）
+  schema: ['./src/lib/db/schema.ts', './src/lib/db/auth-schema.ts'],
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {

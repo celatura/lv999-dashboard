@@ -18,7 +18,7 @@
 - **成本管控（Credits）**：对话 / 生图 / 生视频 / 知识库摄取按 Credits 扣费，新用户默认 0 分、余额不足即拒，杜绝陌生人刷爆 API Key；管理员经后台发放额度。详见 [docs/credits.md](./docs/credits.md)
 - **总览仪表盘**：统计卡片 + Recharts 图表，基于并行路由各区块独立加载，已接真实数据
 - **管理员用户管理后台**：`ADMIN_USER_IDS` 白名单 + 服务端 `isAdmin` 校验，列用户 / 调 Credits / 级联删号（仅管理员可见）。详见 [docs/user-management.md](./docs/user-management.md)
-- **生产级后台底座**：TanStack Query SSR 数据表格（搜索 / 筛选 / 排序 / 分页与 URL 同步）、TanStack Form + Zod 表单、Clerk 认证、⌘K 命令面板、多主题架构、Infobar 提示侧栏——端到端可用，亦可直接长出其他业务
+- **生产级后台底座**：TanStack Query SSR 数据表格（搜索 / 筛选 / 排序 / 分页与 URL 同步）、TanStack Form + Zod 表单、Better Auth 自托管认证、⌘K 命令面板、多主题架构、Infobar 提示侧栏——端到端可用，亦可直接长出其他业务
 
 ## 技术栈
 
@@ -28,7 +28,7 @@
 | 语言 | TypeScript 5.7（strict） |
 | UI 组件 | shadcn/ui（Base UI primitives） |
 | 样式 | Tailwind CSS v4 |
-| 认证 | Clerk |
+| 认证 | Better Auth（自托管 · 邮箱密码） |
 | AI / Agent | AI SDK v7（`ai` + `@ai-sdk/alibaba` / `@ai-sdk/openai-compatible`），百炼（阿里云 Model Studio） |
 | 设计画布 | Konva + react-konva（2D canvas） |
 | 向量检索 / RAG | pgvector（阿里云 RDS） + 百炼 `text-embedding-v4` embedding |
@@ -57,7 +57,7 @@
 | `/dashboard/design/[id]` | 设计画布：打开已存设计继续编辑 |
 | `/dashboard/knowledge` | RAG 知识库：文档管理（新增 / 列表 / 删除 / 重试） |
 | `/dashboard/admin/users` | 用户管理（仅管理员）：列出全部用户、调整 Credits、级联删除账号 |
-| `/dashboard/profile` | 个人资料与安全设置（Clerk 账户管理） |
+| `/dashboard/profile` | 个人资料与安全设置（改名字 / 改密码 / 登出） |
 | `/dashboard/profile/credits` | 我的积分：Credits 余额与流水明细 |
 | `/auth/sign-in`、`/auth/sign-up` | 登录 / 注册 |
 
@@ -71,7 +71,7 @@ bun install
 
 # 2. 配置环境变量
 cp env.example.txt .env.local
-# 然后至少填入 Clerk 密钥与 DATABASE_URL（总览 / 资产等页直连数据库，缺一不可，见下方说明）
+# 然后至少填入 BETTER_AUTH_SECRET / BETTER_AUTH_URL 与 DATABASE_URL（总览 / 资产等页直连数据库，缺一不可，见下方说明）
 
 # 3. 初始化数据库 schema（首次 / 空库必做，否则数据页因缺表报错）
 #    pgvector 前置：先在目标库执行 CREATE EXTENSION IF NOT EXISTS vector;
@@ -90,17 +90,17 @@ bun run dev
 
 | 变量 | 说明 |
 | --- | --- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Clerk 密钥，必填 |
-| `ADMIN_USER_IDS` | 平台管理员白名单（逗号分隔的 Clerk userId），用户管理后台鉴权；留空 = 无管理员 |
+| `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Better Auth 密钥（≥32 字符）与应用基础 URL，必填 |
+| `ADMIN_USER_IDS` | 平台管理员白名单（逗号分隔的 Better Auth user id），用户管理后台鉴权；留空 = 无管理员 |
 | `NEXT_PUBLIC_APP_URL` | 应用公开地址（用于 metadataBase，本地为 `http://localhost:3000`） |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` 等 | 登录 / 注册与重定向地址（默认值已够用） |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | 密码重置邮件（可选，未配则重置不可用） |
 | `BUILD_STANDALONE` | Docker / 自托管时设为 `"true"`，启用 standalone 输出 |
 | `DATABASE_URL` | PostgreSQL 连接串（总览 / 资产 / Agent / 知识库 / 设计等数据层均需，未配会报错） |
 | `DASHSCOPE_API_KEY` | 阿里云百炼 API Key（对话与图片模型） |
 | `OSS_REGION` / `OSS_BUCKET` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS（图片等二进制资产） |
 | `REDIS_URL` | Redis 连接串（流恢复 / 停止信号 / 限流，需 pub/sub） |
 
-后台页至少需 Clerk 密钥 + `DATABASE_URL`；`DASHSCOPE_API_KEY` / OSS / `REDIS_URL` 仅创作能力（Agent 模块）需要。完整变量见 `env.example.txt`，Clerk 配置见 [docs/clerk_setup.md](./docs/clerk_setup.md)。
+后台页至少需 Better Auth 密钥 + `DATABASE_URL`；`DASHSCOPE_API_KEY` / OSS / `REDIS_URL` 仅创作能力（Agent 模块）需要。完整变量见 `env.example.txt`，认证配置见 [docs/auth.md](./docs/auth.md)。
 
 ### 常用命令
 
@@ -160,10 +160,10 @@ src/
 - **RAG 知识库**：文本 / 上传文件经切分 → 百炼 `text-embedding-v4` → pgvector（`knowledge_documents` / `knowledge_chunks` 两表 + HNSW 索引）；Agent 经 `knowledgeSearch` 语义检索 topK 片段作答并标注来源。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)。
 - **视频产物**：AI SDK v7 `experimental_generateVideo` + `@ai-sdk/alibaba`（默认 `wan3.0-video`），作为 `kind='video'` 资产落库（不新增表），封面用 OSS 原生截帧经同源代理下发。详见 [docs/video-generation.md](./docs/video-generation.md)。
 - **Credits 成本管控**：调用部署者真实 API Key，故新用户默认 0 分、付费入口先 `checkBalance`（不足返回 402）；按真实 usage「发起后按结果扣」，依百炼「失败不计费」口径，`credits_accounts` + `credit_ledger` 两表原子扣费。详见 [docs/credits.md](./docs/credits.md)。
-- **用户管理后台**：管理员（`ADMIN_USER_IDS` + 服务端 `isAdmin`）列用户 / 调 Credits / 级联删号（Clerk → 7 表事务 → OSS）；多租户组织功能已移除、改为单管理员模型。详见 [docs/user-management.md](./docs/user-management.md)。
+- **用户管理后台**：管理员（`ADMIN_USER_IDS` + 服务端 `isAdmin`）列用户 / 调 Credits / 级联删号（Better Auth user → 7 表事务 → OSS）；多租户组织功能已移除、改为单管理员模型。详见 [docs/user-management.md](./docs/user-management.md)。
 - **URL 状态（nuqs）**：服务端 `searchParamsCache` 读、客户端 `useQueryState(shallow: true)` 写，表格分页 / 筛选零 RSC 往返、可分享还原。
 - **表单（TanStack Form + Zod）**：`createFormHook` + 可复用 Field 组件，提交走 `useMutation` + 查询键失效。详见 [docs/forms.md](./docs/forms.md)。
-- **权限**：`nav-config.ts` 声明导航、客户端 `useFilteredNavGroups()` 同步过滤（仅 UX）；真正鉴权是服务端 `isAdmin` 与 `auth.protect()`（org-based RBAC 已随 Clerk Organizations 退役）。详见 [docs/nav-rbac.md](./docs/nav-rbac.md)。
+- **权限**：`nav-config.ts` 声明导航、客户端 `useFilteredNavGroups()` 同步过滤（仅 UX）；真正鉴权是服务端 `isAdmin` 与 dashboard/layout 的 `verifySession()`（org-based RBAC 已退役）。详见 [docs/nav-rbac.md](./docs/nav-rbac.md)。
 - **主题系统**：`[data-theme]` + CSS 变量驱动，`active_theme` cookie 持久化。详见 [docs/themes.md](./docs/themes.md)。
 
 ## 部署

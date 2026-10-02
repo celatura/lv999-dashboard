@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import {
@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -30,7 +30,7 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -82,7 +82,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

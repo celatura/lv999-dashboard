@@ -27,7 +27,7 @@ import {
 import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navGroups } from '@/config/nav-config';
 import { useMediaQuery } from '@/hooks/use-media-query';
-import { useClerk, useUser } from '@clerk/nextjs';
+import { signOut } from '@/lib/auth-client';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import { SidebarCreditsItem } from '@/features/credits/components/sidebar-credits-item';
 import Link from 'next/link';
@@ -38,13 +38,13 @@ import { Icons } from '../icons';
 interface AppSidebarProps {
   /** 是否平台管理员：由 dashboard/layout.tsx 服务端计算后注入，仅控制「用户管理」入口可见性（UX，非权限依据） */
   isAdmin?: boolean;
+  /** 当前登录用户展示信息：由 dashboard/layout.tsx 服务端会话注入，避免客户端再拉一次 get-session（无头像闪烁） */
+  user?: { name: string; email: string; image?: string | null } | null;
 }
 
-export default function AppSidebar({ isAdmin = false }: AppSidebarProps) {
+export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarProps) {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
-  const { user } = useUser();
-  const { signOut } = useClerk();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
   // 账号下拉受控 open：打开时才查 Credits 余额（不常驻轮询）
@@ -179,7 +179,13 @@ export default function AppSidebar({ isAdmin = false }: AppSidebarProps) {
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => signOut({ redirectUrl: '/auth/sign-in' })}>
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      await signOut();
+                      router.refresh();
+                      router.push('/auth/sign-in');
+                    }}
+                  >
                     <Icons.logout aria-hidden className='mr-2 h-4 w-4' />
                     退出登录
                   </DropdownMenuItem>

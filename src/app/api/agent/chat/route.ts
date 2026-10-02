@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import {
   convertToModelMessages,
   createUIMessageStreamResponse,
@@ -53,7 +53,7 @@ function extractText(message: UIMessage): string {
 }
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

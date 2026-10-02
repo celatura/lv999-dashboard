@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { notFound } from 'next/navigation';
 import type { UIMessage } from 'ai';
 import { getConversation, listMessages } from '@/features/agent/api/service';
@@ -13,7 +13,7 @@ type PageProps = {
 };
 
 export default async function ConversationPage({ params }: PageProps) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) notFound();
 
   const { conversationId } = await params;

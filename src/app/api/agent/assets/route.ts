@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { createDesignAsset, listAssets } from '@/features/agent/api/service';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -27,7 +27,7 @@ function parseBoolean(value: string | null): boolean | undefined {
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 
 /** 创建 design 资产：文档 JSON 落 content 列，导出 PNG 预览落 OSS */
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

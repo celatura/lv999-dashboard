@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { deleteDocument, getDocumentDetail, listChunks } from '@/features/knowledge/api/service';
@@ -12,7 +12,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * 只读端点：无计费、无写入限流；越权与不存在同样 404（归属即权限）。
  */
 export async function GET(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -31,7 +31,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
 /** 删除文档：片段由外键 ON DELETE CASCADE 级联清理（删除后不再被检索到） */
 export async function DELETE(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

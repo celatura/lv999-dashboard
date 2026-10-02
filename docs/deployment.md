@@ -14,8 +14,9 @@
 
 确保在部署平台中设置了以下变量：
 
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- `CLERK_SECRET_KEY`
+- `BETTER_AUTH_SECRET`（≥32 字符）与 `BETTER_AUTH_URL`（生产 HTTPS）
+- `DATABASE_URL`；如需密码重置邮件另配 `SMTP_*`
+- `ADMIN_USER_IDS`（Better Auth user id）用于管理后台
 - 所有用于客户端访问的 `NEXT_PUBLIC_*` 变量
 
 ## Docker
@@ -27,12 +28,12 @@
 ```bash
 # Node.js
 docker build \
-  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx \
+  --build-arg NEXT_PUBLIC_APP_URL=https://your-domain.com \
   -t lv999-dashboard .
 
 # 或 Bun
 docker build -f Dockerfile.bun \
-  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx \
+  --build-arg NEXT_PUBLIC_APP_URL=https://your-domain.com \
   -t lv999-dashboard .
 ```
 
@@ -40,8 +41,9 @@ docker build -f Dockerfile.bun \
 
 ```bash
 docker run -d -p 3000:3000 \
-  -e NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx \
-  -e CLERK_SECRET_KEY=sk_live_xxxxx \
+  -e BETTER_AUTH_SECRET=your-32-plus-char-secret \
+  -e BETTER_AUTH_URL=https://your-domain.com \
+  -e DATABASE_URL=postgresql://user:pass@host:5432/db \
   --restart unless-stopped \
   --name lv999-dashboard \
   lv999-dashboard

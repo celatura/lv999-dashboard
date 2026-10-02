@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { notFound } from 'next/navigation';
 import { getAsset } from '@/features/agent/api/service';
 import { DesignEditorIsland } from '@/features/design/components/design-editor-island';
@@ -16,7 +16,7 @@ type PageProps = {
 
 /** 打开已存 design：归属 + 类型校验，把文档作为初始状态传入客户端编辑器 */
 export default async function DesignEditPage({ params }: PageProps) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) notFound();
 
   const { id } = await params;

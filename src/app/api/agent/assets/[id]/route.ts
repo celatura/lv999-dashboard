@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { deleteAsset, getAsset, updateDesignAsset } from '@/features/agent/api/service';
@@ -17,7 +17,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -37,7 +37,7 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -54,7 +54,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
 /** 更新 design 资产：文档 JSON / 标题 / 预览 PNG（按所有权，仅限 kind='design'） */
 export async function PATCH(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

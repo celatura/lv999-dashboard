@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { UI_MESSAGE_STREAM_HEADERS } from 'ai';
 import { after } from 'next/server';
 import { createResumableStreamContext } from 'resumable-stream';
@@ -16,7 +16,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * - 有活跃流：重连到进行中的流，先回放已缓冲内容再持续推送
  */
 export async function GET(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

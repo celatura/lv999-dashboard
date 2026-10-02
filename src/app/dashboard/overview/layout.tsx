@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import PageContainer from '@/components/layout/page-container';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -26,7 +26,7 @@ export default async function OverViewLayout({
   area_stats: React.ReactNode;
 }) {
   // 与并行路由槽同请求：getAssetStats 经 React.cache 去重，layout 与 4 个槽共用一轮统计查询
-  const { userId } = await auth();
+  const userId = await requireUserId();
   const [assetStats, conversationStats] = await Promise.all([
     getAssetStats(userId),
     getConversationStats(userId)

@@ -16,7 +16,7 @@ export const searchParams = {
   status: parseAsString,
   /** 知识库文档来源筛选（逗号分隔：manual/asset） */
   source: parseAsString,
-  /** 管理端用户列表搜索（邮箱 / 名称 / 用户名 / userId，透传 Clerk query） */
+  /** 管理端用户列表搜索（邮箱 / 名称 / userId，ilike 匹配 user 表） */
   query: parseAsString,
   sort: parseAsString
   // advanced filter

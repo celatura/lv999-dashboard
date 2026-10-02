@@ -69,7 +69,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | 列 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | uuid PK | 默认随机生成 |
-| `userId` | text | Clerk userId |
+| `userId` | text | Better Auth user id |
 | `title` | text | 会话标题（首条消息自动生成） |
 | `model` | text | 会话级模型选择，默认 `deepseek-flash` |
 | `activeSkillId` | text \| null | 会话级技能（专家模式）id，指向代码内技能注册表；null = 通用（无技能） |

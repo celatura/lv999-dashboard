@@ -35,6 +35,7 @@ function summarize(result: DeleteUserResult): string {
     result.conversations > 0 ? `${result.conversations} 会话` : null,
     result.messages > 0 ? `${result.messages} 消息` : null,
     result.assets > 0 ? `${result.assets} 资产` : null,
+    result.skills > 0 ? `${result.skills} 技能` : null,
     result.knowledgeDocuments > 0 ? `${result.knowledgeDocuments} 文档` : null,
     result.ossObjects > 0 ? `${result.ossObjects} 个 OSS 对象` : null
   ].filter(Boolean);
@@ -53,7 +54,7 @@ function resolveDeleteError(error: unknown): string {
 
 /**
  * 删除用户（不可逆）：二次确认需手动输入邮箱/名称匹配才可提交。
- * → DELETE /api/admin/users/[id] → Clerk 删号 → DB 事务级联清 7 表 → OSS 对象清理。
+ * → DELETE /api/admin/users/[id] → 删 Better Auth 用户 → DB 事务级联清 7 表 → OSS 对象清理。
  */
 export function DeleteUserDialog({ user, open, onOpenChange }: DeleteUserDialogProps) {
   const mutation = useMutation(deleteUserMutation);
@@ -93,7 +94,7 @@ export function DeleteUserDialog({ user, open, onOpenChange }: DeleteUserDialogP
           <DialogDescription>
             将永久删除 <span className='text-foreground font-medium'>{user.name}</span>（
             {user.email}
-            ）的 Clerk 账号、全部业务数据（会话 / 消息 / 资产 / 知识库 / Credits）与 OSS
+            ）的账号、全部业务数据（会话 / 消息 / 资产 / 知识库 / Credits）与 OSS
             对象。此操作不可撤销。
           </DialogDescription>
         </DialogHeader>

@@ -12,7 +12,7 @@ This file provides essential information for AI coding agents working on this pr
 - **Language**: TypeScript 5.7
 - **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui (base-nova style, Base UI primitives)
-- **Authentication**: Clerk (single-user; Organizations feature disabled)
+- **Authentication**: Better Auth (self-hosted; email + password)
 - **Charts**: Recharts
 - **Containerization**: Docker (Node.js & Bun Dockerfiles)
 - **Package Manager**: Bun (preferred) or npm
@@ -51,9 +51,9 @@ The project follows a feature-based folder structure designed for scalability in
 
 ### Authentication & Authorization
 
-- Clerk for authentication and user management
-- Organizations / multi-tenancy are **disabled** — core business is isolated by `userId` (single-admin model)
-- Client-side nav filtering is for UX only; real authorization is server-side `isAdmin` (see "Authentication Patterns")
+- Better Auth (self-hosted) for authentication; the Drizzle adapter reuses the existing RDS — see [docs/auth.md](./docs/auth.md)
+- Email + password only (OAuth / 2FA / organization plugins deferred); core business is isolated by `userId` (single-admin model)
+- Server-side session reads go through the DAL `src/lib/auth-session.ts` (`verifySession` / `requireUserId`); client-side nav filtering is UX only, real authorization is server-side `isAdmin` (see "Authentication Patterns")
 
 ### Data & APIs
 
@@ -140,8 +140,9 @@ The project follows a feature-based folder structure designed for scalability in
 │   ├── design-editor.md   # Design canvas editor
 │   ├── knowledge-base.md  # RAG knowledge base
 │   ├── credits.md         # Credits billing rules
+│   ├── auth.md            # Better Auth (self-hosted): architecture / DAL / security
 │   ├── user-management.md # Admin user management & server-side auth
-│   ├── clerk_setup.md     # Clerk configuration guide
+│   ├── clerk_setup.md     # DEPRECATED (Clerk) — historical; see auth.md
 │   ├── nav-rbac.md        # Navigation RBAC documentation
 │   └── themes.md          # Theme customization guide
 
@@ -188,20 +189,27 @@ bun run prepare      # Install Husky hooks
 
 Copy `env.example.txt` to `.env.local` and configure:
 
-### Required for Authentication (Clerk)
+### Required for Authentication (Better Auth)
 
 ```env
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
-CLERK_SECRET_KEY=sk_...
+# Encryption secret (min 32 chars; generate: openssl rand -base64 32)
+BETTER_AUTH_SECRET=...
+# App base URL (HTTPS in production); Better Auth infers cookie domain & callbacks from it
+BETTER_AUTH_URL=http://localhost:3000
 
 # App base URL (used for metadataBase)
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-# Redirect URLs
-NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
-NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
-NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL="/dashboard/overview"
-NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL="/dashboard/overview"
+# SMTP for password-reset emails (reset unavailable if unset; sign-in/up unaffected)
+SMTP_HOST=
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+
+# Admin whitelist (comma-separated Better Auth user ids; empty = no admin)
+ADMIN_USER_IDS=
 ```
 
 ## Code Style Guidelines
@@ -290,50 +298,36 @@ The `NavItem.access` field and its properties (`requireOrg` / `permission` / `ro
 
 ### Client-Side Filtering
 
-The `useFilteredNavGroups()` / `useFilteredNavItems()` hooks in `src/hooks/use-nav.ts` filter navigation synchronously on the client (UX only — no `useOrganization` / `useUser` calls, which would re-trigger Clerk's "Organizations feature required" popup). Real security is enforced server-side.
+The `useFilteredNavGroups()` / `useFilteredNavItems()` hooks in `src/hooks/use-nav.ts` filter navigation synchronously on the client (UX only — no session / org lookups). Real security is enforced server-side.
 
 ---
 
 ## Authentication Patterns
 
+Better Auth is self-hosted; see [docs/auth.md](./docs/auth.md) for the full architecture. Key files: `src/lib/auth.ts` (config), `src/app/api/auth/[...all]/route.ts` (`toNextJsHandler`), `src/lib/auth-client.ts` (`createAuthClient`), and the DAL `src/lib/auth-session.ts`.
+
 ### Protected Routes
 
-Dashboard routes are behind Clerk's middleware. For admin-only pages / endpoints, enforce the server-side whitelist `isAdmin` (`src/lib/admin.ts`, backed by `ADMIN_USER_IDS`). This is the ONLY security boundary — client-side entry visibility is UX.
+The `/dashboard` layout gates on a real session (`verifySession`); `proxy.ts` only does an optimistic cookie redirect (not a security boundary). For admin-only pages / endpoints, enforce the server-side whitelist `isAdmin` (`src/lib/admin.ts`, backed by `ADMIN_USER_IDS`). This is the ONLY security boundary — client-side entry visibility is UX.
 
 ```tsx
-import { auth } from '@clerk/nextjs';
 import { redirect } from 'next/navigation';
+import { requireUserId } from '@/lib/auth-session';
 import { isAdmin } from '@/lib/admin';
 
 export default async function AdminPage() {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!isAdmin(userId)) redirect('/dashboard/overview');
   // ...
 }
 ```
 
-In route handlers, return `403` for non-admins. See [docs/user-management.md](./docs/user-management.md).
+In route handlers, return `401` when `requireUserId()` is null and `403` for non-admins. Never call `auth.api.getSession` directly — always go through the DAL. See [docs/user-management.md](./docs/user-management.md).
 
-### Plan/Feature Protection
+### Session in Components
 
-Use Clerk's `<Protect>` component for client-side:
-
-```tsx
-import { Protect } from '@clerk/nextjs';
-
-<Protect plan='pro' fallback={<UpgradePrompt />}>
-  <PremiumContent />
-</Protect>;
-```
-
-Use `has()` function for server-side checks:
-
-```tsx
-import { auth } from '@clerk/nextjs';
-
-const { has } = await auth();
-const hasFeature = has({ feature: 'premium_access' });
-```
+- Server: `verifySession()` → `{ userId, user, session } | null`.
+- Client: `authClient.useSession()`. The dashboard sidebar instead receives `user` as a server-injected prop (from the layout's `verifySession`) to avoid a second client fetch and avatar flash.
 
 ---
 
@@ -498,8 +492,9 @@ Canonical guide: [docs/deployment.md](./docs/deployment.md) (Vercel, production 
 
 Ensure these are set in your deployment platform:
 
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- `CLERK_SECRET_KEY`
+- `BETTER_AUTH_SECRET` (min 32 chars) and `BETTER_AUTH_URL` (HTTPS)
+- `DATABASE_URL`; `SMTP_*` if password-reset email is needed
+- `ADMIN_USER_IDS` (Better Auth user ids) for the admin backend
 - All `NEXT_PUBLIC_*` variables for client-side access
 
 ### Docker
@@ -514,7 +509,7 @@ Both use `output: 'standalone'` in `next.config.ts`. Pass `NEXT_PUBLIC_*` vars a
 ### Build Considerations
 
 - Output: `standalone` (optimized for Docker/self-hosting)
-- Images: `remotePatterns` configured for `img.clerk.com` and `clerk.com`
+- `serverExternalPackages`: `ali-oss`, `@firecrawl/anydoc`, `nodemailer` (Node-loaded, not bundled)
 
 ---
 
@@ -617,10 +612,10 @@ See "Theming System" section above or `docs/themes.md`.
 - Ensure using Tailwind CSS v4 syntax (`@import 'tailwindcss'`)
 - Check `postcss.config.js` uses `@tailwindcss/postcss`
 
-**Clerk keyless mode popup**
+**Auth session always null / "Invalid origin"**
 
-- Run `npx clerk@latest init` to provision a dev instance in seconds (no account needed)
-- It writes keys to `.env.local`; later you can claim application or set env variables
+- Ensure `BETTER_AUTH_SECRET` (≥32 chars) and `BETTER_AUTH_URL` are set, and the request origin is in `trustedOrigins`
+- Verify with `GET /api/auth/ok` → `{"ok":true}`; see [docs/auth.md](./docs/auth.md)
 
 **Theme not applying**
 
@@ -637,7 +632,7 @@ See "Theming System" section above or `docs/themes.md`.
 ## External Documentation
 
 - [Next.js App Router](https://nextjs.org/docs/app)
-- [Clerk Next.js SDK](https://clerk.com/docs/references/nextjs)
+- [Better Auth](https://better-auth.com/docs)
 - [shadcn/ui](https://ui.shadcn.com/docs)
 - [Tailwind CSS v4](https://tailwindcss.com/docs)
 - [TanStack Table](https://tanstack.com/table/latest)

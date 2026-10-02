@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { getAsset } from '@/features/agent/api/service';
@@ -27,7 +27,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * 封面帧 URL 后同样以同源流式回传（列表/卡片/预览 poster 共用，避免客户端签名与 CORS）。
  */
 export async function GET(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

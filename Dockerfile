@@ -32,10 +32,11 @@ COPY . .
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Build-time env vars — override these with --build-arg or in compose.yml
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/auth/sign-in
-ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/sign-up
+# Build-time env vars (override with --build-arg or in compose.yml).
+# Better Auth 用运行时 env（BETTER_AUTH_SECRET / BETTER_AUTH_URL / DATABASE_URL，经 `docker run -e` 注入）；
+# auth.ts 已惰性建库，构建阶段不再依赖 DATABASE_URL。
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 
 ENV BUILD_STANDALONE=true
 

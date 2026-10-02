@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { getBalance } from '@/features/credits/api/service';
 
@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
  * 无账户行视为 0（懒创建，见 docs/credits.md §2）。无写端点：grant 仅 CLI，扣费在各计费入口内部完成。
  */
 export async function GET() {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import type { UIMessage } from 'ai';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
@@ -28,7 +28,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * 注：请求体解析失败时按空对象继续——停止是尽力而为的控制通道，保持始终可用。
  */
 export async function POST(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

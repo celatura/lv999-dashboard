@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { GenerationError } from '@/features/agent/api/generation-error';
@@ -40,7 +40,7 @@ function buildAssetTitle(prompt: string, title?: string): string {
  * 可在「我的资产」复用。计费/限流/402 拦截与 `/assets/[id]/edit`（I2I）同构。
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

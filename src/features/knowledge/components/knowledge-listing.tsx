@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
@@ -9,7 +9,7 @@ import type { KnowledgeDocumentFilters } from '../api/types';
 import { KnowledgeTable, KnowledgeTableSkeleton } from './knowledge-tables';
 
 export default async function KnowledgeListing() {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) return null;
 
   const title = searchParamsCache.get('title');

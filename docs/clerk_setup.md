@@ -1,5 +1,7 @@
 # Clerk 配置指南
 
+> ⚠️ **已废弃（DEPRECATED）**：本项目认证已从 Clerk 迁移到 **Better Auth（自托管）**。最新的认证架构 / 配置 / 安全清单见 [docs/auth.md](./auth.md)。以下 Clerk 内容仅作历史留存，不再适用。
+
 本指南涵盖本项目中使用的 Clerk 功能的设置与配置。
 
 ## 所需的 Clerk 权限范围

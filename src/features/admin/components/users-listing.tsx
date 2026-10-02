@@ -9,7 +9,7 @@ import { UsersTable, UsersTableSkeleton } from './users-table';
 
 /**
  * 用户管理列表（server）：读 URL 状态 → 服务端预取（直连 service）→ HydrationBoundary + Suspense。
- * 预取 queryFn 直连 `listUsers`（Clerk BAPI + 合并余额），返回结构必须与客户端 `/api/admin/users`
+ * 预取 queryFn 直连 `listUsers`（查 user 表 + 合并余额），返回结构必须与客户端 `/api/admin/users`
  * 的 apiClient 应答完全一致，否则水合数据形状错乱。
  */
 export default function UsersListing() {

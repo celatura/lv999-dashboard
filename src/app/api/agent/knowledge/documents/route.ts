@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
@@ -48,7 +48,7 @@ function parseEnumList(value: string | null, allowed: readonly string[]): string
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
  * 流程：限流 → 体积 → 解析校验 → 切分校验 → 建文档行（processing）→ 同步摄取 → 返回文档态。
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

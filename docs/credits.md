@@ -23,7 +23,7 @@ LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频
 
 **`credit_ledger`**（流水，只增不改，审计 + 前端展示）：`id`(uuid PK) / `userId`(text) / `delta`(integer，正=grant 负=消耗) / `balanceAfter`(integer，本笔后余额快照，免回算) / `kind`(text：`grant`/`chat`/`image`/`video`/`knowledge`) / `meta`(jsonb，计量明细) / `createdAt`。索引 `(userId, createdAt)`。
 
-- **懒创建**：无账户行视为 `balance=0`；`chargeCredits`/`grantCredits` 对无行 user 先 upsert 建行。新注册用户天然 0 余额被拦，**不依赖 Clerk webhook**。
+- **懒创建**：无账户行视为 `balance=0`；`chargeCredits`/`grantCredits` 对无行 user 先 upsert 建行。新注册用户天然 0 余额被拦，**不依赖任何认证方 webhook**。
 - **迁移**：`bunx drizzle-kit generate` → `bun scripts/db-apply-sql.ts`（RDS 下 `db:push` 静默失败，沿用确定性工作流）。
 
 ---
@@ -172,7 +172,7 @@ bun scripts/credit-admin.ts set <userId> <amount> [--note "..."]      # 直接�
 
 ## 11. 明确延后（未实现）
 
-预扣/冻结/退款、有效期/周期清零、多来源扣款排序、支付、低余额警告、事前估算弹窗/档位展示、基于 Clerk 角色的 admin 权限（当前用 `ADMIN_USER_IDS` env 白名单）、`knowledgeSearch` 检索计费、Clerk webhook 自动开户、余额变负的阻断（接受单次透支）。
+预扣/冻结/退款、有效期/周期清零、多来源扣款排序、支付、低余额警告、事前估算弹窗/档位展示、基于角色的 admin 权限（当前用 `ADMIN_USER_IDS` env 白名单）、`knowledgeSearch` 检索计费、认证方 webhook 自动开户、余额变负的阻断（接受单次透支）。
 
 ---
 

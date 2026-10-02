@@ -1,8 +1,8 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { redirect } from 'next/navigation';
 
 export default async function Page() {
-  const { userId } = await auth();
+  const userId = await requireUserId();
 
   if (!userId) {
     return redirect('/auth/sign-in');

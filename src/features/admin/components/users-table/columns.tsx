@@ -11,7 +11,7 @@ import { CellAction } from './cell-action';
 
 /**
  * 用户管理列：用户（头像 + 名 + 邮箱，兼作搜索）/ 注册时间 / 最近登录 / Credits 余额 / 操作。
- * createdAt、lastSignInAt 可排序（映射 Clerk orderBy）；query 列为文本搜索（透传 Clerk 模糊查询）。
+ * createdAt、lastSignInAt 可排序（映射服务端 orderBy）；query 列为文本搜索（ilike 模糊匹配）。
  */
 
 /** 头像回退首字母：名称 → 邮箱 → '?' */

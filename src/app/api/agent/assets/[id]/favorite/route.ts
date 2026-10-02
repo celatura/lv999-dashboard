@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -16,7 +16,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 /** 收藏/取消收藏资产（任意 kind，按所有权） */
 export async function POST(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

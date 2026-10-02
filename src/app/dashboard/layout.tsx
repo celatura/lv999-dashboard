@@ -5,9 +5,10 @@ import { InfoSidebar } from '@/components/layout/info-sidebar';
 import { InfobarProvider } from '@/components/ui/infobar';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { isAdmin } from '@/lib/admin';
-import { auth } from '@clerk/nextjs/server';
+import { verifySession } from '@/lib/auth-session';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
   title: 'LV999',
@@ -19,10 +20,11 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  // Gate the whole /dashboard segment: redirect to sign-in when signed out.
-  // protect() 返回 SignedInAuthObject（userId 非空），据此服务端计算 isAdmin 注入侧边栏。
-  const { userId } = await auth.protect();
-  const admin = isAdmin(userId);
+  // Gate the whole /dashboard segment: redirect to sign-in when there is no valid session.
+  // verifySession() 是真实安全校验（proxy 只做乐观分流）；据此服务端计算 isAdmin 注入侧边栏。
+  const verified = await verifySession();
+  if (!verified) redirect('/auth/sign-in');
+  const admin = isAdmin(verified.userId);
   // Persisting the sidebar state in the cookie.
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get('sidebar_state')?.value === 'true';
@@ -35,7 +37,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
         >
           Skip to content
         </a>
-        <AppSidebar isAdmin={admin} />
+        <AppSidebar
+          isAdmin={admin}
+          user={{
+            name: verified.user.name,
+            email: verified.user.email,
+            image: verified.user.image
+          }}
+        />
         <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
           <Header />
           <InfobarProvider defaultOpen={false}>

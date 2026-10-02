@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import PageContainer from '@/components/layout/page-container';
 import { isAdmin } from '@/lib/admin';
 import { searchParamsCache } from '@/lib/searchparams';
@@ -21,7 +21,7 @@ type PageProps = {
  * 侧边栏入口可见性只是 UX。校验通过后解析 URL 状态并渲染 UsersListing（服务端预取 + Suspense）。
  */
 export default async function AdminUsersPage(props: PageProps) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!isAdmin(userId)) notFound();
 
   const searchParams = await props.searchParams;

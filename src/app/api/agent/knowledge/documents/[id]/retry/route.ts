@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -28,7 +28,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * replaceChunks 在事务内整体替换，重试幂等。
  */
 export async function POST(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

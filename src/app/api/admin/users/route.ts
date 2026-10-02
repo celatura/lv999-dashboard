@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isAdmin } from '@/lib/admin';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -17,9 +17,9 @@ function parseInteger(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** 管理员用户列表：Clerk 用户（分页 + query 搜索 + 排序）+ 合并 Credits 余额。非管理员 403。 */
+/** 管理员用户列表：Better Auth user 表（分页 + query 搜索 + 排序）+ 合并 Credits 余额。非管理员 403。 */
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

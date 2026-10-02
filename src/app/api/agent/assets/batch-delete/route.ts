@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { deleteAsset } from '@/features/agent/api/service';
@@ -16,7 +16,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
  * 不存在的 id 静默跳过，返回实际删除计数；全部未命中时返回 404。
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

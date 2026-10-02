@@ -50,6 +50,20 @@
       "when": 1790876826896,
       "tag": "0006_messy_mother_askani",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790970453142,
+      "tag": "0007_smiling_the_spike",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790974390262,
+      "tag": "0008_purple_santa_claus",
+      "breakpoints": true
     }
   ]
 }

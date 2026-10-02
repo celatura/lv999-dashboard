@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -18,7 +18,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * uuid 的归属过滤在 updateSkill 内完成，越权/不存在 → 404。
  */
 export async function PATCH(request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -57,7 +57,7 @@ export async function PATCH(request: Request, context: RouteContext) {
  * activeSkillId 置 null（显式回退通用）。预置 key → 404；越权/不存在 → 404。
  */
 export async function DELETE(_request: Request, context: RouteContext) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

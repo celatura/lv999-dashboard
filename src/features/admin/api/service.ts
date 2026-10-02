@@ -1,6 +1,6 @@
-import { clerkClient } from '@clerk/nextjs/server';
-import { count, eq, inArray } from 'drizzle-orm';
+import { count, eq, ilike, inArray, max, or, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { session, user } from '@/lib/db/auth-schema';
 import {
   assets,
   conversations,
@@ -8,7 +8,8 @@ import {
   creditsAccounts,
   knowledgeChunks,
   knowledgeDocuments,
-  messages
+  messages,
+  skills
 } from '@/lib/db/schema';
 import { getOssClient } from '@/lib/oss';
 import { getBalancesByIds } from '@/features/credits/api/service';
@@ -17,119 +18,138 @@ import type { AdminUser, AdminUserFilters, AdminUsersResponse, DeleteUserResult 
 /**
  * 管理员用户管理数据访问层（server-only）。
  *
- * - 列用户：Clerk Backend API `getUserList`（分页 + 搜索 + 排序）+ 合并项目 `credits_accounts` 余额（批量查，避免 N+1）。
- * - 删用户：先 Clerk 删号断登录 → DB 事务级联清理 7 表 → OSS 对象清理（失败仅告警）。
+ * - 列用户：查 Better Auth `user` 表（分页 + 搜索 email/name/id + 排序）+ 合并项目 `credits_accounts`
+ *   余额（批量查，避免 N+1）；「最近登录」由 `session` 表派生（user 表无 lastSignInAt 列）。
+ * - 删用户：先删 Better Auth 用户（级联 session/account 断登录）→ DB 事务级联清理业务表 → OSS 对象清理（失败仅告警）。
  * - 调 Credits：不在本文件重写，路由直接复用 `features/credits` 的 grantCredits / setBalance。
  *
  * 客户端经 `/api/admin/*` Route Handlers 访问（每个端点 isAdmin 403 守卫），不直接引用本文件。
  */
 
-/**
- * Clerk Backend `User` 的结构子集（仅取本模块用到的字段）。
- * 用结构化类型而非直接 import `@clerk/backend`：后者是 `@clerk/nextjs` 的传递依赖，不作直接依赖引入。
- */
-interface ClerkUserLike {
+/** listUsers 查询投影的一行（Better Auth user + 派生的最近登录时间） */
+interface UserRow {
   id: string;
-  firstName: string | null;
-  lastName: string | null;
-  username: string | null;
-  imageUrl: string;
-  /** Unix 毫秒时间戳 */
-  createdAt: number;
-  /** Unix 毫秒时间戳；从未登录为 null */
-  lastSignInAt: number | null;
-  primaryEmailAddress: { emailAddress: string } | null;
+  name: string;
+  email: string;
+  image: string | null;
+  createdAt: Date;
+  lastSignInAt: Date | null;
 }
 
-/** Clerk getUserList 支持的 orderBy 值（本模块仅按注册时间 / 最近登录排序） */
-type UserOrderBy = '+created_at' | '-created_at' | '+last_sign_in_at' | '-last_sign_in_at';
-
-function resolveName(user: ClerkUserLike, email: string): string {
-  const full = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-  if (full) return full;
-  if (user.username) return user.username;
-  if (email) return email.split('@')[0] ?? user.id;
-  return user.id;
+/** 展示名：user.name 优先，缺省回退邮箱前缀或 userId */
+function resolveName(row: UserRow): string {
+  const name = row.name?.trim();
+  if (name) return name;
+  if (row.email) return row.email.split('@')[0] || row.id;
+  return row.id;
 }
 
-function toAdminUser(user: ClerkUserLike, balance: number): AdminUser {
-  const email = user.primaryEmailAddress?.emailAddress ?? '';
+function toAdminUser(row: UserRow, balance: number): AdminUser {
   return {
-    id: user.id,
-    name: resolveName(user, email),
-    email: email || '（无邮箱）',
-    imageUrl: user.imageUrl,
-    createdAt: new Date(user.createdAt).toISOString(),
-    lastSignInAt: user.lastSignInAt ? new Date(user.lastSignInAt).toISOString() : null,
+    id: row.id,
+    name: resolveName(row),
+    email: row.email || '（无邮箱）',
+    imageUrl: row.image ?? '',
+    createdAt: row.createdAt.toISOString(),
+    // max(session.createdAt) 经 leftJoin 未命中（从未登录）时为 null；用 instanceof 兜底运行时安全
+    lastSignInAt: row.lastSignInAt instanceof Date ? row.lastSignInAt.toISOString() : null,
     balance
   };
 }
 
 /**
- * 解析前端排序参数为 Clerk orderBy。
- * 与其它列表同构：`sort` 为 JSON 字符串 `[{ id, desc }]`，仅取首列；非受支持列回退默认 `-created_at`。
+ * 解析前端排序参数：`sort` 为 JSON 字符串 `[{ id, desc }]`，仅取首列。
+ * 支持 createdAt / lastSignInAt；其余或非法输入回退默认 createdAt 倒序。
  */
-function parseUserOrderBy(sort?: string): UserOrderBy {
-  if (!sort) return '-created_at';
-  try {
-    const parsed = JSON.parse(sort) as { id?: string; desc?: boolean }[];
-    const first = Array.isArray(parsed) ? parsed[0] : undefined;
-    const sign = first?.desc === false ? '+' : '-';
-    switch (first?.id) {
-      case 'lastSignInAt':
-        return `${sign}last_sign_in_at`;
-      case 'createdAt':
-        return `${sign}created_at`;
-      default:
-        return '-created_at';
+function parseSort(sort?: string): { column: 'createdAt' | 'lastSignInAt'; descending: boolean } {
+  let column: 'createdAt' | 'lastSignInAt' = 'createdAt';
+  let descending = true;
+  if (sort) {
+    try {
+      const parsed = JSON.parse(sort) as { id?: string; desc?: boolean }[];
+      const first = Array.isArray(parsed) ? parsed[0] : undefined;
+      if (first?.id === 'lastSignInAt') column = 'lastSignInAt';
+      if (first) descending = first.desc !== false;
+    } catch {
+      // 非法 sort → 默认排序
     }
-  } catch {
-    return '-created_at';
   }
+  return { column, descending };
 }
 
-/** 用户列表：Clerk BAPI 分页 + 合并 Credits 余额（一次批量查，避免逐用户 getBalance 的 N+1） */
+/** 用户列表：查 Better Auth user 表（分页 + 搜索 + 排序）+ 合并 Credits 余额（一次批量查，避免 N+1） */
 export async function listUsers(filters: AdminUserFilters): Promise<AdminUsersResponse> {
   const page = Math.max(1, filters.page ?? 1);
   const limit = Math.min(100, Math.max(1, filters.limit ?? 10));
+  const offset = (page - 1) * limit;
   const query = filters.query?.trim();
+  const db = getDb();
 
-  const client = await clerkClient(); // ⚠️ v7 clerkClient 为 async，必须 await
-  const { data, totalCount } = await client.users.getUserList({
-    offset: (page - 1) * limit,
-    limit,
-    orderBy: parseUserOrderBy(filters.sort),
-    ...(query ? { query } : {})
-  });
+  // 每用户最近一次会话创建时间 = 最近登录（user 表无 lastSignInAt 列，从 session 派生）
+  const lastActive = db
+    .select({ userId: session.userId, lastSignInAt: max(session.createdAt) })
+    .from(session)
+    .groupBy(session.userId)
+    .as('last_active');
 
-  const balances = await getBalancesByIds(data.map((user) => user.id));
-  const users = data.map((user) => toAdminUser(user, balances.get(user.id) ?? 0));
-  return { users, total: totalCount, page, limit };
+  const where = query
+    ? or(
+        ilike(user.email, `%${query}%`),
+        ilike(user.name, `%${query}%`),
+        ilike(user.id, `%${query}%`)
+      )
+    : undefined;
+
+  const { column, descending } = parseSort(filters.sort);
+  const orderTarget = column === 'lastSignInAt' ? lastActive.lastSignInAt : user.createdAt;
+  // lastSignInAt 由 leftJoin 派生可能为 null（从未登录）：排序一律 NULLS LAST，避免新用户顶在列表最前
+  const orderBy = descending
+    ? sql`${orderTarget} DESC NULLS LAST`
+    : sql`${orderTarget} ASC NULLS LAST`;
+
+  const [rows, totalRows] = await Promise.all([
+    db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        image: user.image,
+        createdAt: user.createdAt,
+        lastSignInAt: lastActive.lastSignInAt
+      })
+      .from(user)
+      .leftJoin(lastActive, eq(lastActive.userId, user.id))
+      .where(where)
+      .orderBy(orderBy)
+      .limit(limit)
+      .offset(offset),
+    db.select({ value: count() }).from(user).where(where)
+  ]);
+
+  const balances = await getBalancesByIds(rows.map((row) => row.id));
+  const users = rows.map((row) => toAdminUser(row, balances.get(row.id) ?? 0));
+  return { users, total: totalRows[0]?.value ?? 0, page, limit };
 }
 
 /**
- * 级联删除用户（不可逆重操作）。顺序：先断登录，再清数据，最后清对象存储。
+ * 级联删除用户（不可逆重操作）。顺序：DB 事务原子清库 → 提交后清对象存储。
  *
- * 1. **Clerk 删号**：立即禁止登录，防删除过程中产生新数据；已删（404）则幂等继续（支持中断后重跑）。
- * 2. **DB 事务**：先收集 assets 的 storageKey 与预数 messages，再按 userId 删各表——
- *    `messages` 无 userId 列，靠 `conversations` 的 ON DELETE CASCADE 清理；`knowledgeChunks` 显式按 userId 删 +
- *    `knowledgeDocuments` 的 CASCADE 兜底；其余表跨表外键均 cascade / set null，无 restrict 阻塞。
- * 3. **OSS 清理**：并发删除步骤 2 收集的 storageKey（固定并发分批），失败仅 `console.warn` 不阻塞（沿用 deleteAsset 模式）。
+ * 1. **DB 事务（原子）**：先删 Better Auth `user`（`session` / `account` 外键 ON DELETE CASCADE → 断登录），
+ *    再按 userId 清理业务 8 表；任一步失败整体回滚（用户行保留，可安全重跑）。已删则 user 影响 0 行，幂等继续。
+ *    先收集 assets 的 storageKey 与预数 messages——`messages` 无 userId 列，靠 `conversations` 的
+ *    ON DELETE CASCADE 清理；`knowledgeChunks` 显式按 userId 删 + `knowledgeDocuments` 的 CASCADE 兜底；
+ *    `skills` 亦按 userId 显式删（该表无外键指向 auth user，不会被级联）；其余表跨表外键均 cascade / set null。
+ * 2. **OSS 清理**：事务提交后并发删除步骤 1 收集的 storageKey（固定并发分批），失败仅 `console.warn`
+ *    不阻塞（DB 行已删，残留对象无访问路径，沿用 deleteAsset 模式）。
  */
 export async function deleteUserCascade(userId: string): Promise<DeleteUserResult> {
-  // 1. 先 Clerk 删号（断登录）；已删则幂等继续
-  try {
-    const client = await clerkClient();
-    await client.users.deleteUser(userId);
-  } catch (error) {
-    // Clerk 404 = 账号已不存在（重跑场景）：继续清理残留 DB / OSS 数据
-    if ((error as { status?: number })?.status !== 404) throw error;
-    console.warn('[admin] Clerk user already deleted, continuing DB cleanup:', { userId });
-  }
-
-  // 2. DB 事务清理 + 收集 storageKey
   const db = getDb();
+
+  // DB 事务：删用户（级联断登录）+ 清业务 8 表，全部原子——失败整体回滚，用户行保留可重跑
   const { storageKeys, counts } = await db.transaction(async (tx) => {
+    // 1. 删 Better Auth 用户（FK cascade 清 session/account → 断登录）；已删则 0 行，幂等继续
+    await tx.delete(user).where(eq(user.id, userId));
+
     const convRows = await tx
       .select({ id: conversations.id })
       .from(conversations)
@@ -149,6 +169,10 @@ export async function deleteUserCascade(userId: string): Promise<DeleteUserResul
             .where(inArray(messages.conversationId, convIds))
         : [{ value: 0 }];
 
+    const skillsDel = await tx
+      .delete(skills)
+      .where(eq(skills.userId, userId))
+      .returning({ id: skills.id });
     const chunks = await tx
       .delete(knowledgeChunks)
       .where(eq(knowledgeChunks.userId, userId))
@@ -182,6 +206,7 @@ export async function deleteUserCascade(userId: string): Promise<DeleteUserResul
         conversations: convs.length,
         messages: msgRow?.value ?? 0,
         assets: assetsDel.length,
+        skills: skillsDel.length,
         knowledgeDocuments: docs.length,
         knowledgeChunks: chunks.length,
         creditLedger: ledger.length,
@@ -190,7 +215,7 @@ export async function deleteUserCascade(userId: string): Promise<DeleteUserResul
     };
   });
 
-  // 3. OSS 清理（失败仅告警不阻塞：DB 行已删，残留对象无访问路径）；各对象互不依赖，
+  // 2. OSS 清理（事务提交后；失败仅告警不阻塞：DB 行已删，残留对象无访问路径）；各对象互不依赖，
   // 按固定并发分批删除（单请求内复用同一 client，避免每 key 新建一次）
   const oss = getOssClient();
   const OSS_DELETE_CONCURRENCY = 8;

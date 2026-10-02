@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { listLedger } from '@/features/credits/api/service';
 import { CREDIT_KIND_VALUES, type LedgerFilters } from '@/features/credits/api/types';
@@ -27,7 +27,7 @@ function parseEnumList(value: string | null, allowed: readonly string[]): string
  * 按 userId 过滤（归属即权限），kind 可选筛选，createdAt 倒序。
  */
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

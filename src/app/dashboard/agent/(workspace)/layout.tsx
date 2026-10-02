@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { agentKeys } from '@/features/agent/api/queries';
@@ -10,7 +10,7 @@ import { ConversationSidebar } from '@/features/agent/components/conversations/c
  * 高度按 dashboard Header 的尺寸（移动端 h-16，桌面 h-14）扣减，保证区域内部滚动。
  */
 export default async function AgentWorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) return null;
 
   const queryClient = getQueryClient();

@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { auth } from '@clerk/nextjs/server';
+import { requireUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { skillsQueryOptions } from '../../api/queries';
@@ -12,7 +12,7 @@ import { SkillsTable, SkillsTableSkeleton } from './skills-table';
  * 否则水合数据形状错乱（与知识库列表同一约定）。
  */
 export default async function SkillsListing() {
-  const { userId } = await auth();
+  const userId = await requireUserId();
   if (!userId) return null;
 
   const queryClient = getQueryClient();
