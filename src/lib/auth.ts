@@ -15,7 +15,7 @@ import { sendMail } from '@/lib/mailer';
  *   重置后吊销全部旧会话（revokeSessionsOnPasswordReset）；MVP 不强制邮箱验证。
  * - **session**：DB 存储 + cookie 缓存（compact，60s）；7 天过期、24h 刷新。
  * - **rateLimit**：storage=database（serverless 安全，非 memory）；登录/注册端点自定义更严窗口。
- * - **advanced**：生产强制 Secure cookie；backgroundTasks 用 Next `after` 兜底（Vercel/ECS 皆可），
+ * - **advanced**：Secure cookie 按 BETTER_AUTH_URL scheme 判定；反代下配 ipAddress 解析真实 IP 供限流分桶；backgroundTasks 用 Next `after` 兜底（Vercel/ECS 皆可），
  *   保证重置邮件后台发送不阻塞响应。
  *
  * `secret` / `baseURL` 走 env（`BETTER_AUTH_SECRET` / `BETTER_AUTH_URL`），不写进 config。
@@ -94,10 +94,20 @@ export const auth = betterAuth({
   },
   trustedOrigins,
   advanced: {
-    useSecureCookies: isProduction,
+    // Secure cookie 以 BETTER_AUTH_URL 的 scheme 为准（https→true），比只看 NODE_ENV 更稳：
+    // 生产若暂以 http/IP 直连访问，也不会发出浏览器收不回的 Secure cookie 把人锁在登录页；
+    // BETTER_AUTH_URL 未设时回退 isProduction。
+    useSecureCookies: process.env.BETTER_AUTH_URL?.startsWith('https://') ?? isProduction,
     defaultCookieAttributes: {
       sameSite: 'lax',
       httpOnly: true
+    },
+    // 反代（ECS + Nginx / Vercel）下解析真实客户端 IP：供限流分桶与会话审计。
+    // x-real-ip 为单值（Nginx `X-Real-IP $remote_addr`）最稳；多跳 XFF 需再配 trustedProxies。
+    ipAddress: {
+      ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'],
+      ipv6Subnet: 64
+      // 部署按实际代理网段放开：trustedProxies: ['<如 127.0.0.1、10.0.0.0/8>']
     },
     backgroundTasks: {
       // Next.js `after`：请求响应后再跑后台任务（发邮件等），Vercel/ECS 均支持。

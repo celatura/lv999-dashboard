@@ -40,6 +40,7 @@ if (!verified) redirect('/auth/sign-in');
 
 - `verifySession()`：`auth.api.getSession({ headers: await headers() })` + React `cache()`，同一请求内多次调用只查一次（cookieCache 命中时甚至不查 DB）。
 - `requireUserId()`：只取 userId，**刻意返回 `null` 而非抛错**，让调用方原有的 `if (!userId)` 分支（401 / notFound / 空渲染）逐字不变。
+- `verifySessionAuthoritative()` / `requireUserIdAuthoritative()`：带 `disableCookieCache: true` 强制回源 DB，绕过 cookieCache ≤60s 窗口——用于「吊销即时性」敏感的判权（`/api/admin/*` 端点）。普通只读列表仍用 `verifySession()` 享受缓存。
 - 收益：未来更换认证实现或加缓存只改这一处。
 
 ---
@@ -48,7 +49,7 @@ if (!verified) redirect('/auth/sign-in');
 
 - **`proxy.ts`（Edge，乐观分流）**：`getSessionCookie(request)` 仅检查会话 cookie 是否存在（纯字符串解析，不查 DB / 不验签），无则重定向 `/auth/sign-in?redirect_url=<原路径>`。matcher 仅 `/dashboard/:path*`。⚠️ cookie 存在 ≠ 会话有效，**不可当安全边界**。
 - **`dashboard/layout.tsx`（真实校验）**：`verifySession()` 无有效会话则 `redirect('/auth/sign-in')`；据此服务端计算 `isAdmin` 并把 user 注入侧边栏。
-- **各 API 路由**：`requireUserId()` 为空返回 401（信封语义与迁移前一致）；归属即权限（越权返回 404）。
+- **各 API 路由**：`requireUserId()` 为空返回 401（信封语义与迁移前一致）；归属即权限（越权返回 404）。`/api/admin/*` 用 `requireUserIdAuthoritative()`（强制回源 DB，规避 ≤60s 吊销残留）。
 - **登录 / 注册页**：已登录访问 → `verifySession()` 命中则回跳目标（避免登录态停留登录页）。
 
 ---
@@ -98,7 +99,8 @@ Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVer
 - `baseURL` 走 `BETTER_AUTH_URL`（生产 HTTPS）；`trustedOrigins` = 应用域 + `BETTER_AUTH_URL`（生产）；`localhost:3000` 仅非生产放行（去重）。
 - `rateLimit`：`enabled` + `storage: 'database'`（serverless 安全，非 memory）+ `customRules`（`/sign-in/email` 5/分、`/sign-up/email` 3/分）。
 - CSRF 保持开启（未设 `disableCSRFCheck`）；origin 校验保持。
-- Cookie：生产 `useSecureCookies`，`sameSite: lax`，`httpOnly`。
+- Cookie：`useSecureCookies` 按 `BETTER_AUTH_URL` scheme 判定（https→true，未设回退 NODE_ENV），比只看 NODE_ENV 更稳；`sameSite: lax`、`httpOnly`。
+- 反代 IP：`advanced.ipAddress.ipAddressHeaders = ['x-forwarded-for', 'x-real-ip']`（+ `ipv6Subnet: 64`）——Nginx 须以 `X-Real-IP $remote_addr` 下发单值真实 IP；多跳 XFF 需再配 `trustedProxies`，否则生产限流会退化到全站共享单桶（Better Auth 自带告警）。
 - Session：DB 存储 + `cookieCache`（compact，**60s**——兼顾性能与「吊销即时性」：删用户 / 重置后旧 cookie 最多 60s 内仍可能被判有效）；`expiresIn` 7 天、`updateAge` 24h；`revokeSessionsOnPasswordReset: true`。
 - 密码：默认 **scrypt**（Node 原生，无额外原生依赖）；`minPasswordLength: 12`。
 - `backgroundTasks.handler`：Next.js `after`（Vercel / ECS 皆可），重置邮件后台发不阻塞响应。

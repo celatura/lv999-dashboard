@@ -49,3 +49,23 @@ export async function requireUserId(): Promise<string | null> {
   const verified = await verifySession();
   return verified?.userId ?? null;
 }
+
+/**
+ * 强制回源 DB 的会话读取（绕过 cookieCache ≤maxAge 窗口）：用于「吊销即时性」敏感的判权
+ * （管理端端点、扣费写操作等）——被删用户 / 已 `revokeSessionsOnPasswordReset` 的旧 cookie
+ * 立即失效，不受 ≤60s 缓存窗口影响。普通只读列表仍用 `verifySession()` 享受缓存。
+ */
+export const verifySessionAuthoritative = cache(async (): Promise<VerifiedSession | null> => {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+    query: { disableCookieCache: true }
+  });
+  if (!session) return null;
+  return { userId: session.user.id, user: session.user, session: session.session };
+});
+
+/** 同 requireUserId，但强制回源 DB（敏感判权 / 扣费写路径用）。 */
+export async function requireUserIdAuthoritative(): Promise<string | null> {
+  const verified = await verifySessionAuthoritative();
+  return verified?.userId ?? null;
+}

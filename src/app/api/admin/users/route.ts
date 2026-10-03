@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { requireUserIdAuthoritative } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isAdmin } from '@/lib/admin';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -19,7 +19,7 @@ function parseInteger(value: string | null): number | undefined {
 
 /** 管理员用户列表：Better Auth user 表（分页 + query 搜索 + 排序）+ 合并 Credits 余额。非管理员 403。 */
 export async function GET(request: Request) {
-  const userId = await requireUserId();
+  const userId = await requireUserIdAuthoritative();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

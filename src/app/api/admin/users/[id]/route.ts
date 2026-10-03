@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { requireUserIdAuthoritative } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isAdmin } from '@/lib/admin';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
@@ -19,7 +19,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * 非管理员 403；禁止管理员删除自己（防自删锁死，删后会立即断登录并失去管理入口）。
  */
 export async function DELETE(_request: Request, context: RouteContext) {
-  const userId = await requireUserId();
+  const userId = await requireUserIdAuthoritative();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
