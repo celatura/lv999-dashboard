@@ -76,9 +76,33 @@ Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVer
 
 - 登录成功：`router.refresh()` + `router.replace(redirectUrl)`（回跳原路径）。
 - 侧边栏 / 个人资料：user 由服务端会话注入（无客户端二次拉取，无头像闪烁）；登出走 `signOut()`。
-- 个人资料页 [`profile-settings.tsx`](../src/features/profile/components/profile-settings.tsx)：改名字（`updateUser`）+ 改密码（`changePassword`，`revokeOtherSessions`）+ 登出；邮箱只读（改邮箱需二次验证，延后）。
+- 个人资料页 [`profile-settings.tsx`](../src/features/profile/components/profile-settings.tsx)：头像（上传 / 更换 / 删除，见 §5.1）+ 改名字（`updateUser`）+ 改密码（`changePassword`，`revokeOtherSessions`）+ 登出；邮箱只读（改邮箱需二次验证，延后）。
 
 **密码重置流程**：`requestPasswordReset({ email, redirectTo })` → 服务端发信，链接为 `<baseURL>/api/auth/reset-password/<token>?callbackURL=<redirectTo>` → 用户点击 → 服务端校验 token 后重定向到 `redirectTo?token=<token>`（即 `/auth/reset-password`）→ 页面读 token → `resetPassword({ newPassword, token })` → 旧会话全部失效 → 跳登录页。
+
+---
+
+## 5.1 用户头像（上传 / 代理 / 即时生效）
+
+Better Auth 注册不带头像，`user.image` 恒空 → 全站首字母占位。头像功能补上**写入链路**（展示链路本就就绪），零新增依赖、无 DB 迁移（`user.image` 列已存在）、零 Credits（纯存储）。
+
+| 环节 | 位置 | 说明 |
+| --- | --- | --- |
+| 存储 key | [`oss.ts` `avatarObjectKey`](../src/lib/oss.ts) | OSS 私有桶 `avatars/{userId}.png`，**单 key 覆盖写**（换头像即覆盖，无版本累积） |
+| 服务端处理 | [`features/profile/lib/avatar.ts`](../src/features/profile/lib/avatar.ts) | `normalizeAvatar`（sharp 256×256 cover → png）+ `commitUserImage`（updateUser 写回 + 转发 cookie） |
+| 上传 / 删除 | [`POST` / `DELETE /api/user/avatar`](../src/app/api/user/avatar/route.ts) | userId **只取自会话**（`requireUserIdAuthoritative`，防越权）；限流 scope `avatar` 10/分 |
+| 代理展示 | [`GET /api/avatar/[userId]`](../src/app/api/avatar/%5BuserId%5D/route.ts) | 登录即可（头像半公开）；签名拉 OSS → 同源回传字节 + `Cache-Control: private, max-age=300`；无对象 → 404 |
+| 前端入口 | [`avatar-card.tsx`](../src/features/profile/components/avatar-card.tsx) | 预览 + 上传 / 更换 + 删除（确认）；成功后乐观更新 src（`?v=` 破缓存）+ `router.refresh()` |
+
+**上传流程**：`formData` 取 file → 校验（`File` 实例 / ≤5MB / mime 粗筛 / `detectImageType` 魔数防改扩展名）→ sharp 规格化 → `putObject` 覆盖写 → `commitUserImage('/api/avatar/{userId}')` → 返回 `{ image }`。
+
+**`user.image` 存同源代理路径**（`/api/avatar/{userId}`）而非 OSS 签名 URL：签名 URL 会过期、且需对象公开读（安全风险）；代理路径永不过期、桶保持私有，复用资产 `/raw` 成熟模式。
+
+**即时生效的关键（规避 ≤60s cookieCache）**：`updateUser` 内部 `setSessionCookie` 会重签携带新 user 数据的 session cookie，但从 Route Handler 直接调用只拿到返回体、**拿不到 cookie**——故 `commitUserImage` 以 `asResponse: true` 取出响应并**转发其 `Set-Cookie`** 给浏览器，浏览器才立即用新值覆盖 cookieCache。若绕开 Better Auth 直接 Drizzle 改库，则服务端 `verifySession()`（读 cookieCache）最长 ≤60s 仍旧值。
+
+**设置 / 删除对称走 `updateUser`**：`updateUser` 原生支持 `image: null`（透传 `internalAdapter.updateUser` 置空），故删除同样即时、各处一致回退首字母，无需为 null 语义绕 Drizzle。
+
+**展示零改动**：侧边栏 [`user-avatar-profile.tsx`](../src/components/user-avatar-profile.tsx)、管理页 [`users-table/columns.tsx`](../src/features/admin/components/users-table/columns.tsx)、[`dashboard/layout.tsx`](../src/app/dashboard/layout.tsx) 服务端注入均读 `user.image`（`AvatarImage` + 首字母回退）——写入后全部自动生效；代理 404 时 `AvatarImage` 自然回退 `AvatarFallback`。
 
 ---
 

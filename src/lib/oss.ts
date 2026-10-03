@@ -32,6 +32,15 @@ export function assetObjectKey(userId: string, assetId: string, extension: strin
   return `assets/${userId}/${assetId}.${extension}`;
 }
 
+/**
+ * 用户头像对象的存储路径约定（仿 assetObjectKey）。
+ * 单 key 覆盖写——换头像即覆盖同一对象，无版本累积、无垃圾残留。
+ * 扩展名固定 png：上传经 sharp 统一规格化为 png（见 features/profile/lib/avatar.ts）。
+ */
+export function avatarObjectKey(userId: string): string {
+  return `avatars/${userId}.png`;
+}
+
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getOssClient().put(key, body, {
     headers: { 'Content-Type': contentType }

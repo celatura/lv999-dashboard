@@ -28,7 +28,7 @@
 | 语言 | TypeScript 5.7（strict） |
 | UI 组件 | shadcn/ui（Base UI primitives） |
 | 样式 | Tailwind CSS v4 |
-| 认证 | Better Auth（自托管 · 邮箱密码） |
+| 认证 | Better Auth（自托管 · 邮箱密码 · 自定义头像） |
 | AI / Agent | AI SDK v7（`ai` + `@ai-sdk/alibaba` / `@ai-sdk/openai-compatible`），百炼（阿里云 Model Studio） |
 | 设计画布 | Konva + react-konva（2D canvas） |
 | 向量检索 / RAG | pgvector（阿里云 RDS） + 百炼 `text-embedding-v4` embedding |
@@ -57,7 +57,7 @@
 | `/dashboard/design/[id]` | 设计画布：打开已存设计继续编辑 |
 | `/dashboard/knowledge` | RAG 知识库：文档管理（新增 / 列表 / 删除 / 重试） |
 | `/dashboard/admin/users` | 用户管理（仅管理员）：列出全部用户、调整 Credits、级联删除账号 |
-| `/dashboard/profile` | 个人资料与安全设置（改名字 / 改密码 / 登出） |
+| `/dashboard/profile` | 个人资料与安全设置（自定义头像 / 改名字 / 改密码 / 登出） |
 | `/dashboard/profile/credits` | 我的积分：Credits 余额与流水明细 |
 | `/auth/sign-in`、`/auth/sign-up` | 登录 / 注册 |
 

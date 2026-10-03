@@ -25,11 +25,15 @@ function Avatar({
   );
 }
 
-function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
+function AvatarImage({ className, src, ...props }: AvatarPrimitive.Image.Props) {
   return (
     <AvatarPrimitive.Image
       data-slot='avatar-image'
       className={cn('aspect-square size-full rounded-full object-cover', className)}
+      // 空串 src 会渲染成 <img src="">：浏览器把当前页当图片重新请求（React 19 告警），
+      // 删除头像的退出过渡期 img 仍挂载时尤会触发。归一化为 undefined —— Base UI 对
+      // `!src` 一律判为 error 状态并回退 AvatarFallback，行为不变但不再渲染空 src。
+      src={src || undefined}
       {...props}
     />
   );

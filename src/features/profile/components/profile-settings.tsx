@@ -9,6 +9,7 @@ import { FieldGroup } from '@/components/ui/field';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { changePassword, signOut, updateUser } from '@/lib/auth-client';
 import { useAppForm } from '@/lib/form';
+import { AvatarCard } from './avatar-card';
 
 const nameSchema = z.object({
   name: z.string().trim().min(1, '请输入名字').max(50, '名字过长')
@@ -28,13 +29,15 @@ const passwordSchema = z
 interface ProfileSettingsProps {
   name: string;
   email: string;
+  /** 当前 user.image（同源代理路径，或 null） */
+  image: string | null;
 }
 
 /**
- * 自建简版个人资料：改名字（updateUser）+ 改密码（changePassword）+ 登出。
+ * 自建简版个人资料：头像（上传 / 更换 / 删除）+ 改名字（updateUser）+ 改密码（changePassword）+ 登出。
  * 登录邮箱只读展示——Better Auth 改邮箱需向新旧邮箱二次验证，MVP 延后。
  */
-export function ProfileSettings({ name, email }: ProfileSettingsProps) {
+export function ProfileSettings({ name, email, image }: ProfileSettingsProps) {
   const router = useRouter();
 
   const nameForm = useAppForm({
@@ -73,6 +76,8 @@ export function ProfileSettings({ name, email }: ProfileSettingsProps) {
 
   return (
     <div className='flex flex-col gap-6'>
+      <AvatarCard name={name} image={image} />
+
       <Card>
         <CardHeader>
           <CardTitle>账号信息</CardTitle>
