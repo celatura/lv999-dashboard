@@ -6,9 +6,8 @@ import { auth, type Session } from '@/lib/auth';
 /**
  * 认证 Data Access Layer（DAL，server-only）—— 全站会话读取的**单一入口**。
  *
- * 取代此前散落在 ~33 个 Route Handler / server 页 / listing 里的 Clerk `auth()` 调用：
- * 所有服务端代码统一经 `verifySession()` / `requireUserId()` 取当前用户，未来更换认证实现
- * 或加缓存只改这一处（官方 DAL 最佳实践）。
+ * 全站 Route Handler / server 页 / listing 的会话读取统一经 `verifySession()` / `requireUserId()`
+ * 取当前用户，未来更换认证实现或加缓存只改这一处（官方 DAL 最佳实践）。
  *
  * - `verifySession()`：`auth.api.getSession({ headers })` + React `cache()` 去重——
  *   同一请求内多次调用只查一次（cookieCache 命中时甚至不查 DB）。

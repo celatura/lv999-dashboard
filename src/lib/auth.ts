@@ -7,7 +7,7 @@ import * as authSchema from '@/lib/db/auth-schema';
 import { sendMail } from '@/lib/mailer';
 
 /**
- * Better Auth 服务端配置（自托管，替代 Clerk）。
+ * Better Auth 服务端配置（自托管）。
  *
  * - **database**：复用现有阿里云 RDS（Drizzle + postgres.js），provider `pg`；auth 五表
  *   （user/session/account/verification/rate_limit）由 `npx auth generate` 产出 `db/auth-schema.ts` 并迁移。

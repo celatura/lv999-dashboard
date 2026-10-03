@@ -1,11 +1,11 @@
 # 导航可见性与权限控制
 
-## 现状（单管理员模型；认证已迁移 Better Auth）
+## 现状（单管理员模型）
 
 项目为个人自托管、单管理员模型，不使用多租户 / 组织。导航的 **org-based RBAC**
-（`requireOrg` / `permission` / `role`，原经客户端 org hook 检查）**已退役**：
-[`use-nav.ts`](../src/hooks/use-nav.ts) 不再调用任何 org / 会话 hook（纯同步过滤）。
-org 上下文恒为「无组织」（`hasOrg=false`），故带这些 `access` 的导航项在当前部署下隐藏。
+（`requireOrg` / `permission` / `role`）在当前部署下不生效：[`use-nav.ts`](../src/hooks/use-nav.ts)
+为纯同步过滤，不调用任何 org / 会话 hook。org 上下文恒为「无组织」（`hasOrg=false`），
+故带这些 `access` 的导航项隐藏。
 
 ## 导航可见性（纯客户端 UX）
 

@@ -142,7 +142,6 @@ The project follows a feature-based folder structure designed for scalability in
 │   ├── credits.md         # Credits billing rules
 │   ├── auth.md            # Better Auth (self-hosted): architecture / DAL / security
 │   ├── user-management.md # Admin user management & server-side auth
-│   ├── clerk_setup.md     # DEPRECATED (Clerk) — historical; see auth.md
 │   ├── nav-rbac.md        # Navigation RBAC documentation
 │   └── themes.md          # Theme customization guide
 

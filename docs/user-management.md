@@ -1,8 +1,8 @@
 # 用户管理（管理员后台）
 
-LV999 Dashboard 的**平台管理员后台**：管理员在 `/dashboard/admin/users` 列出全部用户、调整其 Credits、级联删除账号。取代原先「只能靠 CLI 发 Credits」的方式，配合 [Credits 消耗系统](./credits.md) 形成完整的成本管控闭环。
+LV999 Dashboard 的**平台管理员后台**：管理员在 `/dashboard/admin/users` 列出全部用户、调整其 Credits、级联删除账号，配合 [Credits 消耗系统](./credits.md) 形成完整的成本管控闭环。
 
-> 认证已从 Clerk 迁移到 **Better Auth（自托管）**（见 [docs/auth.md](./auth.md)）。用户身份数据来自本地 RDS 的 Better Auth `user` 表；本模块**零外部身份服务依赖**，列用户 / 删用户全部走本地 DB。项目核心业务全部按 `userId` 隔离、无任何 `orgId` 依赖，为单管理员模型（无多租户 / 组织）。
+> 认证采用 **Better Auth（自托管）**（见 [docs/auth.md](./auth.md)）。用户身份数据来自本地 RDS 的 Better Auth `user` 表；本模块**零外部身份服务依赖**，列用户 / 删用户全部走本地 DB。项目核心业务全部按 `userId` 隔离、无任何 `orgId` 依赖，为单管理员模型（无多租户 / 组织）。
 
 ---
 
@@ -17,7 +17,7 @@ LV999 Dashboard 的**平台管理员后台**：管理员在 `/dashboard/admin/us
 
 ## 2. 单管理员模型（无多租户 / 组织）
 
-项目为个人自托管、单管理员模型：`src/features` 与 `src/app/api` 全量搜索 `orgId`/`organization` **0 匹配**，`proxy.ts`（Better Auth 乐观分流）与 `dashboard/layout.tsx`（`verifySession()`）均不涉及组织——组织功能零业务依赖。历史上曾从多租户骨架移除工作区 / 团队 / OrgSwitcher 等入口；`NavItem.access` 类型保留（未来若启用 Better Auth `organization` 插件可复用，见 [docs/nav-rbac.md](./nav-rbac.md)）。
+项目为个人自托管、单管理员模型：`src/features` 与 `src/app/api` 全量搜索 `orgId`/`organization` **0 匹配**，`proxy.ts`（Better Auth 乐观分流）与 `dashboard/layout.tsx`（`verifySession()`）均不涉及组织——组织功能零业务依赖。`NavItem.access` 类型保留（未来若启用 Better Auth `organization` 插件可复用，见 [docs/nav-rbac.md](./nav-rbac.md)）。
 
 ---
 
@@ -32,7 +32,7 @@ export function isAdmin(userId: string | null | undefined): boolean {
 ```
 
 - **安全默认**：`ADMIN_USER_IDS` 未配置 / 配错 → `isAdmin` 恒 false → 管理页对所有人不可达、admin 端点一律 403。
-- **userId 语义**：迁移后为 **Better Auth user id**（注册后从 `user` 表或用户管理页取）；旧 Clerk userId 已失效，须用新 id 覆盖白名单。
+- **userId 语义**：为 **Better Auth user id**（注册后从 `user` 表或用户管理页取）。
 - **服务端强制是唯一底线**：
   - 页面 [`dashboard/admin/users/page.tsx`](../src/app/dashboard/admin/users/page.tsx)：`requireUserId()` 后 `!isAdmin → notFound()`。
   - 每个 `/api/admin/*` 端点：`requireUserId()` → `!isAdmin → apiError(403, 'forbidden', …)`（[`api-error.ts`](../src/lib/api-error.ts) 的 `forbidden` code）。

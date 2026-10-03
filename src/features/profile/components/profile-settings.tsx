@@ -31,7 +31,7 @@ interface ProfileSettingsProps {
 }
 
 /**
- * 自建简版个人资料（替代 Clerk `<UserProfile/>`）：改名字（updateUser）+ 改密码（changePassword）+ 登出。
+ * 自建简版个人资料：改名字（updateUser）+ 改密码（changePassword）+ 登出。
  * 登录邮箱只读展示——Better Auth 改邮箱需向新旧邮箱二次验证，MVP 延后。
  */
 export function ProfileSettings({ name, email }: ProfileSettingsProps) {

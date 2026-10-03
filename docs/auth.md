@@ -1,6 +1,6 @@
 # 认证（Better Auth 自托管）
 
-> 本项目认证由 **Clerk（国外 SaaS）迁移到 Better Auth（自托管）**：登录 / 注册 / 会话 / 密码重置全部跑在自有服务器 + RDS，用户数据不出境，国内访问无需连国外域名。历史 Clerk 数据**未迁移**（存量账号作废，重新注册）。
+> 本项目认证采用 **Better Auth（自托管）**：登录 / 注册 / 会话 / 密码重置全部跑在自有服务器 + RDS，用户数据不出境，国内访问无需连国外域名。
 >
 > 依赖：`better-auth` + `nodemailer`（重置邮件）。认证表由 `npx auth generate` 产出、经 drizzle 迁移落库。
 
@@ -24,7 +24,7 @@
 
 ## 2. Data Access Layer（DAL）—— 会话读取单点
 
-所有服务端代码（Route Handler / server 页 / listing）统一经 DAL 取当前用户，替代此前散落的 Clerk `auth()`：
+所有服务端代码（Route Handler / server 页 / listing）统一经 DAL 取当前用户：
 
 ```ts
 import { verifySession, requireUserId } from '@/lib/auth-session';
@@ -49,7 +49,7 @@ if (!verified) redirect('/auth/sign-in');
 
 - **`proxy.ts`（Edge，乐观分流）**：`getSessionCookie(request)` 仅检查会话 cookie 是否存在（纯字符串解析，不查 DB / 不验签），无则重定向 `/auth/sign-in?redirect_url=<原路径>`。matcher 仅 `/dashboard/:path*`。⚠️ cookie 存在 ≠ 会话有效，**不可当安全边界**。
 - **`dashboard/layout.tsx`（真实校验）**：`verifySession()` 无有效会话则 `redirect('/auth/sign-in')`；据此服务端计算 `isAdmin` 并把 user 注入侧边栏。
-- **各 API 路由**：`requireUserId()` 为空返回 401（信封语义与迁移前一致）；归属即权限（越权返回 404）。`/api/admin/*` 用 `requireUserIdAuthoritative()`（强制回源 DB，规避 ≤60s 吊销残留）。
+- **各 API 路由**：`requireUserId()` 为空返回 401；归属即权限（越权返回 404）。`/api/admin/*` 用 `requireUserIdAuthoritative()`（强制回源 DB，规避 ≤60s 吊销残留）。
 - **登录 / 注册页**：已登录访问 → `verifySession()` 命中则回跳目标（避免登录态停留登录页）。
 
 ---
@@ -58,13 +58,12 @@ if (!verified) redirect('/auth/sign-in');
 
 Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVerified/createdAt/updatedAt）、`session`、`account`、`verification`、`rate_limit`（rateLimit storage=database 用）。
 
-- **业务表 userId 语义**：conversations / assets / knowledge / credits / skills 的 `userId`(text) 现存 **Better Auth user id**（列类型不变，无需迁移列）。
-- **不迁移旧数据**：旧 Clerk userId 的业务行成为孤儿（授权作废）。可选清理脚本延后 / 手动。
-- **`ADMIN_USER_IDS`**：值须换成新 Better Auth user id（注册后从 `user` 表或用户管理页取）；机制（env 白名单 + [`isAdmin`](../src/lib/admin.ts)）不变。⚠️ 旧 Clerk userId 已失效。
+- **业务表 userId 语义**：conversations / assets / knowledge / credits / skills 的 `userId`(text) 为 **Better Auth user id**（列类型不变）。
+- **`ADMIN_USER_IDS`**：值为 Better Auth user id（注册后从 `user` 表或用户管理页取）；机制为 env 白名单 + [`isAdmin`](../src/lib/admin.ts)。
 
 ---
 
-## 5. 认证 UI（自建，替换 Clerk 组件）
+## 5. 认证 UI（自建）
 
 品牌外壳 [`auth-shell.tsx`](../src/features/auth/components/auth-shell.tsx)（InteractiveGridPattern 侧栏）+ shadcn Field + TanStack Form + zod：
 
@@ -83,9 +82,9 @@ Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVer
 
 ---
 
-## 6. 用户管理后台（改查本地 DB）
+## 6. 用户管理后台（查本地 DB）
 
-[`features/admin/api/service.ts`](../src/features/admin/api/service.ts) 不再用 Clerk Backend API：
+[`features/admin/api/service.ts`](../src/features/admin/api/service.ts)：
 
 - **`listUsers`**：查 Better Auth `user` 表（分页 + 搜索 email/name/id + 排序 createdAt）+ 合并 `credits_accounts` 余额（批量查避免 N+1）。「最近登录」由 `session` 表派生（`max(session.createdAt)` 子查询 leftJoin，user 表无 lastSignInAt 列）。
 - **`deleteUserCascade`**：**单个 DB 事务原子**依次删 ① Better Auth `user`（`session`/`account` 外键 ON DELETE CASCADE 断登录）+ ② 业务 8 表（conversations / messages(级联) / assets / **skills**（无外键须显式删）/ knowledge_documents / knowledge_chunks / credit_ledger / credits_accounts）——任一步失败整体回滚、可安全重跑；事务提交后再 ③ 清 OSS 对象（失败仅告警）。注：DB 会话即时失效，但被删/吊销用户凭 cookie 缓存最长 ≤60s 仍可能通过旧请求（见 §7 cookieCache）。
