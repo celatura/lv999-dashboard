@@ -2,7 +2,7 @@ import { requireUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { getAsset } from '@/features/agent/api/service';
-import { getSignedUrl, imageThumbUrl, videoSnapshotUrl } from '@/lib/oss';
+import { getServerFetchUrl, imageThumbUrl, videoSnapshotUrl } from '@/lib/oss';
 
 export const runtime = 'nodejs';
 
@@ -47,12 +47,14 @@ export async function GET(request: Request, context: RouteContext) {
   const wantSnapshot = params.get('snapshot') === '1';
   const wantThumb =
     params.get('thumb') === '1' && (asset.kind === 'image' || asset.kind === 'design');
+  // 服务端拉取全程走 server client（OSS_INTERNAL=true 时经内网，免公网流出流量费）——
+  // 这些 URL 只被下方 fetch 消费、不下发浏览器，故可用内网地址
   const signedUrl =
     wantSnapshot && asset.kind === 'video'
-      ? videoSnapshotUrl(asset.storageKey, { width: 400, expiresInSeconds: 300 })
+      ? videoSnapshotUrl(asset.storageKey, { width: 400, expiresInSeconds: 300, internal: true })
       : wantThumb
-        ? imageThumbUrl(asset.storageKey)
-        : await getSignedUrl(asset.storageKey, 300);
+        ? imageThumbUrl(asset.storageKey, { internal: true })
+        : await getServerFetchUrl(asset.storageKey, 300);
   let upstream = await fetch(signedUrl);
   // 图片处理不可用（bucket 未开通等）时回退原图：缩略图只是体积优化，不该让图裂掉。
   // 404 不重试：那是对象本身缺失（历史遗留/已清理），再拉一次只会多一次无谓请求并误导日志。
@@ -60,7 +62,7 @@ export async function GET(request: Request, context: RouteContext) {
     console.warn('[agent] oss image resize failed, fallback to original object', {
       status: upstream.status
     });
-    upstream = await fetch(await getSignedUrl(asset.storageKey, 300));
+    upstream = await fetch(await getServerFetchUrl(asset.storageKey, 300));
   }
   if (!upstream.ok || !upstream.body) {
     // 行还在但 OSS 对象缺失（历史遗留/被清理），或视频截帧不支持：明确 404，交由客户端占位处理

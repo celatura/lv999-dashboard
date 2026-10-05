@@ -7,24 +7,45 @@ import OSS from 'ali-oss';
  * 上传到 OSS，数据库仅存 storage_key，读取时用签名 URL 直连 OSS。
  */
 
-let client: OSS | undefined;
+let publicClient: OSS | undefined;
+let serverClient: OSS | undefined;
 
-export function getOssClient(): OSS {
-  if (!client) {
-    const { OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET } = process.env;
-    if (!OSS_REGION || !OSS_BUCKET || !OSS_ACCESS_KEY_ID || !OSS_ACCESS_KEY_SECRET) {
-      throw new Error(
-        'Aliyun OSS is not configured. Set OSS_REGION / OSS_BUCKET / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET in .env.local.'
-      );
-    }
-    client = new OSS({
-      region: OSS_REGION,
-      bucket: OSS_BUCKET,
-      accessKeyId: OSS_ACCESS_KEY_ID,
-      accessKeySecret: OSS_ACCESS_KEY_SECRET
-    });
+function createOssClient(internal: boolean): OSS {
+  const { OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET } = process.env;
+  if (!OSS_REGION || !OSS_BUCKET || !OSS_ACCESS_KEY_ID || !OSS_ACCESS_KEY_SECRET) {
+    throw new Error(
+      'Aliyun OSS is not configured. Set OSS_REGION / OSS_BUCKET / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET in .env.local.'
+    );
   }
-  return client;
+  return new OSS({
+    region: OSS_REGION,
+    bucket: OSS_BUCKET,
+    accessKeyId: OSS_ACCESS_KEY_ID,
+    accessKeySecret: OSS_ACCESS_KEY_SECRET,
+    // internal=true 时 ali-oss 自动改用同地域内网 endpoint（-internal），免 OSS 公网流出流量费
+    ...(internal ? { internal: true } : {})
+  });
+}
+
+/**
+ * 公网客户端：用于**下发给浏览器/外部服务**的签名 URL（资产预览、下载 302、百炼参考图）。
+ * 这些 URL 的 host 必须公网可解析，故固定公网 endpoint，不受 OSS_INTERNAL 影响。
+ */
+export function getOssClient(): OSS {
+  publicClient ??= createOssClient(false);
+  return publicClient;
+}
+
+/**
+ * 服务端字节操作客户端：上传 / 删除 / 服务端拉取（/raw 代理、头像代理）。
+ * 部署在阿里云（ECS 与 OSS 同地域）时置 `OSS_INTERNAL=true` 走内网——免公网流出流量费且更快；
+ * 未开启（含本地开发）时复用公网客户端，行为与从前完全一致。
+ * 注意：经此签发的 URL 是内网地址，只可用于服务端自身 fetch（见 getServerFetchUrl），**绝不可下发**。
+ */
+export function getOssServerClient(): OSS {
+  if (process.env.OSS_INTERNAL !== 'true') return getOssClient();
+  serverClient ??= createOssClient(true);
+  return serverClient;
 }
 
 /** 资产对象的存储路径约定（服务端写入路径；路径约定的变更需同步清理旧前缀对象） */
@@ -42,7 +63,8 @@ export function avatarObjectKey(userId: string): string {
 }
 
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
-  await getOssClient().put(key, body, {
+  // 服务端上传：走 server client（OSS_INTERNAL=true 时经内网上传）
+  await getOssServerClient().put(key, body, {
     headers: { 'Content-Type': contentType }
   });
 }
@@ -64,6 +86,15 @@ export async function getSignedUrl(
       response: { 'content-disposition': response.contentDisposition }
     })
   });
+}
+
+/**
+ * 服务端拉取专用签名 URL：与 getSignedUrl 同源，但走 server client——
+ * 部署置 `OSS_INTERNAL=true` 时签发内网地址，服务端 fetch OSS 字节走内网（免公网流出流量费）。
+ * **仅供服务端自身 fetch**；内网地址不可下发浏览器或外部服务（如百炼），后者用 getSignedUrl。
+ */
+export async function getServerFetchUrl(key: string, expiresInSeconds = 300): Promise<string> {
+  return getOssServerClient().signatureUrl(key, { expires: expiresInSeconds });
 }
 
 /**
@@ -90,11 +121,14 @@ export function imageThumbUrl(
     width?: number;
     /** 签名有效期（秒），默认 300（足够一次拉取） */
     expiresInSeconds?: number;
+    /** true = 服务端拉取专用（内网优先），仅 /raw 代理使用；内网 URL 不可下发 */
+    internal?: boolean;
   }
 ): string {
   const width = options?.width ?? THUMB_IMAGE_WIDTH;
   const expiresInSeconds = options?.expiresInSeconds ?? 300;
-  return getOssClient().signatureUrl(storageKey, {
+  const client = options?.internal ? getOssServerClient() : getOssClient();
+  return client.signatureUrl(storageKey, {
     expires: expiresInSeconds,
     process: `image/resize,w_${width}`
   });
@@ -122,6 +156,8 @@ export function videoSnapshotUrl(
     mode?: 'fast' | 'accurate';
     /** 签名有效期（秒），默认 3600 */
     expiresInSeconds?: number;
+    /** true = 服务端拉取专用（内网优先），仅 /raw 代理使用；内网 URL 不可下发 */
+    internal?: boolean;
   }
 ): string {
   const time = options?.time ?? 1000;
@@ -129,7 +165,8 @@ export function videoSnapshotUrl(
   const format = options?.format ?? 'jpg';
   const mode = options?.mode ?? 'fast';
   const expiresInSeconds = options?.expiresInSeconds ?? 3600;
-  return getOssClient().signatureUrl(storageKey, {
+  const client = options?.internal ? getOssServerClient() : getOssClient();
+  return client.signatureUrl(storageKey, {
     expires: expiresInSeconds,
     process: `video/snapshot,t_${time},f_${format},w_${width},m_${mode}`
   });

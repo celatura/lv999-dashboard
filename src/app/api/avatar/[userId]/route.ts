@@ -1,6 +1,6 @@
 import { verifySession } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
-import { avatarObjectKey, getSignedUrl } from '@/lib/oss';
+import { avatarObjectKey, getServerFetchUrl } from '@/lib/oss';
 
 export const runtime = 'nodejs';
 
@@ -28,7 +28,8 @@ export async function GET(_request: Request, context: RouteContext) {
     return apiError(404, 'not_found', 'Avatar not found');
   }
 
-  const signedUrl = await getSignedUrl(avatarObjectKey(userId), 300);
+  // 服务端拉取走 server client（OSS_INTERNAL=true 时经内网）——URL 只被下方 fetch 消费、不下发浏览器
+  const signedUrl = await getServerFetchUrl(avatarObjectKey(userId), 300);
   const upstream = await fetch(signedUrl);
   if (!upstream.ok || !upstream.body) {
     return apiError(404, 'not_found', 'Avatar not found');

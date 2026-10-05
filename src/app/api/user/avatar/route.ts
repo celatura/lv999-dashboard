@@ -1,7 +1,7 @@
 import { requireUserIdAuthoritative } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
-import { avatarObjectKey, getOssClient, putObject } from '@/lib/oss';
+import { avatarObjectKey, getOssServerClient, putObject } from '@/lib/oss';
 import { ACCEPTED_IMAGE_MIMES, detectImageType } from '@/features/agent/lib/upload-image';
 import {
   MAX_AVATAR_BYTES,
@@ -125,7 +125,7 @@ export async function DELETE() {
 
   // 删 OSS 对象；对象不存在（NoSuchKey）或网络异常均忽略——user.image 置空后即无访问路径
   try {
-    await getOssClient().delete(avatarObjectKey(userId));
+    await getOssServerClient().delete(avatarObjectKey(userId));
   } catch (error) {
     console.warn('[avatar] failed to delete OSS object:', error);
   }

@@ -11,7 +11,7 @@ import {
   messages,
   skills
 } from '@/lib/db/schema';
-import { getOssClient } from '@/lib/oss';
+import { getOssServerClient } from '@/lib/oss';
 import { getBalancesByIds } from '@/features/credits/api/service';
 import type { AdminUser, AdminUserFilters, AdminUsersResponse, DeleteUserResult } from './types';
 
@@ -221,7 +221,7 @@ export async function deleteUserCascade(userId: string): Promise<DeleteUserResul
 
   // 2. OSS 清理（事务提交后；失败仅告警不阻塞：DB 行已删，残留对象无访问路径）；各对象互不依赖，
   // 按固定并发分批删除（单请求内复用同一 client，避免每 key 新建一次）
-  const oss = getOssClient();
+  const oss = getOssServerClient();
   const OSS_DELETE_CONCURRENCY = 8;
   const deleteBatches = await Promise.all(
     Array.from({ length: Math.ceil(storageKeys.length / OSS_DELETE_CONCURRENCY) }, (_, batch) =>

@@ -16,7 +16,7 @@ import {
 import { cache } from 'react';
 import { getDb } from '@/lib/db';
 import { assets, conversations, messages } from '@/lib/db/schema';
-import { assetObjectKey, getOssClient, putObject } from '@/lib/oss';
+import { assetObjectKey, getOssServerClient, putObject } from '@/lib/oss';
 import { DEFAULT_CONVERSATION_TITLE, buildConversationTitle } from '../constants/conversation';
 import type {
   Asset,
@@ -746,7 +746,7 @@ export async function deleteAsset(userId: string, assetId: string): Promise<bool
   const storageKey = rows[0].storageKey;
   if (storageKey) {
     try {
-      await getOssClient().delete(storageKey);
+      await getOssServerClient().delete(storageKey);
     } catch (error) {
       console.warn('[agent] failed to delete OSS object:', { storageKey, error });
     }
