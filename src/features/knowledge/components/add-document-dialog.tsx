@@ -208,7 +208,7 @@ export function AddDocumentDialog({ open, onOpenChange, initialAsset }: AddDocum
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-2xl'>
+      <DialogContent className='flex max-h-[85svh] flex-col sm:max-w-2xl'>
         <DialogHeader>
           <DialogTitle>新增知识库文档</DialogTitle>
           <DialogDescription>
@@ -217,10 +217,13 @@ export function AddDocumentDialog({ open, onOpenChange, initialAsset }: AddDocum
         </DialogHeader>
 
         {/* AppForm 不接受 id/className（仅 children），故用原生 form 元素 + handleSubmit；
-            footer 的提交按钮经 form 属性关联本表单 */}
+            footer 的提交按钮经 form 属性关联本表单。
+            正文 textarea 随内容增高（field-sizing-content），故中间区域独立滚动、footer 保持可见；
+            右侧 -mr-4 + pr-4：容器右缘伸到弹窗内边距边缘，滚动条紧贴弹窗右侧（正文仍与 header 对齐）；
+            左侧 -ml-1 + pl-1 把裁切边外移 4px，避免 overflow-y-auto 横向裁切输入框 focus ring */}
         <form
           id='knowledge-add-form'
-          className='flex flex-col gap-4'
+          className='-mr-4 -ml-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-4 pl-1'
           onSubmit={(event) => {
             event.preventDefault();
             event.stopPropagation();
