@@ -27,7 +27,7 @@ src/features/agent/
 │   ├── service.ts          # 数据访问层（server-only）：会话 / 消息 / 资产的 DB + OSS 操作
 │   ├── queries.ts          # TanStack Query options + 查询键工厂 agentKeys
 │   ├── mutations.ts        # 会话增删改的 mutation options
-│   ├── provider.ts         # resolveModel(key)：百炼直连 + 兼容模式兜底
+│   ├── provider.ts         # resolveModel(key)：百炼直连（@ai-sdk/alibaba）
 │   ├── agent.ts            # buildAgent()、工具定义、agentValidationTools
 │   ├── image-generation.ts # 图片生成通道（直连百炼 REST，T2I / I2I）
 │   ├── image-edit.ts       # 图生图核心流程（工具与直连端点复用）
@@ -223,7 +223,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | `qwen3.8-flash` | Qwen3.8 Flash | `qwen3.8-flash` | |
 | `qwen3.8-max` | Qwen3.8 Max | `qwen3.8-max` | |
 
-`resolveModel(key)`（[`provider.ts`](../src/features/agent/api/provider.ts)）优先经 `@ai-sdk/alibaba` 解析，不支持的模型回退到百炼 OpenAI 兼容模式（`createOpenAICompatible`），所有模型共用同一 `DASHSCOPE_API_KEY`。
+`resolveModel(key)`（[`provider.ts`](../src/features/agent/api/provider.ts)）统一经 `@ai-sdk/alibaba` 对话通道解析，所有模型共用同一 `DASHSCOPE_API_KEY`。
 
 ### 图像模型（[`constants/image-models.ts`](../src/features/agent/constants/image-models.ts)）
 

@@ -2,7 +2,7 @@
 
 LV999 Dashboard 的检索增强模块：把用户沉淀的文本知识切分、向量化存入 pgvector，Agent 在对话中按**语义**检索相关片段来作答/创作并标注来源。是「复用资产库」（`findAssets`/`readAsset` 按标题）的语义级升级（按内容含义检索）。
 
-> 向量存 **pgvector**（阿里云 RDS PostgreSQL）；embedding 走**百炼 `text-embedding-v4`**（OpenAI 兼容模式）——检索/向量化链路零新增 npm 依赖、零新增外部服务、零新增环境变量（复用 `DASHSCOPE_API_KEY`）。
+> 向量存 **pgvector**（阿里云 RDS PostgreSQL）；embedding 走**百炼 `text-embedding-v4`**（`@ai-sdk/alibaba` 原生 embedding 端点）——检索/向量化链路零新增 npm 依赖、零新增外部服务、零新增环境变量（复用 `DASHSCOPE_API_KEY`）。
 > **文件上传来源**（`source='file'`）另引入 [`@firecrawl/anydoc`](https://github.com/firecrawl/anydoc) v0.2.4（MIT，napi 原生模块）把 PDF/Office 等文档解析为结构化 Markdown，见 §4.1。
 
 ---
@@ -34,8 +34,8 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 3. Embedding 通道
 
-- 配置集中在 [`src/features/agent/constants/embedding.ts`](../src/features/agent/constants/embedding.ts)：`EMBEDDING_MODEL='text-embedding-v4'`、`EMBEDDING_DIM=VECTOR_DIM`、`EMBED_BATCH_SIZE=10`（百炼兼容模式单次上限 10 行）。
-- [`provider.ts`](../src/features/agent/api/provider.ts) 的 `resolveEmbeddingModel()` = `getCompatibleProvider().embeddingModel('text-embedding-v4')`（复用兼容 provider 与 API Key；注意包 API 为 `embeddingModel()`，`textEmbeddingModel()` 已废弃）。维度经 `providerOptions.openaiCompatible.dimensions` 传入。
+- 配置集中在 [`src/features/agent/constants/embedding.ts`](../src/features/agent/constants/embedding.ts)：`EMBEDDING_MODEL='text-embedding-v4'`、`EMBEDDING_DIM=VECTOR_DIM`、`EMBED_BATCH_SIZE=10`（provider `maxEmbeddingsPerCall` 单次上限 10 行）。
+- [`provider.ts`](../src/features/agent/api/provider.ts) 的 `resolveEmbeddingModel()` = `getAlibabaProvider().embeddingModel('text-embedding-v4')`（复用 `@ai-sdk/alibaba` provider 与 API Key，走 `embeddingBaseURL` 指向的 DashScope 原生端点）。维度经 `providerOptions.alibaba.dimension` 传入。
 - [`knowledge/lib/embeddings.ts`](../src/features/knowledge/lib/embeddings.ts)：`embedQuery`（检索单条）、`embedTexts`（摄取分批，`EMBED_BATCH_SIZE` 分批 + 并发 3）；每条向量 `assertDim` 校验维度，与列不一致立即失败。
 
 ---
@@ -101,7 +101,7 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 8. 关键约束
 
-- **维度一致性**：向量列 `VECTOR_DIM`、`EMBEDDING_DIM`、embed 的 `dimensions` 三者必须一致；改维度需重建列+HNSW 索引并对历史数据重嵌。
+- **维度一致性**：向量列 `VECTOR_DIM`、`EMBEDDING_DIM`、embed 的 `providerOptions.alibaba.dimension` 三者必须一致；改维度需重建列+HNSW 索引并对历史数据重嵌。
 - **HTML 入库先抽正文**：html 资产经 `htmlToText` 去标签，不把 markup/CSS/JS 向量化。
 - **失败即清理**：摄取失败清空半截片段并置 `failed`，避免残留片段被检索。
 - **迁移**：`bunx drizzle-kit generate` + 手动补 HNSW 索引 SQL + `bun scripts/db-apply-sql.ts`（RDS 下 `db:push` 静默失败）。

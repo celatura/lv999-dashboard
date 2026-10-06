@@ -1,14 +1,20 @@
 import { createAlibaba } from '@ai-sdk/alibaba';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 import { EMBEDDING_MODEL } from '../constants/embedding';
 import { DEFAULT_MODEL, isModelKey, MODEL_REGISTRY, type ModelKey } from '../constants/models';
 
 /**
- * 百炼 OpenAI 兼容端点（中国大陆 region）。
+ * 百炼对话端点（OpenAI 兼容模式，中国大陆 region）。
  * 注意 provider 包默认指向 dashscope-intl（新加坡），大陆账号必须覆盖为下面的地址。
  */
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+
+/**
+ * 百炼 embedding 端点（DashScope 原生协议，非 OpenAI 兼容模式）。
+ * @ai-sdk/alibaba 的 embeddingBaseURL 默认指向 dashscope-intl（新加坡）的 /api/v1；
+ * 本项目为国内 key，必须覆盖为经典域名（与视频通道一致）。
+ */
+const DASHSCOPE_EMBEDDING_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 
 /**
  * 百炼视频生成端点（DashScope 原生协议，非 OpenAI 兼容模式）。
@@ -28,30 +34,26 @@ function getApiKey(): string {
 }
 
 let alibabaProvider: ReturnType<typeof createAlibaba> | undefined;
-let compatibleProvider: ReturnType<typeof createOpenAICompatible> | undefined;
 let alibabaVideoProvider: ReturnType<typeof createAlibaba> | undefined;
 
+/**
+ * 对话 + embedding 共用单例：同一 createAlibaba 实例用 baseURL（对话，OpenAI 兼容模式）
+ * 与 embeddingBaseURL（向量化，DashScope 原生端点）分别路由到不同子路径。
+ */
 function getAlibabaProvider() {
   if (!alibabaProvider) {
-    alibabaProvider = createAlibaba({ apiKey: getApiKey(), baseURL: DASHSCOPE_BASE_URL });
+    alibabaProvider = createAlibaba({
+      apiKey: getApiKey(),
+      baseURL: DASHSCOPE_BASE_URL,
+      embeddingBaseURL: DASHSCOPE_EMBEDDING_BASE_URL
+    });
   }
   return alibabaProvider;
 }
 
-function getCompatibleProvider() {
-  if (!compatibleProvider) {
-    compatibleProvider = createOpenAICompatible({
-      name: 'dashscope',
-      apiKey: getApiKey(),
-      baseURL: DASHSCOPE_BASE_URL
-    });
-  }
-  return compatibleProvider;
-}
-
 /**
- * 视频生成专用 provider（独立单例）：videoModel() 走 DashScope 原生端点，
- * 与对话/嵌入的 OpenAI 兼容端点隔离，故单独创建一个配置了 videoBaseURL 的实例。
+ * 视频生成专用 provider（独立单例）：videoModel() 走 DashScope 原生视频端点，
+ * 与对话（OpenAI 兼容端点）、embedding（原生 /api/v1 端点）分属不同子路径，故单独配置 videoBaseURL。
  */
 function getAlibabaVideoProvider() {
   if (!alibabaVideoProvider) {
@@ -64,24 +66,20 @@ function getAlibabaVideoProvider() {
 }
 
 /**
- * 把内部模型 key 解析为 AI SDK 模型实例。
- * 默认走 @ai-sdk/alibaba；某模型不被支持时在注册表中改为 transport: 'compatible' 即可。
+ * 把内部模型 key 解析为 AI SDK 模型实例（统一走 @ai-sdk/alibaba 对话通道）。
  */
 export function resolveModel(key: ModelKey | string): LanguageModel {
   const modelKey: ModelKey = isModelKey(key) ? key : DEFAULT_MODEL;
   const entry = MODEL_REGISTRY[modelKey];
-  const provider =
-    entry.transport === 'compatible' ? getCompatibleProvider() : getAlibabaProvider();
-  return provider.chatModel(entry.providerModelId);
+  return getAlibabaProvider().chatModel(entry.providerModelId);
 }
 
 /**
- * 知识库向量化模型：走百炼 OpenAI 兼容模式（同一 API Key 与 baseURL）。
- * 注意包 API 为 `embeddingModel()`（`textEmbeddingModel()` 已废弃）；
- * 维度由调用方经 providerOptions.openaiCompatible.dimensions 传入 EMBEDDING_DIM。
+ * 知识库向量化模型：走 @ai-sdk/alibaba 原生 embedding 端点（同一 API Key）。
+ * 包 API 为 `embeddingModel()`；维度由调用方经 providerOptions.alibaba.dimension 传入 EMBEDDING_DIM。
  */
 export function resolveEmbeddingModel(): EmbeddingModel {
-  return getCompatibleProvider().embeddingModel(EMBEDDING_MODEL);
+  return getAlibabaProvider().embeddingModel(EMBEDDING_MODEL);
 }
 
 /**

@@ -119,7 +119,7 @@ async function probeEmbedding(): Promise<void> {
     const { embedding } = await embed({
       model: resolveEmbeddingModel(),
       value: '模型可用性自查',
-      providerOptions: { openaiCompatible: { dimensions: EMBEDDING_DIM } }
+      providerOptions: { alibaba: { dimension: EMBEDDING_DIM } }
     });
     if (embedding.length !== EMBEDDING_DIM) {
       throw new Error(

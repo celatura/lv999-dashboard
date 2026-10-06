@@ -29,7 +29,7 @@
 | UI 组件 | shadcn/ui（Base UI primitives） |
 | 样式 | Tailwind CSS v4 |
 | 认证 | Better Auth（自托管 · 邮箱密码 · 自定义头像） |
-| AI / Agent | AI SDK v7（`ai` + `@ai-sdk/alibaba` / `@ai-sdk/openai-compatible`），百炼（阿里云 Model Studio） |
+| AI / Agent | AI SDK v7（`ai` + `@ai-sdk/alibaba`），百炼（阿里云 Model Studio） |
 | 设计画布 | Konva + react-konva（2D canvas） |
 | 向量检索 / RAG | pgvector（阿里云 RDS） + 百炼 `text-embedding-v4` embedding |
 | 数据库 / ORM | PostgreSQL（阿里云 RDS） + Drizzle ORM |

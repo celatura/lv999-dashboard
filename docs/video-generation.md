@@ -20,7 +20,7 @@ LV999 Dashboard 的动态内容创作能力：在「文本 / 图片 / 设计」�
 
 - **零新依赖**：复用 `ai`（`experimental_generateVideo`）与 `@ai-sdk/alibaba`（`videoModel()`），无 bunfig 7 天冷却问题。
 - **无 DB 迁移**：`assets` 表的 `kind`/`mime`/`storageKey`/`sizeBytes`/`sourceAssetId`/`favorite` 已通用；`kind='video'` 是纯扩展（`ASSET_KIND_VALUES` 单一来源）。
-- **国内地域端点**：`@ai-sdk/alibaba` 的 `videoBaseURL` 默认指向 `dashscope-intl`（新加坡）；本项目为国内 key，[`provider.ts`](../src/features/agent/api/provider.ts) 用**独立单例** `getAlibabaVideoProvider()` 显式覆盖为经典域名 `https://dashscope.aliyuncs.com`（DashScope 原生协议，与对话/嵌入的 OpenAI 兼容端点隔离）。
+- **国内地域端点**：`@ai-sdk/alibaba` 的 `videoBaseURL` 默认指向 `dashscope-intl`（新加坡）；本项目为国内 key，[`provider.ts`](../src/features/agent/api/provider.ts) 用**独立单例** `getAlibabaVideoProvider()` 显式覆盖为经典域名 `https://dashscope.aliyuncs.com`（DashScope 原生协议，独立于对话的 OpenAI 兼容端点、embedding 的原生 `/api/v1` 端点）。
 - **红线**：任务成功返回的临时 `video_url` 24h 有效，由 SDK 内部立即下载，**不外泄、不落库**；持久化只存 OSS `storageKey`。
 
 ---

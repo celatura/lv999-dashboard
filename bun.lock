@@ -6,7 +6,6 @@
       "name": "lv999-dashboard",
       "dependencies": {
         "@ai-sdk/alibaba": "2.0.60",
-        "@ai-sdk/openai-compatible": "3.0.62",
         "@ai-sdk/react": "^4.0.129",
         "@base-ui/react": "^1.6.0",
         "@firecrawl/anydoc": "^0.2.4",
@@ -86,8 +85,6 @@
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.103", "https://registry.npmmirror.com/@ai-sdk/gateway/-/gateway-4.0.103.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.21", "@ai-sdk/provider-utils": "5.0.53", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-nnGTUHzPRQ14jhv9CL4OQrzcRBIFTBMIPKGIi9Z9u/4GtwSRxa/nxUX6np2Iwp5phOzO0a0njj/j9Jolf5AEaA=="],
 
     "@ai-sdk/mcp": ["@ai-sdk/mcp@2.0.65", "https://registry.npmmirror.com/@ai-sdk/mcp/-/mcp-2.0.65.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.21", "@ai-sdk/provider-utils": "5.0.53", "cross-spawn": "^7.0.6", "pkce-challenge": "^5.0.1" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-KQPNhSkDa7NBn+NRx+ymUXBz4ItMdD4Xr1nIi5KPpdIIptj71Ja38dmWdonZV9JIZQOL9vSF9X4y1SJKV7pbaw=="],
-
-    "@ai-sdk/openai-compatible": ["@ai-sdk/openai-compatible@3.0.62", "https://registry.npmmirror.com/@ai-sdk/openai-compatible/-/openai-compatible-3.0.62.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.21", "@ai-sdk/provider-utils": "5.0.53" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-IAz1xv8zot4KLGa8kN7UfAA6H5+ARzAgAKLsoKxHPBzZuOc2E3ohaELg0x/JR9HVTbMbiftb0dPyCb8cT2KBRg=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.21", "https://registry.npmmirror.com/@ai-sdk/provider/-/provider-4.0.21.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-UpbC9C1oht8dhfKPbVXSLRZS3DI8uk8n5v2uMjBPNIYGsC2kL045ywq7D8Hh9KgnH9rP5W/GxQdYtWScRouqlA=="],
 

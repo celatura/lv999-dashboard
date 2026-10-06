@@ -7,7 +7,7 @@ import { customType } from 'drizzle-orm/pg-core';
  * 维度一旦变更，向量列与 HNSW 索引都必须重建（历史数据需重新 embedding）。
  */
 
-/** 向量维度：必须与 embedding 模型的 dimensions 完全一致 */
+/** 向量维度：必须与 embedding 的 dimension 参数（providerOptions.alibaba.dimension）完全一致 */
 export const VECTOR_DIM = 1024;
 
 /** number[] → pgvector 文本字面量（写入与 `<=>` 检索参数共用同一序列化） */
