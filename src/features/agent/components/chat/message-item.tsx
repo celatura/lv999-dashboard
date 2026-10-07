@@ -4,6 +4,8 @@ import type { UIMessage } from 'ai';
 import { isToolUIPart } from 'ai';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { cjk } from '@streamdown/cjk';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import { Message, MessageContent } from '@/components/ui/message';
 import { getAssetKindMeta } from '../../constants/kinds';
@@ -20,6 +22,8 @@ import { ToolKnowledgePart, type KnowledgeSearchToolPart } from './tool-knowledg
  * 因此流式 chunk 与输入变化时，历史消息可真实跳过重渲染（Streamdown 解析成本高）。
  *
  * isActive：该消息是否为当前正在流式的最后一条 assistant 消息。
+ * 既驱动进行中 tool part 的 loading 态，也作为 Streamdown 的 isAnimating
+ * （显示流式光标 caret + 流式期间自动禁用复制/下载按钮）。
  * AI SDK 中止语义下进行中的 tool part 不会被置为终态（流以 abort 结束），
  * 因此只有 active 消息中的进行中 tool part 渲染为 loading，其余视为已停止收尾。
  */
@@ -68,7 +72,9 @@ export const MessageItem = memo(function MessageItem({
             if (!part.text) return null;
             return (
               <div key={index} className='w-full'>
-                <Streamdown>{part.text}</Streamdown>
+                <Streamdown plugins={{ code, cjk }} caret='block' isAnimating={isActive}>
+                  {part.text}
+                </Streamdown>
               </div>
             );
           }

@@ -4,8 +4,10 @@
 
 @import 'streamdown/styles.css';
 
-/* Streamdown 使用 Tailwind 工具类，告知 Tailwind 扫描其产物文件 */
+/* Streamdown 使用 Tailwind 工具类，告知 Tailwind 扫描其产物文件（含已安装的 code/cjk 插件） */
 @source '../../node_modules/streamdown/dist/*.js';
+@source '../../node_modules/@streamdown/code/dist/*.js';
+@source '../../node_modules/@streamdown/cjk/dist/*.js';
 
 @custom-variant dark (&:is(.dark *));
 

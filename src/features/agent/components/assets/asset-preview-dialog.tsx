@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { cjk } from '@streamdown/cjk';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import {
@@ -29,7 +31,7 @@ interface AssetPreviewDialogProps {
 
 /**
  * 资产预览弹窗。
- * Markdown 用 Streamdown 渲染；HTML 一律放入 sandbox="allow-scripts" 的 iframe
+ * Markdown 用 Streamdown 静态模式渲染（已完成内容，含代码高亮）；HTML 一律放入 sandbox="allow-scripts" 的 iframe
  * （不加 allow-same-origin），与主站隔离，防止资产脚本访问父页面会话；
  * 图片走详情端点签发的 previewUrl（私有桶签名访问，不公开桶）。
  */
@@ -100,7 +102,9 @@ export function AssetPreviewDialog({ assetId, open, onOpenChange }: AssetPreview
               )}
               {data.kind === 'markdown' && (
                 <div className='p-5'>
-                  <Streamdown>{data.content ?? ''}</Streamdown>
+                  <Streamdown mode='static' plugins={{ code, cjk }}>
+                    {data.content ?? ''}
+                  </Streamdown>
                 </div>
               )}
               {(data.kind === 'image' || data.kind === 'design') &&
