@@ -4,12 +4,11 @@ import type { UIMessage } from 'ai';
 import { isToolUIPart } from 'ai';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
-import { cjk } from '@streamdown/cjk';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import { Message, MessageContent } from '@/components/ui/message';
 import { getAssetKindMeta } from '../../constants/kinds';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
+import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 import { ToolAssetPart, type CreateAssetToolPart } from './tool-asset-part';
 import { ToolDesignPart, type DesignAssetToolPart } from './tool-design-part';
 import { ToolImagePart, type ImageAssetToolPart } from './tool-image-part';
@@ -72,7 +71,7 @@ export const MessageItem = memo(function MessageItem({
             if (!part.text) return null;
             return (
               <div key={index} className='w-full'>
-                <Streamdown plugins={{ code, cjk }} caret='block' isAnimating={isActive}>
+                <Streamdown plugins={STREAMDOWN_PLUGINS} caret='block' isAnimating={isActive}>
                   {part.text}
                 </Streamdown>
               </div>

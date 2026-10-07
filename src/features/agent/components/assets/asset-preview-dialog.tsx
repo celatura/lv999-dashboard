@@ -4,8 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
-import { cjk } from '@streamdown/cjk';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import {
@@ -22,6 +20,7 @@ import { getAssetKindMeta } from '../../constants/kinds';
 import { assetQueryOptions } from '../../api/queries';
 import { downloadAsset } from '../../lib/asset-download';
 import { formatBytes } from '../../lib/format';
+import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 
 interface AssetPreviewDialogProps {
   assetId: string;
@@ -102,7 +101,7 @@ export function AssetPreviewDialog({ assetId, open, onOpenChange }: AssetPreview
               )}
               {data.kind === 'markdown' && (
                 <div className='p-5'>
-                  <Streamdown mode='static' plugins={{ code, cjk }}>
+                  <Streamdown mode='static' plugins={STREAMDOWN_PLUGINS}>
                     {data.content ?? ''}
                   </Streamdown>
                 </div>
