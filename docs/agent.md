@@ -157,6 +157,15 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 - **解析**：[`parseAssetReferenceBlock`](../src/features/agent/lib/asset-reference.ts) 在气泡渲染与会话自动标题时剥离引用块只留用户原文（标题不应带机器可读块）。
 - **标题归一**：标题内的换行 / 连续空白归一为单空格，避免破坏逐行解析。
 
+### 4.6 消息操作栏（复制 / 重新生成）
+
+assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操作栏（hover / 键盘聚焦淡入，触屏 `[@media(hover:none)]` 常显），承载两个高频动作：
+
+- **复制**（[`copy-button.tsx`](../src/features/agent/components/copy-button.tsx)）：复制该消息所有 text part 的 **Markdown 源码**（`join('\n\n')`，非渲染态，粘走可再编辑）；✓ 态 1.5s + toast。[`clipboard.ts`](../src/features/agent/lib/clipboard.ts) `copyText` 主路径 `navigator.clipboard`（部署 https 可用）+ `execCommand` 兜底（权限拒绝 / 老浏览器），失败 toast 不静默。资产预览弹窗（markdown/html）复用同一 CopyButton 复制 `content`。
+- **重新生成**（仅**最后一条** assistant 消息）：调 `useChat` 的 `regenerate()`（无参 = 末尾消息）；tooltip 明示「将再次消耗 Credits」（重roll = 新一轮模型调用）。**不对历史中间消息提供**——`regenerate(messageId)` 会截断其后所有对话。
+- **流式禁用**：`isActive` 时两按钮禁用（内容未完整 / 防并发重roll）。
+- **memo 纪律**：[`message-item.tsx`](../src/features/agent/components/chat/message-item.tsx) 是 memo 化的（Streamdown 解析贵）；操作栏新增 props 仅稳定回调（`onRegenerate` 为 chat-window 的 useCallback）+ 布尔（`isLastAssistant`），复制 ✓ 态自持 CopyButton 内部；**不传 `isGenerating`**（每轮生成翻转两次会击穿 memo、重渲染全部历史）——流式只发生在末尾，`isActive` 已等价覆盖禁用语义。
+
 ---
 
 ## 5. Agent 与工具

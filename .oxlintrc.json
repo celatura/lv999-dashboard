@@ -32,6 +32,18 @@
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
 
+    /* React Compiler 专属校验（本项目未在 next.config 启用 reactCompiler，手动 memo 才是真相）：
+       refs / set-state-in-effect / preserve-manual-memoization / incompatible-library / 两个依赖推断变体
+       关闭；react/purity 保留（渲染期不纯调用是真 bug，SSR 与 hydration 会拿到不同值）。 */
+    "react/refs": "off",
+    "react/set-state-in-effect": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/incompatible-library": "off",
+    "react/exhaustive-effect-dependencies": "off",
+    "react/memo-dependencies": "off",
+    /* 库的 render-prop 契约（kbar onRender 等）不算渲染期新建组件 */
+    "react/no-unstable-nested-components": ["warn", { "allowAsProps": true }],
+
     "no-shadow": "off",
     "import/no-anonymous-default-export": "warn",
     "import/no-unassigned-import": "off",

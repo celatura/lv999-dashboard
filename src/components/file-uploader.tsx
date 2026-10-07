@@ -267,6 +267,7 @@ function FileCard({ file, progress, onRemove }: FileCardProps) {
           />
         ) : (
           <span className='bg-muted flex size-12 shrink-0 items-center justify-center rounded-md'>
+            {/* oxlint-disable-next-line react/static-components -- fileIconFor 只从 Icons 注册表取已有组件引用，并非渲染期新建组件 */}
             <FileIcon className='text-muted-foreground size-5' />
           </span>
         )}

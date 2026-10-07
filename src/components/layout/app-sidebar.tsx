@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/sidebar';
 import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navGroups } from '@/config/nav-config';
-import { useMediaQuery } from '@/hooks/use-media-query';
 import { signOut } from '@/lib/auth-client';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import { SidebarCreditsItem } from '@/features/credits/components/sidebar-credits-item';
@@ -44,15 +43,10 @@ interface AppSidebarProps {
 
 export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarProps) {
   const pathname = usePathname();
-  const { isOpen } = useMediaQuery();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
   // 账号下拉受控 open：打开时才查 Credits 余额（不常驻轮询）
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    // Side effects based on sidebar state changes
-  }, [isOpen]);
 
   return (
     <Sidebar collapsible='icon'>

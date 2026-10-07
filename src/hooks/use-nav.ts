@@ -39,10 +39,10 @@ const ACCESS_CONTEXT = {
  * @returns Filtered items
  */
 export function useFilteredNavItems(items: NavItem[]) {
-  const accessContext = ACCESS_CONTEXT;
-
   // Filter items synchronously (all client-side)
   const filteredItems = useMemo(() => {
+    // 模块级常量在回调内取用（不进依赖数组）：它不是响应式值，列为依赖只会模糊重算边界
+    const accessContext = ACCESS_CONTEXT;
     return items
       .filter((item) => {
         // No access restrictions
@@ -147,7 +147,7 @@ export function useFilteredNavItems(items: NavItem[]) {
 
         return item;
       });
-  }, [items, accessContext]);
+  }, [items]);
 
   return filteredItems;
 }

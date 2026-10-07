@@ -74,6 +74,7 @@ import {
   IconPlayerStop,
   IconPlus,
   IconProps,
+  IconRefresh,
   IconRosetteDiscountCheck,
   IconSearch,
   IconSelector,
@@ -190,6 +191,7 @@ export const Icons = {
   save: IconDeviceFloppy,
   undo: IconArrowBackUp,
   redo: IconArrowForwardUp,
+  refresh: IconRefresh,
   maximize: IconMaximize,
 
   // Shapes / Indicators

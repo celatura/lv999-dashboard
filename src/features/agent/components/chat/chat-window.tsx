@@ -120,6 +120,13 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
 
   const isGenerating = status === 'submitted' || status === 'streaming';
 
+  // 重新生成最后一条回复（regenerate() 无参 = 末尾 assistant 消息）。
+  // regenerate 本身是 Chat 实例上的方法（引用恒定），useCallback 只是把这层包装也固定下来：
+  // MessageItem 是 memo 化的，回调引用一变就会重渲染全部历史消息（Streamdown 解析贵）。
+  const handleRegenerate = useCallback(() => {
+    void regenerate();
+  }, [regenerate]);
+
   // 引用去重（选择器已置灰已引用项，此处再兜一道）；函数式更新保证批量添加逐项生效
   const handleAddReference = useCallback((asset: ReferencedAsset) => {
     setReferencedAssets((prev) =>
@@ -214,20 +221,24 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
           {messages.length === 0 ? (
             <ChatEmptyState onPick={setInput} />
           ) : (
-            messages.map((message, index) => (
-              <div
-                key={message.id}
-                className='[content-visibility:auto] [contain-intrinsic-size:auto_120px]'
-              >
-                <MessageItem
-                  message={message}
-                  // 仅最后一条 assistant 消息可能含进行中的 tool part；非流式期间视为已停止（AI SDK 中止语义下 part 不落终态）
-                  isActive={
-                    isGenerating && index === messages.length - 1 && message.role === 'assistant'
-                  }
-                />
-              </div>
-            ))
+            messages.map((message, index) => {
+              // 最后一条 assistant 消息：流式期间唯一 active 的消息，也是唯一可「重新生成」的对象
+              const isLastAssistant = index === messages.length - 1 && message.role === 'assistant';
+              return (
+                <div
+                  key={message.id}
+                  className='[content-visibility:auto] [contain-intrinsic-size:auto_120px]'
+                >
+                  <MessageItem
+                    message={message}
+                    // 仅最后一条 assistant 消息可能含进行中的 tool part；非流式期间视为已停止（AI SDK 中止语义下 part 不落终态）
+                    isActive={isGenerating && isLastAssistant}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={handleRegenerate}
+                  />
+                </div>
+              );
+            })
           )}
           {error && (
             <div className='border-destructive/40 bg-destructive/5 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm'>

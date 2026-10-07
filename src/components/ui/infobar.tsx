@@ -650,9 +650,10 @@ function InfobarMenuSkeleton({
   showIcon?: boolean;
 }) {
   // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
+  // 走 useState 懒初始化（与 sidebar.tsx 同款）：仅挂载时取一次，不在渲染期重复调用不纯函数
+  const [width] = React.useState(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
-  }, []);
+  });
 
   return (
     <div

@@ -234,6 +234,16 @@ Configured in `.oxlintrc.json` — `correctness` category as errors, `suspicious
 - `react-hooks/exhaustive-deps`: warn
 - jsx-a11y rules enabled (alt-text, aria props/roles)
 
+React Compiler validation rules — `react/refs`, `react/set-state-in-effect`,
+`react/preserve-manual-memoization`, `react/incompatible-library`,
+`react/exhaustive-effect-dependencies`, `react/memo-dependencies` — are turned **off** in
+`.oxlintrc.json`. They answer "could the compiler auto-memoize this?", and this project does not
+enable `experimental.reactCompiler`: manual memoization (`memo` / `useCallback` / `useMemo`) is the
+source of truth, so latest-value refs and dialog reset-on-open effects are accepted patterns, not
+findings to refactor. `react/purity` stays on — an impure call during render is a real bug (SSR and
+hydration observe different values); skeletons must render deterministic sizes instead of
+`Math.random()`.
+
 ### Component Conventions
 
 - Use function declarations for components: `function ComponentName() {}`

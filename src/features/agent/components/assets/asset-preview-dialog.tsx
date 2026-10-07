@@ -21,6 +21,7 @@ import { assetQueryOptions } from '../../api/queries';
 import { downloadAsset } from '../../lib/asset-download';
 import { formatBytes } from '../../lib/format';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
+import { CopyButton } from '../copy-button';
 
 interface AssetPreviewDialogProps {
   assetId: string;
@@ -71,6 +72,10 @@ export function AssetPreviewDialog({ assetId, open, onOpenChange }: AssetPreview
               >
                 <Icons.edit /> 编辑
               </Link>
+            )}
+            {/* 文本类资产（Markdown / HTML）直接拿走 content 原文，与消息操作栏共用同一套复制能力 */}
+            {data && (data.kind === 'markdown' || data.kind === 'html') && data.content && (
+              <CopyButton text={data.content} variant='outline' size='sm' withLabel />
             )}
             <button
               type='button'
