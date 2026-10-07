@@ -120,9 +120,11 @@ export function ToolVideoPart({ part, active }: { part: VideoAssetToolPart; acti
   }
 
   if (state === 'output-error') {
+    // errorText 为服务端映射好的完整中文（route.ts onError 对 GenerationError 原样透传，
+    // 如「视频下载失败，请稍后重试。」），直接展示；不再套「视频生成失败：」前缀与重试后缀
     return (
       <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        视频生成失败：{part.errorText ?? '未知错误'}（可调整画面描述或稍后重试）
+        {part.errorText ?? '视频生成失败，请稍后重试。'}
       </div>
     );
   }

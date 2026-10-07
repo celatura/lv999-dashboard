@@ -17,6 +17,7 @@ import {
   VIDEO_RATE_LIMIT,
   VIDEO_RATE_WINDOW_SECONDS
 } from './video-generation';
+import { GenerationError } from './generation-error';
 import { checkRateLimit } from './rate-limit';
 import {
   createAsset,
@@ -419,13 +420,15 @@ function createVideoAssetTool(params: { userId: string; conversationId: string }
         VIDEO_RATE_WINDOW_SECONDS
       );
       if (!allowed) {
-        throw new Error(
-          `视频生成过于频繁（每 ${VIDEO_RATE_WINDOW_SECONDS} 秒最多 ${VIDEO_RATE_LIMIT} 次），请稍后再试。`
+        // 限流拒绝（未发起上游，不扣费）；GenerationError 供 route.ts onError 原样透传文案
+        throw new GenerationError(
+          `视频生成过于频繁（每 ${VIDEO_RATE_WINDOW_SECONDS} 秒最多 ${VIDEO_RATE_LIMIT} 次），请稍后再试。`,
+          { billable: false }
         );
       }
-      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用）
+      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用；不扣费）
       if (!(await checkBalance(params.userId))) {
-        throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
+        throw new GenerationError(INSUFFICIENT_CREDITS_MESSAGE, { billable: false });
       }
       // 工具默认 720P（generateVideoAsset 缺省档）；错误兜底按入参时长估算
       const fallbackDuration = duration ?? 5;
@@ -487,24 +490,29 @@ function createVideoFromImageAssetTool(params: { userId: string; conversationId:
         VIDEO_RATE_WINDOW_SECONDS
       );
       if (!allowed) {
-        throw new Error(
-          `视频生成过于频繁（每 ${VIDEO_RATE_WINDOW_SECONDS} 秒最多 ${VIDEO_RATE_LIMIT} 次），请稍后再试。`
+        // 限流拒绝（未发起上游，不扣费）；GenerationError 供 route.ts onError 原样透传文案
+        throw new GenerationError(
+          `视频生成过于频繁（每 ${VIDEO_RATE_WINDOW_SECONDS} 秒最多 ${VIDEO_RATE_LIMIT} 次），请稍后再试。`,
+          { billable: false }
         );
       }
-      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用）
+      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用；不扣费）
       if (!(await checkBalance(params.userId))) {
-        throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
+        throw new GenerationError(INSUFFICIENT_CREDITS_MESSAGE, { billable: false });
       }
       // 归属校验：源资产必须属于当前用户、为图片且已转入 OSS（越权与不存在同样返回 undefined）
       // 预检失败（未发起上游）→ 不扣
       const source = await getAsset(params.userId, sourceAssetId);
       if (!source || source.kind !== 'image' || !source.storageKey) {
-        throw new Error(
-          '找不到可用作首帧的源图片资产（可能已删除或不是图片），请用 findAssets 重新确认。'
+        throw new GenerationError(
+          '找不到可用作首帧的源图片资产（可能已删除或不是图片），请用 findAssets 重新确认。',
+          { billable: false }
         );
       }
       if (source.sizeBytes && source.sizeBytes > MAX_EDIT_SOURCE_BYTES) {
-        throw new Error('源图片体积超过输入上限（10MB），无法生成视频。');
+        throw new GenerationError('源图片体积超过输入上限（10MB），无法生成视频。', {
+          billable: false
+        });
       }
       // 源图经短期签名 URL 直传百炼作首帧（公网可达；TTL 900s 与图片编辑一致）
       const firstFrameUrl = await getSignedUrl(source.storageKey, 900);

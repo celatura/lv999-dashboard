@@ -18,6 +18,7 @@ import {
   type UsageSink
 } from '@/features/agent/api/agent';
 import { getSkillForUser } from '@/features/agent/api/skill-service';
+import { GenerationError } from '@/features/agent/api/generation-error';
 import {
   applyAutoTitle,
   cleanupSupersededResponses,
@@ -197,8 +198,11 @@ export async function POST(request: Request) {
       // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
       // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
       // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；
+      // 生成类错误（图片/视频的 GenerationError）已携带用户可读中文（下载失败/超时/审核拒绝等），
+      // 原样透传供给工具卡片（如 tool-video-part）直接展示——否则会被兜底文案掩盖真实原因；
       // 其余错误保持与客户端兜底文案一致的通用提示，详情只进服务端日志
       onError: (error: unknown) => {
+        if (error instanceof GenerationError) return error.message;
         const unavailable = detectModelUnavailable({
           channel: 'chat',
           error,
