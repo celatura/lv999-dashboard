@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { copyText } from '../lib/clipboard';
 
 /** ✓ 态停留时长：够看清反馈，又不至于让人以为按钮换了功能 */
@@ -52,7 +53,7 @@ export function CopyButton({
     toast.success('已复制到剪贴板');
   };
 
-  return (
+  const button = (
     <Button
       variant={variant}
       size={size}
@@ -66,5 +67,15 @@ export function CopyButton({
       {copied ? <Icons.check /> : <Icons.copy />}
       {withLabel && <span>{copied ? '已复制' : '复制'}</span>}
     </Button>
+  );
+
+  // 纯图标按钮（消息操作栏）语义不可见，补一条 tooltip；带文案的（资产预览头部）本身已说明用途，不再叠提示
+  if (withLabel) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} />
+      <TooltipContent>{copied ? '已复制' : '复制'}</TooltipContent>
+    </Tooltip>
   );
 }

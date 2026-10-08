@@ -180,8 +180,7 @@ export const MessageItem = memo(function MessageItem({
                   </Button>
                 }
               />
-              {/* 重roll = 新一轮模型调用，按对话档再扣 Credits；tooltip 明示，避免误以为免费 */}
-              <TooltipContent>重新生成（将再次消耗 Credits）</TooltipContent>
+              <TooltipContent>重试</TooltipContent>
             </Tooltip>
           )}
         </MessageFooter>
