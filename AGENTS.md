@@ -25,14 +25,14 @@ The project follows a feature-based folder structure designed for scalability in
 
 ### Core Framework & Runtime
 
-- Next.js 16.2.x with App Router
-- React 19.2.x
-- TypeScript 5.7.2 with strict mode enabled
+- Next.js with App Router
+- React
+- TypeScript with strict mode enabled
 
 ### Styling & UI
 
 - Tailwind CSS v4 (using `@import 'tailwindcss'` syntax)
-- PostCSS with `@tailwindcss/postcss` plugin
+- Tailwind via the `@tailwindcss/turbopack` loader, registered in `next.config.ts` under `turbopack.rules` for `*.css`
 - shadcn/ui component library (Base UI primitives)
 - CSS custom properties for theming (OKLCH color format)
 
@@ -619,7 +619,7 @@ See "Theming System" section above or `docs/themes.md`.
 **Build fails with Tailwind errors**
 
 - Ensure using Tailwind CSS v4 syntax (`@import 'tailwindcss'`)
-- Check `postcss.config.js` uses `@tailwindcss/postcss`
+- Check `next.config.ts` `turbopack.rules` registers the `@tailwindcss/turbopack` loader for `*.css`
 
 **Auth session always null / "Invalid origin"**
 

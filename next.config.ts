@@ -11,6 +11,14 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['ali-oss', '@firecrawl/anydoc', 'nodemailer'],
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
+  },
+  turbopack: {
+    rules: {
+      '*.css': {
+        loaders: ['@tailwindcss/turbopack'],
+        as: '*.css'
+      }
+    }
   }
 };
 
