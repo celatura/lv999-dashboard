@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { formatDateTime } from '@/features/agent/lib/format';
 import { cn } from '@/lib/utils';
+import type { DataTableFeatures } from '@/lib/data-table';
 import type { LedgerEntry } from '../../api/types';
 import { KIND_OPTIONS, describeLedgerMeta, getCreditKindMeta } from '../../constants/display';
 
@@ -12,11 +13,11 @@ import { KIND_OPTIONS, describeLedgerMeta, getCreditKindMeta } from '../../const
  * Credits 流水列：时间 / 类型徽标 / 变动（±，颜色区分）/ 变动后余额 / 详情（meta 摘要）。
  * delta、balanceAfter、createdAt 可排序（服务端 listLedger 支持）；类型可 multiSelect 筛选。
  */
-export const columns: ColumnDef<LedgerEntry>[] = [
+export const columns: ColumnDef<DataTableFeatures, LedgerEntry>[] = [
   {
     id: 'createdAt',
     accessorKey: 'createdAt',
-    header: ({ column }: { column: Column<LedgerEntry, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
       <DataTableColumnHeader column={column} title='时间' />
     ),
     cell: ({ row }) => (
@@ -30,7 +31,7 @@ export const columns: ColumnDef<LedgerEntry>[] = [
     id: 'kind',
     accessorKey: 'kind',
     enableSorting: false,
-    header: ({ column }: { column: Column<LedgerEntry, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
       <DataTableColumnHeader column={column} title='类型' />
     ),
     cell: ({ row }) => {
@@ -52,7 +53,7 @@ export const columns: ColumnDef<LedgerEntry>[] = [
   {
     id: 'delta',
     accessorKey: 'delta',
-    header: ({ column }: { column: Column<LedgerEntry, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
       <DataTableColumnHeader column={column} title='变动' />
     ),
     cell: ({ row }) => {
@@ -75,7 +76,7 @@ export const columns: ColumnDef<LedgerEntry>[] = [
   {
     id: 'balanceAfter',
     accessorKey: 'balanceAfter',
-    header: ({ column }: { column: Column<LedgerEntry, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
       <DataTableColumnHeader column={column} title='变动后余额' />
     ),
     cell: ({ row }) => (
@@ -90,7 +91,7 @@ export const columns: ColumnDef<LedgerEntry>[] = [
   {
     id: 'detail',
     enableSorting: false,
-    header: ({ column }: { column: Column<LedgerEntry, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
       <DataTableColumnHeader column={column} title='详情' />
     ),
     cell: ({ row }) => (

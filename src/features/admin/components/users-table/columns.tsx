@@ -6,6 +6,7 @@ import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-h
 import { Icons } from '@/components/icons';
 import { formatDateTime } from '@/features/agent/lib/format';
 import { cn } from '@/lib/utils';
+import type { DataTableFeatures } from '@/lib/data-table';
 import type { AdminUser } from '../../api/types';
 import { CellAction } from './cell-action';
 
@@ -35,12 +36,12 @@ function UserCell({ user }: { user: AdminUser }) {
   );
 }
 
-export const columns: ColumnDef<AdminUser>[] = [
+export const columns: ColumnDef<DataTableFeatures, AdminUser>[] = [
   {
     id: 'query',
     accessorKey: 'name',
     enableSorting: false,
-    header: ({ column }: { column: Column<AdminUser, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, AdminUser, unknown> }) => (
       <DataTableColumnHeader column={column} title='用户' />
     ),
     cell: ({ row }) => <UserCell user={row.original} />,
@@ -55,7 +56,7 @@ export const columns: ColumnDef<AdminUser>[] = [
   {
     id: 'createdAt',
     accessorKey: 'createdAt',
-    header: ({ column }: { column: Column<AdminUser, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, AdminUser, unknown> }) => (
       <DataTableColumnHeader column={column} title='注册时间' />
     ),
     cell: ({ row }) => (
@@ -68,7 +69,7 @@ export const columns: ColumnDef<AdminUser>[] = [
   {
     id: 'lastSignInAt',
     accessorKey: 'lastSignInAt',
-    header: ({ column }: { column: Column<AdminUser, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, AdminUser, unknown> }) => (
       <DataTableColumnHeader column={column} title='最近登录' />
     ),
     cell: ({ row }) => {
@@ -85,7 +86,7 @@ export const columns: ColumnDef<AdminUser>[] = [
     id: 'balance',
     accessorKey: 'balance',
     enableSorting: false,
-    header: ({ column }: { column: Column<AdminUser, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, AdminUser, unknown> }) => (
       <DataTableColumnHeader column={column} title='Credits 余额' />
     ),
     cell: ({ row }) => (

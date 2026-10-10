@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Icons } from '@/components/icons';
 import { formatDateTime } from '@/features/agent/lib/format';
+import type { DataTableFeatures } from '@/lib/data-table';
 import type { KnowledgeDocument } from '../../api/types';
 import {
   SOURCE_OPTIONS,
@@ -28,11 +29,11 @@ function TitleCell({ document }: { document: KnowledgeDocument }) {
   );
 }
 
-export const columns: ColumnDef<KnowledgeDocument>[] = [
+export const columns: ColumnDef<DataTableFeatures, KnowledgeDocument>[] = [
   {
     id: 'title',
     accessorKey: 'title',
-    header: ({ column }: { column: Column<KnowledgeDocument, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, KnowledgeDocument, unknown> }) => (
       <DataTableColumnHeader column={column} title='标题' />
     ),
     cell: ({ row }) => <TitleCell document={row.original} />,
@@ -48,7 +49,7 @@ export const columns: ColumnDef<KnowledgeDocument>[] = [
     id: 'status',
     accessorKey: 'status',
     enableSorting: false,
-    header: ({ column }: { column: Column<KnowledgeDocument, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, KnowledgeDocument, unknown> }) => (
       <DataTableColumnHeader column={column} title='状态' />
     ),
     cell: ({ row }) => {
@@ -73,7 +74,7 @@ export const columns: ColumnDef<KnowledgeDocument>[] = [
     id: 'source',
     accessorKey: 'source',
     enableSorting: false,
-    header: ({ column }: { column: Column<KnowledgeDocument, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, KnowledgeDocument, unknown> }) => (
       <DataTableColumnHeader column={column} title='来源' />
     ),
     cell: ({ row }) => {
@@ -95,7 +96,7 @@ export const columns: ColumnDef<KnowledgeDocument>[] = [
   {
     id: 'chunkCount',
     accessorKey: 'chunkCount',
-    header: ({ column }: { column: Column<KnowledgeDocument, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, KnowledgeDocument, unknown> }) => (
       <DataTableColumnHeader column={column} title='片段数' />
     ),
     cell: ({ row }) => (
@@ -108,7 +109,7 @@ export const columns: ColumnDef<KnowledgeDocument>[] = [
   {
     id: 'createdAt',
     accessorKey: 'createdAt',
-    header: ({ column }: { column: Column<KnowledgeDocument, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, KnowledgeDocument, unknown> }) => (
       <DataTableColumnHeader column={column} title='创建时间' />
     ),
     cell: ({ row }) => (

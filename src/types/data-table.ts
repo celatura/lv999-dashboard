@@ -1,18 +1,20 @@
 import type { DataTableConfig } from '@/config/data-table';
 import type { FilterItemSchema } from '@/lib/parsers';
-import type { ColumnSort, Row, RowData } from '@tanstack/react-table';
+import type { ColumnSort, Row, RowData, TableFeatures } from '@tanstack/react-table';
 
-declare module '@tanstack/react-table' {
-  // biome-ignore lint/correctness/noUnusedVariables: Interface type parameters required by @tanstack/react-table
-  interface ColumnMeta<TData extends RowData, TValue> {
-    label?: string;
-    placeholder?: string;
-    variant?: FilterVariant;
-    options?: Option[];
-    range?: [number, number];
-    unit?: string;
-    icon?: React.FC<React.SVGProps<SVGSVGElement>>;
-  }
+/**
+ * 所有数据表共用的列 meta 形状。
+ * Table V9 通过 `dataTableFeatures` 上的 `columnMeta` slot（metaHelper）按表注入，
+ * 不再依赖对 `@tanstack/react-table` 的全局声明合并。
+ */
+export interface DataTableColumnMeta {
+  label?: string;
+  placeholder?: string;
+  variant?: FilterVariant;
+  options?: Option[];
+  range?: [number, number];
+  unit?: string;
+  icon?: React.FC<React.SVGProps<SVGSVGElement>>;
 }
 
 export interface Option {
@@ -34,7 +36,7 @@ export interface ExtendedColumnFilter<TData> extends FilterItemSchema {
   id: Extract<keyof TData, string>;
 }
 
-export interface DataTableRowAction<TData> {
-  row: Row<TData>;
+export interface DataTableRowAction<TFeatures extends TableFeatures, TData extends RowData> {
+  row: Row<TFeatures, TData>;
   variant: 'update' | 'delete';
 }

@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import type { DataTableFeatures } from '@/lib/data-table';
 import { setAssetFavoriteMutation } from '../../../api/mutations';
 import { ASSET_KIND_META, ASSET_KINDS, getAssetKindMeta } from '../../../constants/kinds';
 import { assetThumbUrl } from '../../../lib/asset-url';
@@ -165,14 +166,14 @@ function FavoriteCell({ asset }: { asset: Asset }) {
   );
 }
 
-export const columns: ColumnDef<Asset>[] = [
+export const columns: ColumnDef<DataTableFeatures, Asset>[] = [
   {
     id: 'select',
     header: ({ table }) => (
       <Checkbox
         aria-label='全选'
         checked={table.getIsAllPageRowsSelected()}
-        indeterminate={table.getIsSomePageRowsSelected()}
+        indeterminate={table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected()}
         onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
       />
     ),
@@ -189,7 +190,7 @@ export const columns: ColumnDef<Asset>[] = [
   {
     id: 'title',
     accessorKey: 'title',
-    header: ({ column }: { column: Column<Asset, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, Asset, unknown> }) => (
       <DataTableColumnHeader column={column} title='标题' />
     ),
     cell: ({ row }) => <AssetTitleCell asset={row.original} />,
@@ -205,7 +206,7 @@ export const columns: ColumnDef<Asset>[] = [
     id: 'kind',
     accessorKey: 'kind',
     enableSorting: false,
-    header: ({ column }: { column: Column<Asset, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, Asset, unknown> }) => (
       <DataTableColumnHeader column={column} title='类型' />
     ),
     cell: ({ row }) => {
@@ -230,7 +231,7 @@ export const columns: ColumnDef<Asset>[] = [
   {
     id: 'sizeBytes',
     accessorKey: 'sizeBytes',
-    header: ({ column }: { column: Column<Asset, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, Asset, unknown> }) => (
       <DataTableColumnHeader column={column} title='大小' />
     ),
     cell: ({ row }) => (
@@ -245,7 +246,7 @@ export const columns: ColumnDef<Asset>[] = [
   {
     id: 'createdAt',
     accessorKey: 'createdAt',
-    header: ({ column }: { column: Column<Asset, unknown> }) => (
+    header: ({ column }: { column: Column<DataTableFeatures, Asset, unknown> }) => (
       <DataTableColumnHeader column={column} title='创建时间' />
     ),
     cell: ({ row }) => (

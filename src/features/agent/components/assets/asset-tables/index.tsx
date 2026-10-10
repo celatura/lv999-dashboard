@@ -9,6 +9,7 @@ import { Icons } from '@/components/icons';
 import { useDataTable } from '@/hooks/use-data-table';
 import { useMutation, useSuspenseQuery } from '@tanstack/react-query';
 import type { Table } from '@tanstack/react-table';
+import type { DataTableFeatures } from '@/lib/data-table';
 import {
   parseAsArrayOf,
   parseAsBoolean,
@@ -57,7 +58,7 @@ export function AssetsTable() {
     shallow: true,
     debounceMs: 500,
     initialState: {
-      columnPinning: { right: ['favorite', 'actions'] },
+      columnPinning: { start: [], end: ['favorite', 'actions'] },
       sorting: [{ id: 'createdAt', desc: true }]
     }
   });
@@ -84,7 +85,7 @@ export function AssetsTable() {
 }
 
 /** 选中行后浮出的批量操作条：当前仅批量删除（AlertModal 二次确认） */
-function BatchActionBar({ table }: { table: Table<Asset> }) {
+function BatchActionBar({ table }: { table: Table<DataTableFeatures, Asset> }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const batchDeleteMutation = useMutation(batchDeleteAssetsMutation);
 

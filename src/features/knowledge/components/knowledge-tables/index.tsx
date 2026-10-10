@@ -43,7 +43,7 @@ export function KnowledgeTable() {
     shallow: true,
     debounceMs: 500,
     initialState: {
-      columnPinning: { right: ['actions'] },
+      columnPinning: { start: [], end: ['actions'] },
       sorting: [{ id: 'createdAt', desc: true }]
     }
   });

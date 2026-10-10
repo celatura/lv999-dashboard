@@ -39,7 +39,7 @@ export function UsersTable() {
     shallow: true,
     debounceMs: 500,
     initialState: {
-      columnPinning: { right: ['actions'] },
+      columnPinning: { start: [], end: ['actions'] },
       // 与服务端默认排序（createdAt 倒序）一致，表头显示降序指示
       sorting: [{ id: 'createdAt', desc: true }]
     }
