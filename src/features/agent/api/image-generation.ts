@@ -3,6 +3,7 @@ import {
   resolveImageModel,
   type ImageModelRegistryEntry
 } from '../constants/image-models';
+import { detectImageType, imageTypeToMime } from '../lib/upload-image';
 import { GenerationError } from './generation-error';
 import { detectModelUnavailable } from './model-availability';
 
@@ -31,8 +32,6 @@ const DOWNLOAD_TIMEOUT_MS = 60_000;
 /** 下载后图片体积上限（红线：>15MB 拒绝入库） */
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
 function getApiKey(): string {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   if (!apiKey) {
@@ -50,19 +49,38 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortS
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-/** 读取响应文本并尝试 JSON 解析；非 JSON（如网关 HTML 报错）时抛出含片段的错误 */
-async function readJson(response: Response): Promise<Record<string, unknown>> {
-  const text = await response.text();
+/**
+ * 读取响应文本并尝试 JSON 解析。
+ * - 文本读取中断（连接被掐）：按阶段口径（create-task 未提交 → 不扣；query/sync 可能已计费 → 照扣）；
+ * - 非 JSON（如网关 HTML 报错）：4xx/5xx（上游拒绝或网关错误）→ 不扣；
+ *   2xx 却无法解析 → 无法确认结果，按阶段口径（query/sync 照扣、create-task 不扣）。
+ */
+async function readJson(
+  response: Response,
+  context: string,
+  billableOnReadError: boolean
+): Promise<Record<string, unknown>> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    console.error('[agent] image API response read failed', { context, status: response.status });
+    // 已提交的请求（query/sync）响应读取中断时，上游可能已完成计费 → 照扣
+    throw new GenerationError('图片生成失败：响应读取中断。', {
+      cause: error,
+      billable: billableOnReadError
+    });
+  }
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
     console.error('[agent] image API returned non-JSON', {
+      context,
       status: response.status,
       body: text.slice(0, 300)
     });
-    // 网关非 JSON 报错（上游明确失败）→ 不扣
     throw new GenerationError(`图片生成失败（HTTP ${response.status}，非 JSON 响应）。`, {
-      billable: false
+      billable: billableOnReadError && response.status < 400
     });
   }
 }
@@ -92,28 +110,33 @@ function toUserFacingError(
 
   console.error('[agent] image generation failed', { context, httpStatus, code, message });
 
-  if (
-    code === 'InvalidApiKey' ||
-    code === 'AccessDenied' ||
-    httpStatus === 401 ||
-    httpStatus === 403
-  ) {
+  // 403 / access_denied 已被 detectModelUnavailable 提前接管（模型下线/未开通），
+  // 此处只处理 Key 无效与 401
+  if (code === 'InvalidApiKey' || httpStatus === 401) {
     return new GenerationError('图片服务鉴权失败，请检查 API Key 配置。', { billable: false });
+  }
+  // 账户侧 403（欠费/配额/子空间权限）在 detectModelUnavailable 中被排除并返回 null，
+  // 这里给出比「通用失败」更可操作的提示（仍属请求未受理 → 不扣）
+  if (code === 'AccessDenied' || httpStatus === 403) {
+    return new GenerationError(
+      '图片服务无权访问（账户欠费、配额耗尽或工作空间受限），请检查账户状态。',
+      { billable: false }
+    );
   }
   if (code === 'DataInspectionFailed' || code === 'IPInfringementSuspect') {
     // 内容审核拒绝是 400 失败，百炼不计费 → 不扣（纠正原「照扣」假设）
-    return new GenerationError('内容审核未通过，请调整画面描述后重试。', { billable: false });
+    return new GenerationError('内容审核未通过，请调整画面描述。', { billable: false });
   }
   if (code === 'Throttling' || httpStatus === 429) {
     return new GenerationError('图片生成繁忙（触发限流），请稍后再试。', { billable: false });
   }
   if (code === 'InvalidParameter' || httpStatus === 400) {
-    return new GenerationError(`图片生成参数错误：${message ?? '请调整描述后重试。'}`, {
+    return new GenerationError(`图片生成参数错误：${message ?? '请调整描述。'}`, {
       billable: false
     });
   }
   // 其余上游明确返回的失败（5xx / 任务 FAILED 等）→ 不扣
-  return new GenerationError('图片生成失败，请稍后重试。', { billable: false });
+  return new GenerationError('图片生成失败。', { billable: false });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -121,11 +144,42 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * 明确未建连的 fetch 失败（请求未到达上游）：DNS 解析、连接被拒、证书校验。
+ * 命中时即使处于已提交阶段也不扣；其余连接中断（ECONNRESET 等）无法区分，仍按阶段照扣。
+ */
+const PRE_CONNECT_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+]);
+
+function isPreConnectError(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: string; errors?: { code?: string }[] } }).cause;
+  const codes = [cause?.code, ...(cause?.errors?.map((item) => item.code) ?? [])];
+  return codes.some((code) => typeof code === 'string' && PRE_CONNECT_ERROR_CODES.has(code));
+}
+
+/**
  * fetch 包装：停止 / 超时 / 网络错误映射为用户可读中文（详情走日志）。
  * 停止路径依赖外部 abortSignal（工具 execute 第二参数）的组合信号：
  * 用户停止 → AbortError；阶段超时 → TimeoutError（AbortSignal.timeout）。
+ * 网络错误的计费口径：明确未建连的失败（DNS / 连接被拒 / 证书）恒不扣；
+ * 其余按阶段决定——create-task 未提交 → 不扣；query-task / sync-generate 已提交 → 照扣。
  */
-async function fetchImageApi(url: string, init: RequestInit, context: string): Promise<Response> {
+async function fetchImageApi(
+  url: string,
+  init: RequestInit,
+  context: string,
+  billableOnNetworkError: boolean
+): Promise<Response> {
   try {
     return await fetch(url, init);
   } catch (error) {
@@ -136,14 +190,16 @@ async function fetchImageApi(url: string, init: RequestInit, context: string): P
     if (error instanceof DOMException && error.name === 'TimeoutError') {
       console.error('[agent] image api request timed out', { context });
       // 阶段超时：任务可能已提交并完成 → 保守照扣
-      throw new GenerationError('图片生成请求超时，请稍后重试。', { cause: error, billable: true });
+      throw new GenerationError('图片生成失败：请求超时。', { cause: error, billable: true });
     }
     console.error('[agent] image api network error', {
       context,
       error: error instanceof Error ? error.message : error
     });
-    // 提交前网络错误（未到达上游）→ 不扣
-    throw new GenerationError('图片生成网络错误，请稍后重试。', { cause: error, billable: false });
+    throw new GenerationError('图片生成失败：网络连接异常。', {
+      cause: error,
+      billable: billableOnNetworkError && !isPreConnectError(error)
+    });
   }
 }
 
@@ -174,9 +230,10 @@ async function generateViaAsyncTask(
       }),
       signal: withTimeout(signal, CREATE_TASK_TIMEOUT_MS)
     },
-    'create-task'
+    'create-task',
+    false
   );
-  const created = await readJson(createResponse);
+  const created = await readJson(createResponse, 'create-task', false);
   const createdOutput = created.output as Record<string, unknown> | undefined;
   const taskId = createdOutput?.task_id as string | undefined;
   if (!createResponse.ok || !taskId) {
@@ -197,8 +254,11 @@ async function generateViaAsyncTask(
           headers: authHeaders(),
           signal: withTimeout(signal, QUERY_TASK_TIMEOUT_MS)
         },
-        'query-task'
-      )
+        'query-task',
+        true
+      ),
+      'query-task',
+      true
     );
     const queriedOutput = queried.output as Record<string, unknown> | undefined;
     lastStatus = String(queriedOutput?.task_status ?? 'UNKNOWN');
@@ -218,7 +278,7 @@ async function generateViaAsyncTask(
   }
   console.error('[agent] image task polling timed out', { timeoutMs: POLL_TIMEOUT_MS, lastStatus });
   // 轮询超时：任务已提交、上游可能已完成计费 → 保守照扣
-  throw new GenerationError(`图片生成超时（超过 ${POLL_TIMEOUT_MS / 1000} 秒），请稍后重试。`, {
+  throw new GenerationError(`图片生成失败：等待结果超时（超过 ${POLL_TIMEOUT_MS / 1000} 秒）。`, {
     billable: true
   });
 }
@@ -253,16 +313,19 @@ async function generateViaSync(
       }),
       signal: withTimeout(signal, SYNC_GENERATE_TIMEOUT_MS)
     },
-    'sync-generate'
+    'sync-generate',
+    true
   );
-  const body = await readJson(response);
-  if (!response.ok || body.code) {
+  const body = await readJson(response, 'sync-generate', true);
+  const output = body.output as
+    | { choices?: { message?: { content?: { image?: string }[] } }[]; code?: string }
+    | undefined;
+  // body.code 与 output.code 都可能承载上游错误（见 toUserFacingError）
+  if (!response.ok || body.code || output?.code) {
     throw toUserFacingError(body, response.status, 'sync-generate');
   }
-  const output = body.output as
-    | { choices?: { message?: { content?: { image?: string }[] } }[] }
-    | undefined;
-  const url = output?.choices?.[0]?.message?.content?.[0]?.image;
+  // I2I 的 content 可能同时含 text 与 image，取第一个图片片段
+  const url = output?.choices?.[0]?.message?.content?.find((part) => part.image)?.image;
   if (!url) {
     console.error('[agent] sync image response has no image url');
     // 响应 200 但未包含图片（上游未交付可用结果）→ 不扣
@@ -272,11 +335,15 @@ async function generateViaSync(
 }
 
 /**
- * 下载临时图 → 校验 PNG 魔数与体积上限 → 返回 Buffer（临时 URL 到此为止，不外泄）。
+ * 下载临时图 → 按魔数判定真实类型（png/jpeg/webp）→ 校验体积上限 → 返回 Buffer 与 mime
+ * （临时 URL 到此为止，不外泄）。
  * 网络抖动重试 1 次（实测偶发 Unable to connect）；用户停止 / 超时不重试。
  * 图片此时已上游成功生成（已拿到临时 URL）→ 本函数所有失败均为「已生成后下载失败」→ billable=true。
  */
-async function downloadImage(url: string, signal: AbortSignal | undefined): Promise<Buffer> {
+async function downloadImage(
+  url: string,
+  signal: AbortSignal | undefined
+): Promise<{ imageBuffer: Buffer; mime: string }> {
   let response: Response | undefined;
   let lastError: unknown;
   for (let attempt = 1; attempt <= 2 && !response; attempt += 1) {
@@ -289,7 +356,7 @@ async function downloadImage(url: string, signal: AbortSignal | undefined): Prom
       }
       if (error instanceof DOMException && error.name === 'TimeoutError') {
         console.error('[agent] image download timed out', { attempt });
-        throw new GenerationError('图片下载超时，请稍后重试。', { cause: error, billable: true });
+        throw new GenerationError('图片下载超时。', { cause: error, billable: true });
       }
       console.warn('[agent] image download attempt failed', {
         attempt,
@@ -299,27 +366,35 @@ async function downloadImage(url: string, signal: AbortSignal | undefined): Prom
   }
   if (!response) {
     console.error('[agent] image download failed after retries');
-    throw new GenerationError('图片下载网络错误，请稍后重试。', {
+    throw new GenerationError('图片下载失败：网络连接异常。', {
       cause: lastError,
       billable: true
     });
   }
   if (!response.ok) {
     console.error('[agent] image download failed', { status: response.status });
-    throw new GenerationError('图片下载失败，请稍后重试。', { billable: true });
+    throw new GenerationError('图片下载失败。', { billable: true });
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (!buffer.subarray(0, 8).equals(PNG_MAGIC)) {
-    console.error('[agent] downloaded image is not PNG', {
-      headHex: buffer.subarray(0, 8).toString('hex')
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    console.error('[agent] image download interrupted');
+    // 已拿到临时 URL（上游已生成），仅字节读取中断 → 按下载失败照扣
+    throw new GenerationError('图片下载失败：响应读取中断。', { cause: error, billable: true });
+  }
+  const type = detectImageType(buffer);
+  if (!type) {
+    console.error('[agent] downloaded image is not a supported format', {
+      headHex: buffer.subarray(0, 12).toString('hex')
     });
-    throw new GenerationError('图片下载失败：返回内容不是 PNG。', { billable: true });
+    throw new GenerationError('图片下载失败：返回内容不是受支持的图片格式。', { billable: true });
   }
   if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
     console.error('[agent] image exceeds size limit', { bytes: buffer.byteLength });
     throw new GenerationError('图片体积超过 15MB 上限，已拒绝入库。', { billable: true });
   }
-  return buffer;
+  return { imageBuffer: buffer, mime: imageTypeToMime(type) };
 }
 
 /**
@@ -328,6 +403,9 @@ async function downloadImage(url: string, signal: AbortSignal | undefined): Prom
  * - I2I（传入 referenceImageUrl 时）：content = [{ image }, { text }]（3.0 系列原生支持，
  *   源图为公网可达 URL，当前传入 OSS 短期签名 URL；I2I 输入上限 10MB，由调用方预检）。
  * 内部完成「调用 → 拿临时 URL → 立即下载」；超时上限 120s（轮询）/180s（同步）。
+ * 生成调用本身不做自动重试（官方 generateImage 默认 maxRetries=2）：按张计费，
+ * 连接中断时无法确认上游是否已接单，重试有双计费风险；仅下载阶段（已生成、免费）重试 1 次。
+ * 注册表保留 qwen-image-3.0-pro，待接入模型选择器后启用（当前固定 DEFAULT_IMAGE_MODEL）。
  */
 export async function generateImage(params: {
   prompt: string;
@@ -337,7 +415,7 @@ export async function generateImage(params: {
   size?: string;
   /** 工具执行透传的 abortSignal（execute 第二参数），保证「停止」语义 */
   signal?: AbortSignal;
-}): Promise<{ imageBuffer: Buffer; mime: 'image/png' }> {
+}): Promise<{ imageBuffer: Buffer; mime: string }> {
   const entry = resolveImageModel(DEFAULT_IMAGE_MODEL);
   if (entry.protocol === 'async-task') {
     if (params.referenceImageUrl) {
@@ -345,13 +423,11 @@ export async function generateImage(params: {
       throw new GenerationError('当前图片模型不支持图像编辑。', { billable: false });
     }
     const temporaryUrl = await generateViaAsyncTask(entry, params.prompt, params.signal);
-    const imageBuffer = await downloadImage(temporaryUrl, params.signal);
-    return { imageBuffer, mime: 'image/png' };
+    return downloadImage(temporaryUrl, params.signal);
   }
   const content = params.referenceImageUrl
     ? [{ image: params.referenceImageUrl }, { text: params.prompt }]
     : [{ text: params.prompt }];
   const temporaryUrl = await generateViaSync(entry, content, params.size, params.signal);
-  const imageBuffer = await downloadImage(temporaryUrl, params.signal);
-  return { imageBuffer, mime: 'image/png' };
+  return downloadImage(temporaryUrl, params.signal);
 }

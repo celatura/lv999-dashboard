@@ -394,9 +394,17 @@ export async function createAsset(params: {
   return { id: rows[0].id, sizeBytes };
 }
 
+/** 生成图片 mime → OSS 扩展名（mime 由下载阶段按魔数判定，见 api/image-generation.ts） */
+const GENERATED_IMAGE_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp'
+};
+
 /**
  * 图片资产：应用层预生成 assetId → 转存 OSS → 一次性 insert 全字段
  * （避免「先插后更」的两次写库；prompt 存 content 列可溯源/可重试）。
+ * OSS 扩展名由 mime 决定（生成图在下载阶段已按魔数判定真实类型）。
  */
 export async function createImageAsset(params: {
   userId: string;
@@ -405,12 +413,17 @@ export async function createImageAsset(params: {
   title: string;
   prompt: string;
   imageBuffer: Buffer;
+  /** 图片 mime（下载阶段按魔数判定的真实类型） */
   mime: string;
   /** 派生来源资产 id（I2I 编辑产物传入源资产；文生图为空） */
   sourceAssetId?: string | null;
 }): Promise<{ id: string; sizeBytes: number }> {
   const assetId = randomUUID();
-  const storageKey = assetObjectKey(params.userId, assetId, 'png');
+  const storageKey = assetObjectKey(
+    params.userId,
+    assetId,
+    GENERATED_IMAGE_EXT[params.mime] ?? 'png'
+  );
   await putObject(storageKey, params.imageBuffer, params.mime);
 
   const sizeBytes = params.imageBuffer.byteLength;
@@ -435,7 +448,7 @@ export async function createImageAsset(params: {
 /**
  * 用户上传图片资产（source='upload'）：与 createImageAsset 同构——预生成 id → 转存 OSS → 一次性 insert。
  * 差异：source='upload'、conversationId=null（上传无归属会话）、content=null（上传图无 prompt）、
- * 扩展名/mime 由真实图片类型决定（png/jpg/webp，非固定 png）。不改动 createImageAsset（Agent 生成路径不受影响）。
+ * 扩展名/mime 由真实图片类型决定（png/jpg/webp），与 createImageAsset 共用同一套 mime→ext 映射。
  */
 export async function createUploadedImageAsset(params: {
   userId: string;

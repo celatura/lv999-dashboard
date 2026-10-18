@@ -175,14 +175,14 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | 工具 | 输入 | 行为 |
 | --- | --- | --- |
 | `createAsset` | `title` / `kind`(markdown\|html) / `content` | 文本作品直接落库 `assets.content`；`≤200KB`（`MAX_ASSET_SIZE_BYTES`）|
-| `createImageAsset` | `title` / `prompt` / `aspect?` | 文生图：生成 → 立即下载 → 转存 OSS → 入库图片资产 |
-| `editImageAsset` | `sourceAssetId` / `title` / `instruction` / `aspect?` | 图生图（I2I）：校验源图归属/kind/`storageKey`/≤10MB → 签名 URL 直传百炼 → 产出派生资产（`sourceAssetId` 记录血缘）|
+| `createImageAsset` | `title` / `prompt` / `aspect?` | 文生图：工具内限流（`image-generate` scope，20/分，与直连端点共用）→ 生成 → 立即下载 → 转存 OSS → 入库图片资产 |
+| `editImageAsset` | `sourceAssetId` / `title` / `instruction` / `aspect?` | 图生图（I2I）：工具内限流（`image-edit` scope，20/分）→ 校验源图归属/kind/`storageKey`/≤10MB → 签名 URL 直传百炼 → 产出派生资产（`sourceAssetId` 记录血缘）|
 | `createVideoAsset` | `title` / `prompt` / `aspect?` / `duration?(2..10)` | 文生视频（T2V）：工具内限流（video scope）→ `experimental_generateVideo`（内置轮询）→ 下载 → 转存 OSS → 入库视频资产；详见 [docs/video-generation.md](./video-generation.md) |
 | `createVideoFromImageAsset` | `sourceAssetId` / `title` / `prompt` / `aspect?` / `duration?` | 图生视频（I2V）：限流 → 校验源图（归属/`kind='image'`/`storageKey`/≤10MB）→ 签名 URL（TTL 900s）作首帧 → I2V → 入库（`sourceAssetId` 血缘）|
 | `findAssets` | `query?` / `kind?` / `limit?` | 按标题关键词 + 类型检索用户资产库，返回候选元信息（不含正文/URL）——按【标题】找「作品」供复用/改写 |
 | `readAsset` | `assetId` | 读取资产内容：markdown/html 返回正文、image/video 返回生成 prompt（design 不支持），供“基于它再创作” |
 | `knowledgeSearch` | `query` / `topK?` | 在 RAG 知识库中按【语义】检索「资料」片段（问答/综述），返回 topK 片段 + 来源标题；见 [docs/knowledge-base.md](./knowledge-base.md) |
-| `composeDesign` | `title` / `imagePrompt` / `heading?` / `subheading?` / `layout`(top-image\|full-image-bar\|left-image) / `aspect?` | **一句话生成整版设计**：`checkBalance` → 文生图（计费 image 档，比例按**版式主图区域**选最接近的一档）→ `createImageAsset`（主图仍沉淀为独立资产）→ `sharp` 读自然尺寸 → [`design/lib/layouts.ts`](../src/features/design/lib/layouts.ts) 按版式组装文档（坐标/字号/对齐全由代码计算）+ sanitize → `createDesignAsset(previewPng=null)`；返回 `{ assetId, title, kind:'design', sizeBytes, imageAssetId }`，对话内渲染「打开编辑」卡片。design 落库为纯 JSON 组装，**不额外计费**；无预览（预览由画布保存时客户端导出补上）。详见 [docs/design-editor.md](./design-editor.md) |
+| `composeDesign` | `title` / `imagePrompt` / `heading?` / `subheading?` / `layout`(top-image\|full-image-bar\|left-image) / `aspect?` | **一句话生成整版设计**：工具内限流（`image-generate`）→ `checkBalance` → 文生图（计费 image 档，比例按**版式主图区域**选最接近的一档）→ `createImageAsset`（主图仍沉淀为独立资产）→ `sharp` 读自然尺寸 → [`design/lib/layouts.ts`](../src/features/design/lib/layouts.ts) 按版式组装文档（坐标/字号/对齐全由代码计算）+ sanitize → `createDesignAsset(previewPng=null)`；返回 `{ assetId, title, kind:'design', sizeBytes, imageAssetId }`，对话内渲染「打开编辑」卡片。design 落库为纯 JSON 组装，**不额外计费**；无预览（预览由画布保存时客户端导出补上）。详见 [docs/design-editor.md](./design-editor.md) |
 
 > 区分：`findAssets` 按标题找「作品」（复用/改写/改图）；`knowledgeSearch` 按语义找「资料」（基于内容作答并标注来源）。对话中的 `[引用资产]` 块给出的 id 可直接使用，无需再检索。
 
@@ -272,8 +272,9 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - 端点：`https://dashscope.aliyuncs.com` 的 `multimodal-generation/generation`（sync 协议）。
 - T2I：`content = [{ text }]`；I2I：`content = [{ image: <公网URL> }, { text: <指令> }]`，源图用 OSS 短期签名 URL（TTL 900s）。
 - **红线**：返回的图片链接 24h 有效，必须立即下载转存 OSS，任何持久化字段不得存临时 URL。
-- 校验：PNG magic bytes、下载体积 ≤15MB；`enable_thinking` 显式关闭（否则耗时 3-4 倍）。
+- 校验：图片 magic bytes（png/jpeg/webp，mime 与 OSS 扩展名均按真实类型落库）、下载体积 ≤15MB；`enable_thinking` 显式关闭（否则耗时 3-4 倍）。
 - 用户停止时 `abortSignal` 透传，同步取消进行中的请求与轮询。
+- 计费分类：生成调用不自动重试（按张计费，重试有双计费风险）；`create-task` 阶段的网络/非 JSON 失败不扣；`query-task` / `sync` 阶段已送达后的网络中断、超时、下载失败照扣，DNS 解析失败 / 连接被拒 / 证书错误等未建连失败不扣（见 [docs/credits.md §7](./credits.md)）。
 
 ---
 
@@ -296,7 +297,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | POST | `/api/agent/assets/[id]/favorite` | 收藏 / 取消收藏（任意 kind，限流 60/分）|
 | POST | `/api/agent/assets/[id]/edit` | 直连图片编辑 I2I（不经聊天，限流 20/分，`maxDuration=300`）|
 | POST | `/api/agent/assets/generate` | 直连图片生成 T2I（设计画布「AI 生成图片」，限流 scope `image-generate` 20/分，`maxDuration=300`）——详见 design-editor.md |
-| GET | `/api/agent/assets/[id]/download` | 下载（image / design / video 有 `storageKey` 走 302 签名 URL，扩展名映射 video→mp4；文本直接返回）|
+| GET | `/api/agent/assets/[id]/download` | 下载（image / design / video 有 `storageKey` 走 302 签名 URL，扩展名按 kind/mime 映射：image→png/jpg/webp、design→png、video→mp4；文本直接返回）|
 | GET | `/api/agent/assets/[id]/raw` | 资产字节同源代理（供设计画布加载图片规避 canvas 跨域污染；带 `?snapshot=1` 且 video 时回 OSS 截帧封面）|
 | POST | `/api/agent/assets/batch-delete` | 批量删除（单次 ≤100 uuid，限流 10/分）|
 | GET / POST | `/api/agent/knowledge/documents` | 知识库文档列表 / 新增（同步摄取，限流 scope `knowledge` 30/分）——见 knowledge-base.md |

@@ -124,8 +124,8 @@ chargeOnGenerationResult({ userId, kind, run, buildCharge, fallbackCharge })
 | --- | :-: | --- |
 | 成功（返回 buffer）| — | 直接扣（`buildCharge`）|
 | Abort / 用户停止 | ✅ true | 客户端中断；任务已提交，上游可能已 SUCCEEDED 计费，无法确认 → 保守扣 |
-| 轮询/请求超时 | ✅ true | 同上，上游可能已完成计费 |
-| 下载阶段失败 / 体积超限 / MP4·PNG 校验失败 | ✅ true | 图·视频已生成，上游已计费 |
+| 轮询/请求超时 / 已提交后的网络中断 | ✅ true | 同上，上游可能已完成计费 |
+| 下载阶段失败 / 体积超限 / MP4·图片格式校验失败 | ✅ true | 图·视频已生成，上游已计费 |
 | **内容审核拒绝**（`DataInspectionFailed`）| ❌ **false** | **百炼「失败不计费」，审核拒绝是 400 失败，上游未计费**（照扣等于作者赚差价）|
 | 鉴权失败 / 账户欠费（`InvalidApiKey`/`AccessDenied`/`Arrearage`）| ❌ false | 请求未受理 |
 | 参数错误（`InvalidParameter`）/ 限流（`Throttling`）| ❌ false | 任务未创建 / 被拒 |

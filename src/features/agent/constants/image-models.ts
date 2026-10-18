@@ -20,7 +20,7 @@
  *
  * 协议形态：
  * - sync：POST /api/v1/services/aigc/multimodal-generation/generation
- *   → output.choices[0].message.content[0].image
+ *   → output.choices[0].message.content 中首个 image 片段（I2I 可能先 text 后 image）
  * - async-task：旧异步协议（X-DashScope-Async + 轮询 /api/v1/tasks/{id}）。
  *   3.0 系列同样支持异步接入（批量/长任务场景）；当前注册表未使用，保留代码路径备用。
  *
@@ -38,8 +38,6 @@ export interface ImageModelRegistryEntry {
   description: string;
   providerModelId: string;
   protocol: ImageProtocol;
-  /** 正向提示词上限（官方推荐值；超出由服务端截断） */
-  maxPromptTokens: number;
 }
 
 /** MVP 单默认模型（不做选择器）；3.0 标准版兼顾质量与速度，单价低于旧代 qwen-image */
@@ -50,15 +48,14 @@ export const IMAGE_MODEL_REGISTRY: Record<ImageModelKey, ImageModelRegistryEntry
     label: 'Qwen-Image 3.0',
     description: '千问图像 3.0 标准版：文字渲染稳定、复杂图文一次生成，兼顾质量与速度',
     providerModelId: 'qwen-image-3.0',
-    protocol: 'sync',
-    maxPromptTokens: 4500
+    protocol: 'sync'
   },
+  // 旗舰档预留：接入模型选择器后启用（当前 generateImage 固定 DEFAULT_IMAGE_MODEL）
   'qwen-image-3.0-pro': {
     label: 'Qwen-Image 3.0 Pro',
     description: '千问图像 3.0 旗舰：复杂版面 / 密集小字渲染与真实质感更强（较慢、较贵）',
     providerModelId: 'qwen-image-3.0-pro',
-    protocol: 'sync',
-    maxPromptTokens: 4500
+    protocol: 'sync'
   }
 };
 

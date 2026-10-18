@@ -5,7 +5,11 @@ import { GenerationError } from '@/features/agent/api/generation-error';
 import { generateImage } from '@/features/agent/api/image-generation';
 import { createImageAsset } from '@/features/agent/api/service';
 import { generateImageRequestSchema } from '@/features/agent/api/types';
-import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
+import {
+  IMAGE_RATE_LIMIT,
+  IMAGE_RATE_WINDOW_SECONDS,
+  MAX_REQUEST_BYTES
+} from '@/features/agent/constants/limits';
 import { ASPECT_PRESETS } from '@/features/agent/constants/image-models';
 import { checkBalance } from '@/features/credits/api/service';
 import { chargeOnGenerationResult } from '@/features/credits/lib/billing';
@@ -15,10 +19,6 @@ import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/c
 export const runtime = 'nodejs';
 // T2I 同步生成实测 10-60s（上游同步超时 180s），与 I2I 直连编辑同档
 export const maxDuration = 300;
-
-/** 生图限流：T2I 是付费模型调用（≈0.18 元/张），20 次/分/用户（与 image-edit 同档） */
-const IMAGE_GENERATE_RATE_LIMIT = 20;
-const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 /** 缺省资产标题：prompt 压平空白后截断（title 上限 100，展示以短为宜） */
 const FALLBACK_TITLE_MAX_LENGTH = 60;
@@ -47,12 +47,12 @@ export async function POST(request: Request) {
 
   // 限流与读 body 并行；按「限流 → 体积 → 解析 → 校验」顺序处理
   const [allowed, rawBody] = await Promise.all([
-    checkRateLimit('image-generate', userId, IMAGE_GENERATE_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS),
+    checkRateLimit('image-generate', userId, IMAGE_RATE_LIMIT, IMAGE_RATE_WINDOW_SECONDS),
     request.text()
   ]);
   if (!allowed) {
     return apiError(429, 'too_many_requests', 'Too many requests', {
-      'Retry-After': String(RATE_LIMIT_WINDOW_SECONDS)
+      'Retry-After': String(IMAGE_RATE_WINDOW_SECONDS)
     });
   }
   if (Buffer.byteLength(rawBody, 'utf8') > MAX_REQUEST_BYTES) {
@@ -83,6 +83,8 @@ export async function POST(request: Request) {
   }
 
   try {
+    // 直连端点刻意不透传 request.signal：这里没有「停止」入口，客户端断开时中止会导致
+    // 「已按 billable 扣费但资产未落库」；生成交给 maxDuration 兜底完成（仅聊天路径需要 abortSignal 语义）。
     // 发起后按结果扣（T2I 档）：审核拒绝/鉴权/参数/限流（billable=false）不扣；
     // abort/超时/已生成后下载失败（billable=true）照扣；成功按张扣费
     const asset = await chargeOnGenerationResult({

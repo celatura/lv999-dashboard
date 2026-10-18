@@ -8,6 +8,7 @@ import {
   type SkillRegistryEntry
 } from '../constants/skills';
 import { ASPECT_KEYS, ASPECT_PRESETS, type AspectKey } from '../constants/image-models';
+import { IMAGE_RATE_LIMIT, IMAGE_RATE_WINDOW_SECONDS } from '../constants/limits';
 import { DEFAULT_I2V_MODEL, VIDEO_ASPECT_KEYS } from '../constants/video-models';
 import { resolveModel } from './provider';
 import { generateImage } from './image-generation';
@@ -49,7 +50,7 @@ export const MAX_ASSET_SIZE_BYTES = 200 * 1024;
 const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，帮助用户产出高质量的内容作品。
 
 工作方式：
-1. 先用 1-3 句话说明你的创作计划，然后开始执行。
+1. 先用 1-3 句话说明你的创作计划，然后开始执行。图片类生成工具（createImageAsset / editImageAsset / composeDesign）返回失败后不要自动重试，如实告知用户，由用户决定是否再试。
 2. 当产出的内容构成完整作品（文案、文章、报告、网页等）时，必须调用 createAsset 工具把作品保存为资产：
    - Markdown 文章/文案 → kind 用 "markdown"
    - 完整 HTML 网页 → kind 用 "html"（必须是可直接打开运行的完整文档，样式与脚本内联，不依赖本地文件）
@@ -321,6 +322,19 @@ function createImageAssetTool(params: { userId: string; conversationId: string }
     description: CREATE_IMAGE_ASSET_DESCRIPTION,
     inputSchema: createImageAssetInputSchema,
     execute: async ({ title, prompt, aspect }, { abortSignal }) => {
+      // 限流：付费模型调用（与直连端点同 scope、同额度），命中直接拒绝、不发起上游
+      const allowed = await checkRateLimit(
+        'image-generate',
+        params.userId,
+        IMAGE_RATE_LIMIT,
+        IMAGE_RATE_WINDOW_SECONDS
+      );
+      if (!allowed) {
+        throw new GenerationError(
+          `图片生成过于频繁（每 ${IMAGE_RATE_WINDOW_SECONDS} 秒最多 ${IMAGE_RATE_LIMIT} 次），请稍后再试。`,
+          { billable: false }
+        );
+      }
       // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用），中文错误由工具输出展示
       if (!(await checkBalance(params.userId))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
@@ -360,6 +374,19 @@ export function editImageAssetTool(params: { userId: string; conversationId: str
     description: EDIT_IMAGE_ASSET_DESCRIPTION,
     inputSchema: editImageAssetInputSchema,
     execute: async ({ sourceAssetId, title, instruction, aspect }, { abortSignal }) => {
+      // 限流：付费模型调用（与直连编辑端点同 scope、同额度），命中直接拒绝、不发起上游
+      const allowed = await checkRateLimit(
+        'image-edit',
+        params.userId,
+        IMAGE_RATE_LIMIT,
+        IMAGE_RATE_WINDOW_SECONDS
+      );
+      if (!allowed) {
+        throw new GenerationError(
+          `图片编辑过于频繁（每 ${IMAGE_RATE_WINDOW_SECONDS} 秒最多 ${IMAGE_RATE_LIMIT} 次），请稍后再试。`,
+          { billable: false }
+        );
+      }
       // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用）
       if (!(await checkBalance(params.userId))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
@@ -688,6 +715,19 @@ function composeDesignTool(params: { userId: string; conversationId: string }) {
       { title, imagePrompt, heading, subheading, layout, aspect },
       { abortSignal }
     ) => {
+      // 限流：主图生成是付费调用（与 createImageAsset 同 scope、同额度）
+      const allowed = await checkRateLimit(
+        'image-generate',
+        params.userId,
+        IMAGE_RATE_LIMIT,
+        IMAGE_RATE_WINDOW_SECONDS
+      );
+      if (!allowed) {
+        throw new GenerationError(
+          `图片生成过于频繁（每 ${IMAGE_RATE_WINDOW_SECONDS} 秒最多 ${IMAGE_RATE_LIMIT} 次），请稍后再试。`,
+          { billable: false }
+        );
+      }
       // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用）
       if (!(await checkBalance(params.userId))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);

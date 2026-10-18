@@ -4,7 +4,11 @@ import { isUuid } from '@/lib/utils';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { GenerationError } from '@/features/agent/api/generation-error';
 import { ImageEditError, editImageAssetCore } from '@/features/agent/api/image-edit';
-import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
+import {
+  IMAGE_RATE_LIMIT,
+  IMAGE_RATE_WINDOW_SECONDS,
+  MAX_REQUEST_BYTES
+} from '@/features/agent/constants/limits';
 import { editImageRequestSchema } from '@/features/agent/api/types';
 import { checkBalance } from '@/features/credits/api/service';
 import { chargeOnGenerationResult } from '@/features/credits/lib/billing';
@@ -14,10 +18,6 @@ import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/c
 export const runtime = 'nodejs';
 // I2I 同步生成实测 13-45s（上限 180s 超时），与 chat 路由同档
 export const maxDuration = 300;
-
-/** 图片编辑限流：I2I 是付费模型调用（≈0.20 元/次），20 次/分/用户 */
-const IMAGE_EDIT_RATE_LIMIT = 20;
-const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -38,12 +38,12 @@ export async function POST(request: Request, context: RouteContext) {
 
   // 限流与读 body 并行；按「限流 → 体积 → 解析 → 校验」顺序处理
   const [allowed, rawBody] = await Promise.all([
-    checkRateLimit('image-edit', userId, IMAGE_EDIT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS),
+    checkRateLimit('image-edit', userId, IMAGE_RATE_LIMIT, IMAGE_RATE_WINDOW_SECONDS),
     request.text()
   ]);
   if (!allowed) {
     return apiError(429, 'too_many_requests', 'Too many requests', {
-      'Retry-After': String(RATE_LIMIT_WINDOW_SECONDS)
+      'Retry-After': String(IMAGE_RATE_WINDOW_SECONDS)
     });
   }
   if (Buffer.byteLength(rawBody, 'utf8') > MAX_REQUEST_BYTES) {
@@ -74,6 +74,8 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
+    // 直连端点刻意不透传 request.signal：这里没有「停止」入口，客户端断开时中止会导致
+    // 「已按 billable 扣费但资产未落库」；生成交给 maxDuration 兜底完成（仅聊天路径需要 abortSignal 语义）。
     // 发起后按结果扣（I2I 与 T2I 同价）：源图预检失败（ImageEditError，未发起上游）不扣；
     // abort/超时/下载失败（billable）照扣；成功按张扣费
     const asset = await chargeOnGenerationResult({

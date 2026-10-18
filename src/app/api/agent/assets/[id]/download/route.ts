@@ -8,17 +8,23 @@ export const runtime = 'nodejs';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function buildFileName(title: string, kind: string): string {
+function buildFileName(title: string, kind: string, mime: string | null): string {
   const safeTitle = title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'asset';
   // design 有 storageKey（导出 PNG 预览），走 302 签名 URL 分支，下载得到 PNG；video 下载得到 mp4
   const extension =
     kind === 'html'
       ? 'html'
-      : kind === 'image' || kind === 'design'
+      : kind === 'design'
         ? 'png'
-        : kind === 'video'
-          ? 'mp4'
-          : 'md';
+        : kind === 'image'
+          ? mime === 'image/jpeg'
+            ? 'jpg'
+            : mime === 'image/webp'
+              ? 'webp'
+              : 'png'
+          : kind === 'video'
+            ? 'mp4'
+            : 'md';
   return `${safeTitle}.${extension}`;
 }
 
@@ -40,7 +46,7 @@ export async function GET(_request: Request, context: RouteContext) {
   // 注意：判据必须是 storageKey 而不是 content —— 图片资产的 content 列存的是生成 prompt（不为 null），
   // 曾因此把 prompt 文本当作图片内容返回（历史缺陷：下载得到 ~1KB 的“PNG”）。
   if (asset.storageKey) {
-    const fileName = buildFileName(asset.title, asset.kind);
+    const fileName = buildFileName(asset.title, asset.kind, asset.mime);
     const url = await getSignedUrl(asset.storageKey, 300, {
       contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
     });
@@ -59,7 +65,7 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   // 文本资产（内容存 content 列）：直接返回
-  const fileName = buildFileName(asset.title, asset.kind);
+  const fileName = buildFileName(asset.title, asset.kind, asset.mime);
   return new Response(asset.content, {
     headers: {
       'Content-Type': asset.mime ?? 'text/plain; charset=utf-8',
