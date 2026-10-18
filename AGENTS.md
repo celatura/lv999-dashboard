@@ -9,7 +9,7 @@ This file provides essential information for AI coding agents working on this pr
 **LV999** is an AI-native multimodal creation platform (Agent creation, design canvas, RAG knowledge base, and a unified asset library) built on top of a production-grade admin dashboard base. Tech stack:
 
 - **Framework**: Next.js 16 (App Router)
-- **Language**: TypeScript 5.7
+- **Language**: TypeScript 5.9
 - **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui (base-nova style, Base UI primitives)
 - **Authentication**: Better Auth (self-hosted; email + password)

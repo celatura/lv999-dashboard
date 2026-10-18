@@ -25,7 +25,7 @@
 | 类别 | 选型 |
 | --- | --- |
 | 框架 | Next.js 16（App Router） |
-| 语言 | TypeScript 5.7（strict） |
+| 语言 | TypeScript 5.9（strict） |
 | UI 组件 | shadcn/ui（Base UI primitives） |
 | 样式 | Tailwind CSS v4 |
 | 认证 | Better Auth（自托管 · 邮箱密码 · 自定义头像） |
@@ -36,7 +36,7 @@
 | 对象存储 | 阿里云 OSS（图片 / 视频等二进制资产；视频封面用 OSS 原生截帧） |
 | 缓存 / 流恢复 | Redis（resumable-stream 与停止信号 / 限流） |
 | 数据请求 | TanStack Query v5（SSR + Suspense） |
-| 数据表格 | TanStack Table v8 |
+| 数据表格 | TanStack Table v9 |
 | 表单 | TanStack Form + Zod v4 |
 | URL 状态 | nuqs |
 | 图表 | Recharts |
