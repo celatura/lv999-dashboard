@@ -1,14 +1,14 @@
 # Credits 消耗系统
 
-LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频 / 知识库摄取背后调用的是**部署者提供的百炼 API Key**，每次调用产生真实费用。本系统按 **Credits（积分）** 扣费、余额不足即拒绝，杜绝开源场景下「陌生人刷爆作者 API」的成本风险。
+LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频 / 知识库摄取背后调用的是**部署者提供的百炼 API Key**，每次调用产生真实费用。本系统按 **Credits（积分）** 扣费：**余额耗尽后拒绝**（固定价入口按单次价格校验，见 §5/§10），杜绝开源场景下「陌生人刷爆作者 API」的成本风险。
 
-> **核心取向**：公开注册保持开放，但新用户默认 **0 积分**、无体验额度；计费入口的 `checkBalance` 对 0 余额直接拒绝（HTTP 402）。成本上界钉死为 **0**（注册零成本，除非管理员 `grant`）。方案以**极简**为第一原则：无预扣、无冻结、无有效期、无支付、无退款。术语统一 **Credits**（UI 文案用 Credits）。**零新增 npm 依赖、零新增环境变量**（复用 `DATABASE_URL`）。
+> **核心取向**：公开注册保持开放，但新用户默认 **0 积分**、无体验额度；计费入口的 `checkBalance` 拒绝余额不足的调用（HTTP 402）：对话/知识库按 `balance > 0`，图片/视频按「余额 ≥ 单次固定价」。无 `grant` 时成本上界为 **0**；并发透支敞口见 §10。方案以**极简**为第一原则：无预扣、无冻结、无有效期、无支付、无退款。术语统一 **Credits**（UI 文案用 Credits）。**零新增 npm 依赖、零新增环境变量**（复用 `DATABASE_URL`）。
 
 ---
 
 ## 1. 概览
 
-- **计费入口**（发起上游调用前 `checkBalance`，`balance > 0` 放行，否则 402）：对话 `chat`、图片（工具 + 整版设计工具 + 直连生成/编辑端点）、视频（T2V/I2V 工具）、知识库摄取（新增/上传/重试）。
+- **计费入口**（发起上游调用前 `checkBalance`：对话/知识库 `balance > 0`，图片/视频 `balance ≥ 单次固定价`，否则 402）：对话 `chat`、图片（工具 + 整版设计工具 + 直连生成/编辑端点）、视频（T2V/I2V 工具）、知识库摄取（新增/上传/重试）。
 - **扣费时机**：按真实 usage「**发起后按结果扣**」——对话在流 `onEnd` 按累计 token 结算；图片/视频在上游调用返回后按结果判定；知识库在摄取成功后按 embedding tokens 结算。
 - **计量**：后端按 token / 张 / 秒精算，前端只展示余额与流水，不暴露档位估算。
 - **余额展示**（不常驻）：账号下拉菜单显示余额 + `/dashboard/profile/credits` 看流水。
@@ -30,16 +30,18 @@ LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频
 
 ## 3. 定价引擎（`features/credits/{constants/pricing.ts, lib/pricing.ts}`）
 
-**基准 1 credit ≈ ¥0.01**；credits 为整数，`Math.max(1, Math.ceil(...))` 向上取整、单次至少 1（作者侧永不亏损）；`undefined` token 防御为 0 并 `console.warn`。费率已按**百炼 2026-09 中国内地真实单价**校准：
+**基准 1 credit ≈ ¥0.01**；credits 为整数，`Math.max(1, Math.ceil(...))` 向上取整、单次至少 1（避免小数累积）；`undefined` token 防御为 0 并 `console.warn`。费率已按**百炼 2026-09 中国内地真实单价**校准：
+
+> **「不亏损」的边界**：视频档位按上游 API 成本价（零毛利），未覆盖 OSS/DB/函数与失败吸收；该表述仅指上游 API 调用本身，不代表整体盈利。
 
 | 类型 | 定价（`CREDIT_PRICING`）| 真实成本对照 |
 | --- | --- | --- |
-| 对话 | 按模型 input/output 每 1K token 分价（如 flash 0.2/0.6、max 0.8/2.4；未列模型回退 `chatFallback`）| 百炼 output 通常 3-4 倍于 input |
+| 对话 | 按模型 input/output 每 1K token 分价（如 flash 0.2/0.6、max 0.8/2.4；未列模型回退 `chatFallback` 并 `console.warn`，防新模型漏配价）| 百炼 output 通常 3-4 倍于 input |
 | 图片 | `imagePerAsset=30` / `imageEditPerAsset=30`（T2I 与 I2I 同价）| qwen-image ≈¥0.2-0.3/张 |
 | 视频 | 分辨率档每秒：`480P:30 / 720P:60 / 1080P:100` | 百炼中国内地 480P≈¥0.3、720P≈¥0.6、1080P≈¥1.0 每秒 |
 | 知识库摄取 | `embeddingPer1k=0.1` | text-embedding-v4≈¥0.5/百万 token |
 
-纯函数 `priceChat(modelKey, inputTokens, outputTokens)` / `priceImage(isEdit)` / `priceVideo(resolution, durationSeconds)` / `priceEmbedding(tokens)`。体验号建议额度 `DEFAULT_GRANT_TRIAL=500`（≈¥5，够 1 条 720P 短视频 + 大量对话/图片）。
+纯函数 `priceChat(modelKey, inputTokens, outputTokens)` / `priceImage(isEdit)` / `priceVideo(resolution, durationSeconds)` / `priceEmbedding(tokens)`。体验号建议额度 `DEFAULT_GRANT_TRIAL=500`（≈¥5；720P·5s 短视频 = 300 credits，剩余约 6 张图或大量纯文本对话）。
 
 ---
 
@@ -48,10 +50,10 @@ LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频
 | 函数 | 行为 |
 | --- | --- |
 | `getBalance(userId)` | 读余额，无记录返回 0 |
-| `checkBalance(userId)` | 入口拦截判据：`balance > 0` |
+| `checkBalance(userId, minCost?)` | 入口拦截：对话/知识库 `balance > 0`；图片/视频传 `minCost` → `balance ≥ 单次固定价` |
 | `chargeCredits({userId,cost,kind,meta})` | **原子扣费**：事务内懒创建账户 → 单条 SQL `balance = balance - cost`（非读改写，PG 行锁防竞态）`RETURNING balanceAfter` → insert ledger（`delta=-cost`）。`cost` 经 `max(1,ceil)`；**不设「余额不足则跳过」，照扣至负** |
 | `grantCredits({userId,amount,note})` | upsert 账户 `balance += amount` + ledger（`delta=+`，kind=grant）|
-| `setBalance({userId,amount,note})` | 直接设定余额 + 写调整流水（`delta=新-旧`）|
+| `setBalance({userId,amount,note})` | 直接设定余额 + 写调整流水（`delta=新-旧`）；`SELECT … FOR UPDATE` 锁行，避免与并发扣费交错 |
 | `listLedger(userId, filters)` | 流水分页（kind 可选筛选，createdAt 倒序）|
 
 客户端经 `api/queries.ts`（`creditKeys` + `balanceQueryOptions`/`ledgerQueryOptions`）走 `/api/agent/credits*` 只读查询；**普通用户前端无写端点**（扣费在各入口内部）。发放/设定改由**管理员后台**经 `/api/admin/users/[id]/credits`（`isAdmin` 403 守卫）复用 `grantCredits`/`setBalance`，另有 CLI 应急后备。
@@ -65,10 +67,10 @@ LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频
 | 入口 | 拦截位置 | 拒绝形式 |
 | --- | --- | --- |
 | 对话 | `chat/route.ts` POST（限流后、建流前）| `apiError(402, 'insufficient_credits', …)` |
-| 图片（工具）| `createImageAssetTool`/`editImageAssetTool`/`composeDesignTool`（整版设计内含一次文生图）execute 入口 | `throw new Error(INSUFFICIENT_CREDITS_MESSAGE)`（工具 output-error 展示中文）|
+| 图片（工具）| `createImageAssetTool`/`editImageAssetTool`/`composeDesignTool`（整版设计内含一次文生图）execute 入口（先限流后余额；按单张固定价校验）| `throw new Error(INSUFFICIENT_CREDITS_MESSAGE)`（工具 output-error 展示中文）|
 | 图片（直连生成）| `assets/generate` route（设计画布「AI 生成图片」，限流后、调用前）| `apiError(402, …)` |
 | 图片（直连编辑）| `assets/[id]/edit` route（资产行「继续修改」+ 设计画布「AI 修改」）| `apiError(402, …)` |
-| 视频（工具）| `createVideoAssetTool`/`createVideoFromImageAssetTool` execute（与 video 限流并列）| `throw new Error(INSUFFICIENT_CREDITS_MESSAGE)` |
+| 视频（工具）| `createVideoAssetTool`/`createVideoFromImageAssetTool` execute（与 video 限流并列；按 720P×入参时长校验）| `throw new GenerationError(INSUFFICIENT_CREDITS_MESSAGE, { billable: false })`（同走工具 output-error 展示中文）|
 | 知识库摄取 | `POST /documents`、`/documents/upload`、`/documents/[id]/retry` | `apiError(402, …)` |
 
 文案单一来源 [`constants/credits.ts`](../src/features/credits/constants/credits.ts)：`INSUFFICIENT_CREDITS_MESSAGE`（中文，工具/前端展示）+ `INSUFFICIENT_CREDITS_API_MESSAGE`（英文，错误信封）。
@@ -106,6 +108,7 @@ chargeOnGenerationResult({ userId, kind, run, buildCharge, fallbackCharge })
 - 图片：`priceImage(isEdit)`；视频：`priceVideo(resolution, duration)`（成功用 `generateVideoAsset` 回吐的实际 resolution/duration，失败用入参兜底估算）。
 - **图片计费调用点同一口径**：聊天工具 `createImageAssetTool`（T2I，`priceImage(false)`）/ 聊天工具 `composeDesignTool`（整版设计内含的 T2I，`priceImage(false)`，`meta.compose=true`；其后的 design 落库不再计费）/ 直连生成端点 `assets/generate`（设计画布 AI 生图，T2I，`priceImage(false)`）/ 直连编辑端点 `assets/[id]/edit` 与聊天 `editImageAssetTool`（I2I，`priceImage(true)`，`meta.sourceAssetId` 记血缘）；流水 `meta` 均带 `assetId` 与 `edit` 标志。
 - 视频工具入口 `checkBalance` 与 `checkRateLimit('video', …)` 并列（任一不过即抛中文错误）。
+- **扣费失败不阻断结果**：生成与落库成功后 `chargeCredits` 抛错仅 `console.error` 并照常返回资产；billable 失败路径的兜底扣费同样不掩盖原始生成错误。极端情况下存在「已交付未扣费」，需按 `[credits]` 日志对账（见 §10）。
 
 ### 6.3 知识库摄取（`knowledge/lib/{embeddings,ingest}.ts`）
 
@@ -127,7 +130,7 @@ chargeOnGenerationResult({ userId, kind, run, buildCharge, fallbackCharge })
 | 轮询/请求超时 / 已提交后的网络中断 | ✅ true | 同上，上游可能已完成计费 |
 | 下载阶段失败 / 体积超限 / MP4·图片格式校验失败 | ✅ true | 图·视频已生成，上游已计费 |
 | **内容审核拒绝**（`DataInspectionFailed`）| ❌ **false** | **百炼「失败不计费」，审核拒绝是 400 失败，上游未计费**（照扣等于作者赚差价）|
-| 鉴权失败 / 账户欠费（`InvalidApiKey`/`AccessDenied`/`Arrearage`）| ❌ false | 请求未受理 |
+| 鉴权失败 / 账户欠费（`InvalidApiKey`/`Arrearage`；403 `access_denied` 由模型可用性识别接管）| ❌ false | 请求未受理 |
 | 参数错误（`InvalidParameter`）/ 限流（`Throttling`）| ❌ false | 任务未创建 / 被拒 |
 | 网络错误（提交前 fetch 失败）/ 配置缺失 / 非 JSON 网关错误 | ❌ false | 未到达上游 |
 
@@ -162,25 +165,27 @@ bun scripts/credit-admin.ts set <userId> <amount> [--note "..."]      # 直接�
 
 ## 10. 关键约束与设计取舍
 
-- **单次透支（固有）**：`balance > 0` 放行 + 无预扣/无估算 → 已 grant 账号单次调用可透支至负；余额负后 `checkBalance` 全拦。成本上界 = grant 额度 + 单次最大消耗（一条长视频）。对「0 余额拦截陌生人」目标已完全达成。
+- **透支敞口（固定价已收窄）**：图片/视频入口按单次固定价校验（不足即 402），对话与知识库摄取（token / embedding 成本事前未知）仍 `balance > 0` 放行，单次可透支至负。
+  - 并发上界：`checkBalance` 与扣费非原子、无预扣，N 个并发请求可各自通过 → **成本上界 = Σgrant + N × 单次最大消耗**；N 受入口限流约束（对话/图片 20 次/分、视频 5 次/分、知识库 30 次/分），对话单次上限取决于模型上下文与 6 步上限，知识库摄取上限取决于单文档 token，均不按余额封顶。
+  - 进一步收窄需「每用户进行中重任务 ≤1」并发锁或预扣/冻结（见 §11）。
 - **原子扣费**：`chargeCredits` 单条 SQL `balance = balance - cost`（非读改写）+ 同事务 insert ledger，PG 行锁防并发竞态。
 - **对话超时链路**：`chargeCredits` 在 `onEnd`（流末尾）执行，不阻塞流式；`usageSink` 每请求新建（serverless 无状态，无跨请求污染）。
 - **审核拒绝不扣的依据**：以百炼官方「失败不计费、仅对成功生成计费」为准，不臆断（详见 §7）。
-- **结算不阻断主流程**：对话/知识库的 `chargeCredits` 失败仅记录日志，不回滚已完成的生成/摄取（避免因计费故障丢失用户产物）。
+- **结算不阻断主流程（含图片/视频）**：`chargeCredits` 失败仅记录日志，不回滚已完成的生成/摄取或已落库资产；无自动补偿，漏收需按 `[credits]` 日志对账（见 §6.2/§7）。
 
 ---
 
 ## 11. 明确延后（未实现）
 
-预扣/冻结/退款、有效期/周期清零、多来源扣款排序、支付、低余额警告、事前估算弹窗/档位展示、基于角色的 admin 权限（当前用 `ADMIN_USER_IDS` env 白名单）、`knowledgeSearch` 检索计费、认证方 webhook 自动开户、余额变负的阻断（接受单次透支）。
+预扣/冻结/退款、有效期/周期清零、多来源扣款排序、支付、低余额警告、事前估算弹窗/档位展示、基于角色的 admin 权限（当前用 `ADMIN_USER_IDS` env 白名单）、`knowledgeSearch` 检索计费、认证方 webhook 自动开户、对话/知识库的余额变负阻断（接受单次透支）、**每用户进行中重任务并发锁**、**计费失败自动补偿/对账**。
 
 ---
 
 ## 12. 手动验收清单
 
 - **发放/查询**：`credit-admin.ts grant` → 余额增加、流水有 grant 记录；`chargeCredits` → 余额原子减少、`balanceAfter` 正确；无账户 user `getBalance`=0。
-- **拦截**：0 余额账号 → 对话/生图/生视频/知识库摄取全部 402，无上游调用。
+- **拦截**：0 余额账号 → 全部 402；余额低于单次固定价（如 1 credit 点 720P·5s 视频）→ 图片/视频 402（`minCost`），均无上游调用。
 - **对话**：grant 后对话 → 余额按 token 减少、流水 meta 记 tokens；**停止生成** → 已完成步 usage 仍扣；**刷新重连** → 不重复扣；`failed` 且 0 token → 不扣。
-- **图片/视频**：成功 → 按张/秒扣；鉴权/参数/限流/**审核拒绝** → 不扣；abort/超时/下载失败 → 照扣（§7）。
+- **图片/视频**：成功 → 按张/秒扣；鉴权/参数/限流/**审核拒绝** → 不扣；abort/超时/下载失败 → 照扣（§7）；扣费失败不影响资产返回（§6.2）。
 - **知识库**：新增/上传/重试 → 摄取成功按 embedding tokens 扣；失败不扣；`knowledgeSearch` 不扣。
 - **前端**：账号下拉打开显示余额；`/dashboard/profile/credits` 流水表展示每笔（类型/±/余额/详情摘要）；透支至负后后续调用被 402 拦。

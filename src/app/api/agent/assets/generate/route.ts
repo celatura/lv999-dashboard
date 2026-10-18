@@ -77,8 +77,8 @@ export async function POST(request: Request) {
     return apiError(400, 'invalid_request', 'prompt is required (1..2000 chars)');
   }
 
-  // 计费入口拦截：余额 ≤0 直接 402（不发起上游调用）
-  if (!(await checkBalance(userId))) {
+  // 计费入口拦截：余额不足以支付单张固定价直接 402（不发起上游调用）
+  if (!(await checkBalance(userId, priceImage(false)))) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
 

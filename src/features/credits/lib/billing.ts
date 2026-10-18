@@ -32,21 +32,34 @@ export async function chargeOnGenerationResult<T>(params: {
     result = await params.run();
   } catch (error) {
     if (isBillableError(error)) {
-      await chargeCredits({
-        userId: params.userId,
-        cost: params.fallbackCharge.cost,
-        kind: params.kind,
-        meta: params.fallbackCharge.meta
-      });
+      try {
+        await chargeCredits({
+          userId: params.userId,
+          cost: params.fallbackCharge.cost,
+          kind: params.kind,
+          meta: params.fallbackCharge.meta
+        });
+      } catch (chargeError) {
+        // 兜底扣费失败不掩盖原始生成错误（漏收由作者吸收，需按日志对账）
+        console.error(
+          '[credits] fallback charge failed (generation error preserved):',
+          chargeError
+        );
+      }
     }
     throw error;
   }
   const charge = params.buildCharge(result);
-  await chargeCredits({
-    userId: params.userId,
-    cost: charge.cost,
-    kind: params.kind,
-    meta: charge.meta
-  });
+  try {
+    await chargeCredits({
+      userId: params.userId,
+      cost: charge.cost,
+      kind: params.kind,
+      meta: charge.meta
+    });
+  } catch (chargeError) {
+    // 生成与落库已成功：结算失败不阻断结果返回（与对话/知识库口径一致），漏收由作者吸收
+    console.error('[credits] settle charge failed (result kept):', chargeError);
+  }
   return result;
 }

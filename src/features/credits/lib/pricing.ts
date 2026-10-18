@@ -2,7 +2,7 @@
  * 定价引擎（纯函数）：token / 张 / 秒 → credits。
  *
  * 规则：ceil 向上取整、单次至少 1 credit（Math.max(1, Math.ceil(...))）——
- * 宁可多扣不足 1，避免小数累积与负零，作者侧永不亏损。
+ * 宁可多扣不足 1，避免小数累积与负零；「不亏损」仅指上游 API 成本，不含基础设施与失败吸收。
  * token 为 undefined 时按 0 处理并 console.warn（provider 未回 usage 的防御）。
  */
 
@@ -25,7 +25,13 @@ function safeTokens(value: number | undefined, label: string): number {
 
 function resolveChatPricing(modelKey: string): ChatModelPricing {
   const table = CREDIT_PRICING.chatPerModel as Record<string, ChatModelPricing | undefined>;
-  return table[modelKey] ?? CREDIT_PRICING.chatFallback;
+  const pricing = table[modelKey];
+  if (!pricing) {
+    // 注册表新增模型但未配价：回退 flash 费率会低估成本，打日志避免静默漏收
+    console.warn(`[credits] pricing missing for chat model "${modelKey}", fallback to flash rate`);
+    return CREDIT_PRICING.chatFallback;
+  }
+  return pricing;
 }
 
 /** 对话：input/output 分价，按模型每 1K token 费率换算 */

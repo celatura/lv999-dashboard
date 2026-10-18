@@ -335,8 +335,8 @@ function createImageAssetTool(params: { userId: string; conversationId: string }
           { billable: false }
         );
       }
-      // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用），中文错误由工具输出展示
-      if (!(await checkBalance(params.userId))) {
+      // 计费入口拦截：余额不足以支付单张固定价直接拒绝（不发起上游调用），中文错误由工具输出展示
+      if (!(await checkBalance(params.userId, priceImage(false)))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
       }
       // 「调用 → 拿临时 URL → 立即下载」在 generateImage 内完成（临时 URL 不外泄）；
@@ -387,8 +387,8 @@ export function editImageAssetTool(params: { userId: string; conversationId: str
           { billable: false }
         );
       }
-      // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用）
-      if (!(await checkBalance(params.userId))) {
+      // 计费入口拦截：余额不足以支付单次编辑固定价直接拒绝（不发起上游调用）
+      if (!(await checkBalance(params.userId, priceImage(true)))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
       }
       // 核心流程（预检 → 签名 URL → I2I → 落库血缘）抽至 image-edit.ts，与直连端点复用；
@@ -450,12 +450,12 @@ function createVideoAssetTool(params: { userId: string; conversationId: string }
           { billable: false }
         );
       }
-      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用；不扣费）
-      if (!(await checkBalance(params.userId))) {
+      // 工具默认 720P（generateVideoAsset 缺省档）；错误兜底与入口余额校验均按入参时长估算
+      const fallbackDuration = duration ?? 5;
+      // 计费入口拦截：余额不足以支付本次固定价（720P×时长）直接拒绝（不发起上游调用；不扣费）
+      if (!(await checkBalance(params.userId, priceVideo('720P', fallbackDuration)))) {
         throw new GenerationError(INSUFFICIENT_CREDITS_MESSAGE, { billable: false });
       }
-      // 工具默认 720P（generateVideoAsset 缺省档）；错误兜底按入参时长估算
-      const fallbackDuration = duration ?? 5;
       // 发起后按结果扣：成功按实际分辨率×秒扣；abort/超时/下载失败（billable）按兜底照扣；审核/鉴权/参数/限流不扣
       const result = await chargeOnGenerationResult({
         userId: params.userId,
@@ -520,8 +520,10 @@ function createVideoFromImageAssetTool(params: { userId: string; conversationId:
           { billable: false }
         );
       }
-      // 计费入口拦截：与限流并列，余额 ≤0 直接拒绝（不发起上游调用；不扣费）
-      if (!(await checkBalance(params.userId))) {
+      // 工具默认 720P；错误兜底与入口余额校验均按入参时长估算
+      const fallbackDuration = duration ?? 5;
+      // 计费入口拦截：余额不足以支付本次固定价（720P×时长）直接拒绝（不发起上游调用；不扣费）
+      if (!(await checkBalance(params.userId, priceVideo('720P', fallbackDuration)))) {
         throw new GenerationError(INSUFFICIENT_CREDITS_MESSAGE, { billable: false });
       }
       // 归属校验：源资产必须属于当前用户、为图片且已转入 OSS（越权与不存在同样返回 undefined）
@@ -540,8 +542,6 @@ function createVideoFromImageAssetTool(params: { userId: string; conversationId:
       }
       // 源图经短期签名 URL 直传百炼作首帧（公网可达；TTL 900s 与图片编辑一致）
       const firstFrameUrl = await getSignedUrl(source.storageKey, 900);
-      // 工具默认 720P；错误兜底按入参时长估算
-      const fallbackDuration = duration ?? 5;
       // 发起后按结果扣：成功按实际分辨率×秒扣；abort/超时/下载失败（billable）按兜底照扣；审核/鉴权/参数/限流不扣
       const result = await chargeOnGenerationResult({
         userId: params.userId,
@@ -728,8 +728,8 @@ function composeDesignTool(params: { userId: string; conversationId: string }) {
           { billable: false }
         );
       }
-      // 计费入口拦截：余额 ≤0 直接拒绝（不发起上游调用）
-      if (!(await checkBalance(params.userId))) {
+      // 计费入口拦截：余额不足以支付单张固定价直接拒绝（不发起上游调用）
+      if (!(await checkBalance(params.userId, priceImage(false)))) {
         throw new Error(INSUFFICIENT_CREDITS_MESSAGE);
       }
       const resolvedAspect = aspect ?? DEFAULT_LAYOUT_ASPECT;

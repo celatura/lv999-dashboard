@@ -68,8 +68,8 @@ export async function POST(request: Request, context: RouteContext) {
     return apiError(400, 'invalid_request', 'instruction is required (1..2000 chars)');
   }
 
-  // 计费入口拦截：余额 ≤0 直接 402（不发起上游调用）
-  if (!(await checkBalance(userId))) {
+  // 计费入口拦截：余额不足以支付单次编辑固定价直接 402（不发起上游调用）
+  if (!(await checkBalance(userId, priceImage(true)))) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
 

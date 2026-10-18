@@ -38,9 +38,14 @@ export async function getBalancesByIds(userIds: string[]): Promise<Map<string, n
   return new Map(rows.map((row) => [row.userId, row.balance]));
 }
 
-/** 入口拦截：balance>0 放行（无预扣、无事前估算，见 docs/credits.md §10） */
-export async function checkBalance(userId: string): Promise<boolean> {
-  return (await getBalance(userId)) > 0;
+/**
+ * 入口拦截（无预扣、无冻结，见 docs/credits.md §10）：
+ * - 不传 minCost：balance > 0 放行（对话 / 知识库等成本事前未知的入口）；
+ * - 传 minCost：balance ≥ 单次固定价放行（图片 / 视频入口，消除固定价业务的单次透支）。
+ */
+export async function checkBalance(userId: string, minCost?: number): Promise<boolean> {
+  const balance = await getBalance(userId);
+  return minCost === undefined ? balance > 0 : balance >= Math.max(1, Math.ceil(minCost));
 }
 
 /**
@@ -117,6 +122,7 @@ export async function grantCredits(params: {
 
 /**
  * 直接设定余额（写调整流水，delta=新-旧）。可选 CLI 能力（set 子命令）。
+ * SELECT ... FOR UPDATE 锁行：避免与并发 chargeCredits 交错导致 delta 失真 / 扣费被覆盖。
  * 返回设定后余额。
  */
 export async function setBalance(params: {
@@ -134,7 +140,8 @@ export async function setBalance(params: {
     const [current] = await tx
       .select({ balance: creditsAccounts.balance })
       .from(creditsAccounts)
-      .where(eq(creditsAccounts.userId, params.userId));
+      .where(eq(creditsAccounts.userId, params.userId))
+      .for('update');
     const before = current.balance;
     const [updated] = await tx
       .update(creditsAccounts)
