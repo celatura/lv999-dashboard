@@ -232,9 +232,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 }
 
 export function useEditorReducer(initialDocument: DesignDocument) {
-  return useReducer(
-    editorReducer,
-    initialDocument,
-    (document): EditorState => ({ past: [], present: document, future: [], selectedIds: [] })
-  );
+  return useReducer(editorReducer, initialDocument, (document): EditorState => ({
+    past: [],
+    present: document,
+    future: [],
+    selectedIds: []
+  }));
 }
