@@ -56,7 +56,7 @@ export function AssetCard({ assetId, title, kind, sizeBytes }: AssetCardProps) {
             type='button'
             onClick={openPreview}
             aria-label={`预览图片：${title}`}
-            className='group bg-muted/50 relative block h-60 w-full cursor-zoom-in sm:h-72'
+            className='group bg-muted/50 relative block h-60 w-full cursor-zoom-in focus-visible:shadow-[inset_0_0_0_2px_var(--ring)] focus-visible:outline-none sm:h-72'
           >
             <Image
               src={imageThumbnailUrl(assetId)}
@@ -69,10 +69,10 @@ export function AssetCard({ assetId, title, kind, sizeBytes }: AssetCardProps) {
             />
             <span
               aria-hidden
-              className='absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/25 group-hover:opacity-100'
+              className='absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-focus-visible:bg-black/25 group-focus-visible:opacity-100 group-hover:bg-black/25 group-hover:opacity-100'
             >
               <span className='bg-background/90 text-foreground flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm'>
-                <Icons.eye className='size-3.5' /> 查看原图
+                <Icons.eye className='size-3.5' /> 预览
               </span>
             </span>
           </button>
@@ -85,10 +85,13 @@ export function AssetCard({ assetId, title, kind, sizeBytes }: AssetCardProps) {
           )}
           <div className='min-w-0 flex-1'>
             <p className='truncate text-sm font-medium'>{title}</p>
-            <div className='text-muted-foreground mt-1 flex items-center gap-2 text-xs'>
-              <Badge variant='outline'>{label}</Badge>
-              {typeof sizeBytes === 'number' && <span>{formatBytes(sizeBytes)}</span>}
-            </div>
+            {(kind !== 'image' || typeof sizeBytes === 'number') && (
+              <div className='text-muted-foreground mt-1 flex items-center gap-2 text-xs'>
+                {/* 图片卡已由缩略图传达类型，徽章冗余；文本资产保留类型徽章 */}
+                {kind !== 'image' && <Badge variant='outline'>{label}</Badge>}
+                {typeof sizeBytes === 'number' && <span>{formatBytes(sizeBytes)}</span>}
+              </div>
+            )}
           </div>
           <div className='flex shrink-0 items-center gap-2'>
             <button
