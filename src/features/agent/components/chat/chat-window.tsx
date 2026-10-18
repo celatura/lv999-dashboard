@@ -8,6 +8,14 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport
+} from '@/components/ui/message-scroller';
 import { createConversationMutation, updateConversationMutation } from '../../api/mutations';
 import { agentKeys } from '../../api/queries';
 import type { Conversation } from '../../api/types';
@@ -215,46 +223,58 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         </div>
       </div>
 
-      <div className='min-h-0 flex-1 overflow-y-auto'>
-        {/* min-h-full：消息不足一屏时容器仍撑满滚动区高度，空态得以真正垂直居中 */}
-        <div className='mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 py-6'>
-          {messages.length === 0 ? (
-            <ChatEmptyState onPick={setInput} />
-          ) : (
-            messages.map((message, index) => {
-              // 最后一条 assistant 消息：流式期间唯一 active 的消息，也是唯一可「重新生成」的对象
-              const isLastAssistant = index === messages.length - 1 && message.role === 'assistant';
-              return (
-                <div
-                  key={message.id}
-                  className='[content-visibility:auto] [contain-intrinsic-size:auto_120px]'
-                >
-                  <MessageItem
-                    message={message}
-                    // 仅最后一条 assistant 消息可能含进行中的 tool part；非流式期间视为已停止（AI SDK 中止语义下 part 不落终态）
-                    isActive={isGenerating && isLastAssistant}
-                    isLastAssistant={isLastAssistant}
-                    onRegenerate={handleRegenerate}
-                  />
-                </div>
-              );
-            })
-          )}
-          {error && (
-            <div className='border-destructive/40 bg-destructive/5 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm'>
-              <span className='text-destructive'>{resolveChatErrorMessage(error)}</span>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={() => regenerate()}
-                disabled={isGenerating}
-              >
-                重试
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
+      <MessageScrollerProvider autoScroll defaultScrollPosition='last-anchor'>
+        <MessageScroller className='min-h-0 flex-1'>
+          <MessageScrollerViewport aria-label='对话消息'>
+            {/* min-h-full：消息不足一屏时容器仍撑满滚动区高度，空态得以真正垂直居中 */}
+            <MessageScrollerContent
+              aria-busy={isGenerating}
+              className='mx-auto w-full max-w-3xl px-4 py-6'
+            >
+              {messages.length === 0 ? (
+                <ChatEmptyState onPick={setInput} />
+              ) : (
+                messages.map((message, index) => {
+                  // 最后一条 assistant 消息：流式期间唯一 active 的消息，也是唯一可「重新生成」的对象
+                  const isLastAssistant =
+                    index === messages.length - 1 && message.role === 'assistant';
+                  return (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === 'user'}
+                    >
+                      <MessageItem
+                        message={message}
+                        // 仅最后一条 assistant 消息可能含进行中的 tool part；非流式期间视为已停止（AI SDK 中止语义下 part 不落终态）
+                        isActive={isGenerating && isLastAssistant}
+                        isLastAssistant={isLastAssistant}
+                        onRegenerate={handleRegenerate}
+                      />
+                    </MessageScrollerItem>
+                  );
+                })
+              )}
+              {error && (
+                <MessageScrollerItem>
+                  <div className='border-destructive/40 bg-destructive/5 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm'>
+                    <span className='text-destructive'>{resolveChatErrorMessage(error)}</span>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => regenerate()}
+                      disabled={isGenerating}
+                    >
+                      重试
+                    </Button>
+                  </div>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton aria-label='回到底部' />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       <ChatComposer
         value={input}
