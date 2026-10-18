@@ -54,15 +54,15 @@ const addDocumentSchema = z
     hasFile: z.boolean()
   })
   .refine((value) => value.mode !== 'manual' || value.content.trim().length > 0, {
-    message: '请粘贴要存入知识库的文本',
+    error: '请粘贴要存入知识库的文本',
     path: ['content']
   })
   .refine((value) => value.mode !== 'asset' || value.sourceAssetId.length > 0, {
-    message: '请选择一篇文本资产',
+    error: '请选择一篇文本资产',
     path: ['sourceAssetId']
   })
   .refine((value) => value.mode !== 'file' || value.hasFile, {
-    message: '请选择要上传的文件',
+    error: '请选择要上传的文件',
     path: ['hasFile']
   });
 

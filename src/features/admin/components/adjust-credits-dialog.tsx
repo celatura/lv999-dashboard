@@ -32,11 +32,11 @@ const adjustFormSchema = z
     note: z.string().trim().max(200, '备注不超过 200 字').optional()
   })
   .refine((value) => /^\d+$/.test(value.amount), {
-    message: '数额必须是非负整数',
+    error: '数额必须是非负整数',
     path: ['amount']
   })
   .refine((value) => (value.mode === 'grant' ? Number(value.amount) > 0 : true), {
-    message: '「增加」数额需为正整数',
+    error: '「增加」数额需为正整数',
     path: ['amount']
   });
 

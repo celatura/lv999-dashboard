@@ -48,11 +48,11 @@ export interface AdminUsersResponse {
 export const adjustCreditsSchema = z
   .object({
     mode: z.enum(['grant', 'set']),
-    amount: z.number().int('数额必须是整数'),
+    amount: z.int('数额必须是整数'),
     note: z.string().trim().max(200, '备注不超过 200 字').optional()
   })
   .refine((value) => (value.mode === 'grant' ? value.amount > 0 : value.amount >= 0), {
-    message: '数额不合法：「加」需为正整数，「设定」需为非负整数',
+    error: '数额不合法：「加」需为正整数，「设定」需为非负整数',
     path: ['amount']
   });
 

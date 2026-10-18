@@ -125,7 +125,6 @@ const EDIT_IMAGE_ASSET_DESCRIPTION =
 
 const editImageAssetInputSchema = z.object({
   sourceAssetId: z
-    .string()
     .uuid()
     .describe(
       '被修改的源图片资产 id（来自上文 createImageAsset / editImageAsset 返回值、findAssets 结果或消息中的 [引用资产] 块）'
@@ -173,7 +172,6 @@ const videoAspectFieldSchema = z
   .describe('可选：视频宽高比。横版用 "16:9"，竖版短视频用 "9:16"，方形 "1:1"；不传默认 "16:9"');
 
 const videoDurationFieldSchema = z
-  .number()
   .int()
   .min(2)
   .max(10)
@@ -199,7 +197,6 @@ const CREATE_VIDEO_FROM_IMAGE_ASSET_DESCRIPTION =
 
 const createVideoFromImageAssetInputSchema = z.object({
   sourceAssetId: z
-    .string()
     .uuid()
     .describe(
       '作为首帧的源图片资产 id（来自上文 createImageAsset / findAssets 结果或消息中的 [引用资产] 块）'
@@ -227,14 +224,14 @@ const findAssetsInputSchema = z.object({
     .enum(ASSET_KIND_VALUES)
     .optional()
     .describe('限定资产类型：markdown / html / image / design / video；不确定时可省略'),
-  limit: z.number().int().min(1).max(20).optional().describe('返回条数上限，默认 8')
+  limit: z.int().min(1).max(20).optional().describe('返回条数上限，默认 8')
 });
 
 const READ_ASSET_DESCRIPTION =
   '读取指定资产的可用内容，用于"基于它再创作"（改写、扩展、总结、写配套文案等）。markdown / html 返回正文 content；image / video 返回其生成提示词 prompt（不返回图像/视频本身，要改图请用 editImageAsset）；design 为结构化数据，不支持读取正文。assetId 必须来自 findAssets 结果、上文工具返回值或消息中的 [引用资产] 块。';
 
 const readAssetInputSchema = z.object({
-  assetId: z.string().uuid().describe('要读取的资产 id（必须归属当前用户）')
+  assetId: z.uuid().describe('要读取的资产 id（必须归属当前用户）')
 });
 
 const KNOWLEDGE_SEARCH_DESCRIPTION =
@@ -246,7 +243,7 @@ const knowledgeSearchInputSchema = z.object({
     .min(1)
     .max(500)
     .describe('检索问句：用自然语言描述要找的内容（包含关键概念词效果更好）'),
-  topK: z.number().int().min(1).max(8).optional().describe('返回片段数上限，默认 5')
+  topK: z.int().min(1).max(8).optional().describe('返回片段数上限，默认 5')
 });
 
 /** 服务端校验历史消息使用（无需 execute，与 Agent 内工具共享同一 schema） */

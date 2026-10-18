@@ -22,7 +22,7 @@ const passwordSchema = z
     confirmPassword: z.string().min(1, '请再次输入新密码')
   })
   .refine((value) => value.newPassword === value.confirmPassword, {
-    message: '两次输入的新密码不一致',
+    error: '两次输入的新密码不一致',
     path: ['confirmPassword']
   });
 

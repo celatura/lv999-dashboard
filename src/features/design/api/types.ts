@@ -57,7 +57,7 @@ export const imageObjectSchema = z.object({
   ...baseObjectFields,
   type: z.literal('image'),
   /** 引用的图片资产 id（不存字节，渲染时经 /raw 同源代理加载） */
-  assetId: z.string().uuid(),
+  assetId: z.uuid(),
   width: z.number().positive(),
   height: z.number().positive()
 });

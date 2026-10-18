@@ -10,7 +10,7 @@ import { signIn } from '@/lib/auth-client';
 import { useAppForm } from '@/lib/form';
 
 const signInSchema = z.object({
-  email: z.string().trim().min(1, '请输入邮箱').email('邮箱格式不正确'),
+  email: z.string().trim().min(1, '请输入邮箱').pipe(z.email('邮箱格式不正确')),
   password: z.string().min(1, '请输入密码')
 });
 

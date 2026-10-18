@@ -11,7 +11,7 @@ import { useAppForm } from '@/lib/form';
 
 const signUpSchema = z.object({
   name: z.string().trim().min(1, '请输入你的名字').max(50, '名字过长'),
-  email: z.string().trim().min(1, '请输入邮箱').email('邮箱格式不正确'),
+  email: z.string().trim().min(1, '请输入邮箱').pipe(z.email('邮箱格式不正确')),
   password: z.string().min(12, '密码至少 12 位').max(256, '密码过长')
 });
 

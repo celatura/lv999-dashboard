@@ -9,7 +9,7 @@ import { requestPasswordReset } from '@/lib/auth-client';
 import { useAppForm } from '@/lib/form';
 
 const forgotPasswordSchema = z.object({
-  email: z.string().trim().min(1, '请输入邮箱').email('邮箱格式不正确')
+  email: z.string().trim().min(1, '请输入邮箱').pipe(z.email('邮箱格式不正确'))
 });
 
 /**

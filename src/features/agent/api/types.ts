@@ -153,7 +153,7 @@ export type FavoriteRequest = z.infer<typeof favoriteRequestSchema>;
 
 /** 批量删除请求体（单次上限 100 个） */
 export const batchDeleteRequestSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(100)
+  ids: z.array(z.uuid()).min(1).max(100)
 });
 
 export type BatchDeleteRequest = z.infer<typeof batchDeleteRequestSchema>;

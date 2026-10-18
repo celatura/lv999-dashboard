@@ -92,7 +92,7 @@ export const createDocumentRequestSchema = z.discriminatedUnion('source', [
   z.object({
     source: z.literal('asset'),
     title: z.string().min(1).max(200).optional(),
-    sourceAssetId: z.string().uuid()
+    sourceAssetId: z.uuid()
   })
 ]);
 
@@ -104,7 +104,7 @@ export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
  */
 export const knowledgeSearchRequestSchema = z.object({
   query: z.string().min(1).max(500),
-  topK: z.number().int().min(1).max(MAX_SEARCH_TOP_K).optional()
+  topK: z.int().min(1).max(MAX_SEARCH_TOP_K).optional()
 });
 
 export type KnowledgeSearchRequest = z.infer<typeof knowledgeSearchRequestSchema>;
