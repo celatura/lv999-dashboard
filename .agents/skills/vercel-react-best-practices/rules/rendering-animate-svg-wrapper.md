@@ -14,10 +14,15 @@ Many browsers don't have hardware acceleration for CSS3 animations on SVG elemen
 ```tsx
 function LoadingSpinner() {
   return (
-    <svg className='animate-spin' width='24' height='24' viewBox='0 0 24 24'>
-      <circle cx='12' cy='12' r='10' stroke='currentColor' />
+    <svg 
+      className="animate-spin"
+      width="24" 
+      height="24" 
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" />
     </svg>
-  );
+  )
 }
 ```
 
@@ -26,12 +31,16 @@ function LoadingSpinner() {
 ```tsx
 function LoadingSpinner() {
   return (
-    <div className='animate-spin'>
-      <svg width='24' height='24' viewBox='0 0 24 24'>
-        <circle cx='12' cy='12' r='10' stroke='currentColor' />
+    <div className="animate-spin">
+      <svg 
+        width="24" 
+        height="24" 
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="10" stroke="currentColor" />
       </svg>
     </div>
-  );
+  )
 }
 ```
 

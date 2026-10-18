@@ -21,7 +21,7 @@ function Composer({
   isDMThread,
   dmId,
   isEditing,
-  isForwarding
+  isForwarding,
 }: Props) {
   return (
     <form>
@@ -32,10 +32,16 @@ function Composer({
       ) : isThread ? (
         <AlsoSendToChannelField id={channelId} />
       ) : null}
-      {isEditing ? <EditActions /> : isForwarding ? <ForwardActions /> : <DefaultActions />}
+      {isEditing ? (
+        <EditActions />
+      ) : isForwarding ? (
+        <ForwardActions />
+      ) : (
+        <DefaultActions />
+      )}
       <Footer onSubmit={onSubmit} />
     </form>
-  );
+  )
 }
 ```
 
@@ -55,7 +61,7 @@ function ChannelComposer() {
         <Composer.Submit />
       </Composer.Footer>
     </Composer.Frame>
-  );
+  )
 }
 
 // Thread composer - adds "also send to channel" field
@@ -71,7 +77,7 @@ function ThreadComposer({ channelId }: { channelId: string }) {
         <Composer.Submit />
       </Composer.Footer>
     </Composer.Frame>
-  );
+  )
 }
 
 // Edit composer - different footer actions
@@ -86,7 +92,7 @@ function EditComposer() {
         <Composer.SaveEdit />
       </Composer.Footer>
     </Composer.Frame>
-  );
+  )
 }
 ```
 
