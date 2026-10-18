@@ -19,3 +19,8 @@ export function assetThumbUrl(asset: Pick<Asset, 'id' | 'kind' | 'updatedAt'>): 
   const base = `/api/agent/assets/${asset.id}/raw?thumb=1`;
   return asset.kind === 'design' ? `${base}&v=${encodeURIComponent(asset.updatedAt)}` : base;
 }
+
+/** 图片资产缩略图 URL（image 内容不可变，无需 updatedAt 版本参数） */
+export function imageThumbnailUrl(assetId: string): string {
+  return `/api/agent/assets/${assetId}/raw?thumb=1`;
+}
