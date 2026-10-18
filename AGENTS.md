@@ -663,3 +663,13 @@ See "Theming System" section above or `docs/themes.md`.
 11. **Button loading** - Use `<Button isLoading={isPending}>` for loading states. Uses CSS Grid overlap trick for zero layout shift. When `isLoading` is not passed, button behaves as default shadcn. `SubmitButton` in forms handles this automatically via form `isSubmitting` state.
 12. **Data layer** - Always go through the service layer: `types.ts` → `service.ts` → `queries.ts`. Components import types from `types.ts`, functions from `service.ts`, query options from `queries.ts`. Services hit real backends (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis).
 13. **Model registries** - Keep the internal key stable (it is the persisted `conversations.model` value and the credits pricing key); only change `providerModelId`. Prefer **mainline model names over date-suffixed snapshots** — Alibaba retires snapshots with 30 days' notice vs 3 months for mainline models. Callers must route model errors through `detectModelUnavailable()` (`features/agent/api/model-availability.ts`) so retired/unpurchased models (`403 access_denied`) are not reported as auth failures. Run `bun run scripts/model-audit.ts` after any retirement notice (`--image` / `--video` / `--all` add the paid channels). See docs/agent.md §7.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
