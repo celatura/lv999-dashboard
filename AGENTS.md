@@ -60,8 +60,8 @@ The project follows a feature-based folder structure designed for scalability in
 - TanStack Table for data tables
 - TanStack React Query for data fetching and mutations
 - Recharts for analytics/charts
-- Service layer per feature (`api/types.ts` → `api/service.ts` → `api/queries.ts`)
-- Route handlers at `src/app/api/` (for Route Handler or BFF patterns)
+- Service layer per feature (`api/types.ts` → `api/service.ts` (server-only) → `api/queries.ts` / `api/mutations.ts` → Route Handler)
+- Route handlers at `src/app/api/` (client-side data boundary; BFF proxies when needed)
 - Real backend is already wired in: Drizzle ORM + PostgreSQL; the agent / design / knowledge / credits features hit DB / OSS / Redis / Alibaba Cloud Model Studio directly
 - API client utility in `src/lib/api-client.ts` (for fetch-based patterns)
 
@@ -334,27 +334,28 @@ In route handlers, return `401` when `requireUserId()` is null and `403` for non
 
 ### Service Layer Architecture
 
-Each feature has a three-file API layer:
+Each feature has an API layer (add `mutations.ts` when the feature has writes):
 
 ```
 src/features/<name>/api/
   types.ts      ← Type contract (response shapes, filters, payloads)
-  service.ts    ← Data access functions (the ONE file to swap for your backend)
-  queries.ts    ← React Query options + query key factories (stable, never changes)
+  service.ts    ← Server-only data access (Drizzle / external API) — imported by Route Handlers + server prefetch
+  queries.ts    ← Query keys + queryOptions (client: apiClient → Route Handler)
+  mutations.ts  ← mutationOptions (client: apiClient → Route Handler)
 ```
 
-**`service.ts` is the only file you modify when connecting to a real backend.** Queries and components import from it — they never change.
+**`service.ts` is the server-only data boundary.** Client code never imports it; client reads/writes go through `queries.ts` / `mutations.ts` via `apiClient`. Server Components prefetch with the same query key and call `service.ts` directly, so server and client share one cache entry.
 
 #### Backend Patterns
 
-| Pattern                                            | How to implement                                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| **Server Actions + ORM** (Prisma/Drizzle/Supabase) | Add `'use server'` at top of `service.ts`, call ORM directly                                |
-| **Route Handlers + ORM**                           | `service.ts` calls `/api/` routes via `apiClient`, route handlers call ORM                  |
-| **BFF** (Next.js proxies to Laravel/Go/etc.)       | `service.ts` calls `/api/` routes via `apiClient`, route handlers proxy to external backend |
-| **Direct external API** (frontend-only)            | `service.ts` calls external URL via `fetch()`                                               |
+| Pattern                                            | How to implement                                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Server Actions + ORM** (Prisma/Drizzle/Supabase) | Add `'use server'` at top of `service.ts`, call ORM directly                                                         |
+| **Route Handlers + ORM** (this project)            | `service.ts` is server-only and calls the ORM (Drizzle); Route Handlers import it; client `queries.ts` fetches `/api/...` via `apiClient` |
+| **BFF** (Next.js proxies to Laravel/Go/etc.)       | Route Handlers proxy to the external backend; `service.ts` holds the server-side mapping; client calls `apiClient`    |
+| **Direct external API**                            | `service.ts` calls the external URL server-side via `fetch()`                                                        |
 
-Route handlers at `src/app/api/` are ready for patterns 2 and 3. `src/lib/api-client.ts` provides a typed `fetch` wrapper.
+Route handlers at `src/app/api/` are the boundary for client-side data; `src/lib/api-client.ts` provides the typed `fetch` wrapper used by `queries.ts` / `mutations.ts`.
 
 ### Query Key Factories
 
@@ -378,15 +379,20 @@ queryClient.invalidateQueries({ queryKey: entityKeys.all });
 
 The project uses TanStack React Query with server-side prefetching and client-side cache management:
 
-1. **Query options** defined in `queries.ts` — shared between server prefetch and client hooks
+1. **Query keys** defined in `queries.ts` — shared between server prefetch and client hooks; the client `queryFn` uses `apiClient`
 2. **Server prefetch** using `void queryClient.prefetchQuery()` + `HydrationBoundary` + `dehydrate` — `void` (fire-and-forget) is the standard TanStack pattern for Next.js App Router
 3. **Client fetch** using `useSuspenseQuery()` — integrates with React Suspense so prefetched data streams in without showing a loading skeleton on first load
 4. **Suspense boundary** wraps the client component — shows a fallback skeleton only on subsequent client-side navigations when cache is empty
 
 ```tsx
-// Server component: prefetch + dehydrate
+// Server component: prefetch + dehydrate.
+// Reuse the client queryKey, but call the server-only service directly —
+// apiClient uses a relative /api URL and cannot run inside a Server Component.
 const queryClient = getQueryClient();
-void queryClient.prefetchQuery(entitiesQueryOptions(filters)); // void, not await
+void queryClient.prefetchQuery({
+  queryKey: entitiesQueryOptions(filters).queryKey,
+  queryFn: () => listEntities(userId, filters) // service.ts
+});
 
 return (
   <HydrationBoundary state={dehydrate(queryClient)}>
@@ -399,6 +405,8 @@ return (
 // Client component: useSuspenseQuery (not useQuery)
 const { data } = useSuspenseQuery(entitiesQueryOptions(filters));
 ```
+
+The server prefetch `queryFn` must return exactly the same shape as the client `apiClient` response — a historic mismatch broke hydration (see the comments in `knowledge-listing.tsx` / `credits-listing.tsx`).
 
 **Why `void` + `useSuspenseQuery`:**
 
@@ -416,17 +424,25 @@ const { data } = useSuspenseQuery(entitiesQueryOptions(filters));
 
 ### Mutations
 
-Components import service functions for mutations. Use query key factories for invalidation:
+Client components never import the server-only `service.ts`. Write operations go through `apiClient` — usually encapsulated in `api/mutations.ts` as `mutationOptions`, passed directly to `useMutation(options)`; add UI callbacks per call via `mutate(vars, { onSuccess })`:
 
 ```tsx
-import { createEntity } from '../api/service';
-import { entityKeys } from '../api/queries';
+import { createEntityMutation } from '../api/mutations';
 
-const mutation = useMutation({
-  mutationFn: (data) => createEntity(data),
+const mutation = useMutation(createEntityMutation);
+mutation.mutate(data, { onSuccess: () => toast.success('Created') });
+```
+
+Callbacks passed to `mutate` / `mutateAsync` run **in addition to** `mutationOptions.onSuccess`; a new `onSuccess` spread into `useMutation` would replace the shared one and skip cache invalidation.
+
+`mutationOptions` owns the request and cache invalidation:
+
+```tsx
+export const createEntityMutation = mutationOptions({
+  mutationFn: (data: EntityMutationPayload) =>
+    apiClient<{ id: string }>('/entities', { method: 'POST', body: JSON.stringify(data) }),
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: entityKeys.all });
-    toast.success('Created');
+    getQueryClient().invalidateQueries({ queryKey: entityKeys.all });
   }
 });
 ```
@@ -576,12 +592,12 @@ export const Icons = {
 ### Adding a New Feature (End-to-End)
 
 1. Create `src/features/<name>/api/types.ts` — response types, filter types, mutation payloads
-2. Create `src/features/<name>/api/service.ts` — data access functions (backed by real services: Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis)
-3. Create `src/features/<name>/api/queries.ts` — query key factory + `queryOptions`
-4. Create page route: `src/app/dashboard/<name>/page.tsx`
-5. Create feature components in `src/features/<name>/components/`
-6. Add navigation item in `src/config/nav-config.ts`
-7. (Optional) Add route handlers in `src/app/api/<name>/` for REST API patterns
+2. Create `src/features/<name>/api/service.ts` (server-only) — data access functions (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis)
+3. Create `src/features/<name>/api/queries.ts` and `mutations.ts` (when the feature writes) — `apiClient` → Route Handler
+4. Create Route Handlers in `src/app/api/<name>/` — required for client-facing reads/writes; only skip for server-component-only features
+5. Create page route: `src/app/dashboard/<name>/page.tsx`
+6. Create feature components in `src/features/<name>/components/`
+7. Add navigation item in `src/config/nav-config.ts`
 8. (Optional) Register new icon in `src/components/icons.tsx`
 
 ### Adding a New API Route
@@ -651,7 +667,7 @@ See "Theming System" section above or `docs/themes.md`.
 9. **Page headers** - Always use `PageContainer` props (`pageTitle`, `pageDescription`, `pageHeaderAction`) for page headers. Never import `<Heading>` manually in pages — `PageContainer` handles that internally.
 10. **Forms** - Use `useAppForm` from `@/lib/form` with `form.AppField` rendering the shared field components (`field.TextField`, `field.SelectField`, …) from `@/components/forms/fields`. Each component follows the official shadcn TanStack Form anatomy; drop down to raw `form.Field` render props for one-off custom fields. Never use `useState` inside a render prop — extract stateful controls into components.
 11. **Button loading** - Use `<Button isLoading={isPending}>` for loading states. Uses CSS Grid overlap trick for zero layout shift. When `isLoading` is not passed, button behaves as default shadcn. `SubmitButton` in forms handles this automatically via form `isSubmitting` state.
-12. **Data layer** - Always go through the service layer: `types.ts` → `service.ts` → `queries.ts`. Components import types from `types.ts`, functions from `service.ts`, query options from `queries.ts`. Services hit real backends (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis).
+12. **Data layer** - `types.ts` → `service.ts` (server-only) → `queries.ts` / `mutations.ts` → Route Handler. Client components import only types and queries/mutations; `service.ts` is called by Route Handlers and Server Components (prefetch) — never from client code. Services hit real backends (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis).
 13. **Model registries** - Keep the internal key stable (it is the persisted `conversations.model` value and the credits pricing key); only change `providerModelId`. Prefer **mainline model names over date-suffixed snapshots** — Alibaba retires snapshots with 30 days' notice vs 3 months for mainline models. Callers must route model errors through `detectModelUnavailable()` (`features/agent/api/model-availability.ts`) so retired/unpurchased models (`403 access_denied`) are not reported as auth failures. Run `bun run scripts/model-audit.ts` after any retirement notice (`--image` / `--video` / `--all` add the paid channels). See docs/agent.md §7.
 
 <!-- BEGIN:nextjs-agent-rules -->

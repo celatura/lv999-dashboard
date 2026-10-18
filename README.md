@@ -139,7 +139,7 @@ src/
 │   └── kbar/               # ⌘K 命令面板
 ├── features/               # 按功能划分的模块（agent、design、knowledge、credits、admin、auth、overview、profile）
 │   └── <name>/
-│       ├── api/            # types.ts → service.ts → queries.ts
+│       ├── api/            # types.ts / service.ts (server-only) / queries.ts / mutations.ts
 │       ├── components/
 │       ├── schemas/        # Zod 校验
 │       └── constants/      # 筛选 / 选项配置
@@ -153,8 +153,8 @@ src/
 
 ## 核心设计
 
-- **数据获取（TanStack Query SSR）**：服务端 `prefetchQuery`（`void` 触发不阻塞）→ `HydrationBoundary` + `dehydrate` 注水 → 客户端 `useSuspenseQuery` 消费，配合 `<Suspense>` 展示骨架屏。
-- **Service 层三件套**：每个 feature 的 `api/` = `types.ts`（类型契约）/ `service.ts`（数据访问，接后端唯一需替换的文件）/ `queries.ts`（查询选项 + 键工厂，稳定不变）；支持 Server Actions、Route Handlers、BFF 代理、直连外部 API 多种接入。
+- **数据获取（TanStack Query SSR）**：服务端 `prefetchQuery` 复用 queryKey 并直连 server-only `service.ts`（`void` 触发不阻塞）→ `HydrationBoundary` + `dehydrate` 注水 → 客户端 `useSuspenseQuery` 经 `apiClient` 消费，配合 `<Suspense>` 展示骨架屏。
+- **Service 层**：每个 feature 的 `api/` = `types.ts`（类型契约）/ `service.ts`（server-only 数据访问：Drizzle / 外部 API，由 Route Handler 与 Server Component 预取调用）/ `queries.ts` / `mutations.ts`（客户端经 `apiClient` → Route Handler）；支持 Server Actions、Route Handlers、BFF 代理、直连外部 API 多种接入。
 - **AI Agent 创作**：自然语言 → AI SDK v7 `ToolLoopAgent` → 文本 / 图片 / 视频作品统一沉淀为资产；后端为 PostgreSQL + Drizzle（`conversations` / `messages` / `assets` 三表）、OSS、Redis、百炼大模型。详见 [docs/agent.md](./docs/agent.md)。
 - **设计画布**：Konva 纯客户端孤岛，文档为可序列化 JSON、作为 `kind='design'` 资产落库（不新增表）；画布内直连 T2I / I2I 与 `composeDesign`，产出即时插入 / 替换并走 Credits 计费。详见 [docs/design-editor.md](./docs/design-editor.md)。
 - **RAG 知识库**：文本 / 上传文件经切分 → 百炼 `text-embedding-v4` → pgvector（`knowledge_documents` / `knowledge_chunks` 两表 + HNSW 索引）；Agent 经 `knowledgeSearch` 语义检索 topK 片段作答并标注来源。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)。

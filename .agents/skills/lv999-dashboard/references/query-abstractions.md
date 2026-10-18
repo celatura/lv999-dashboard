@@ -126,14 +126,13 @@ export const updateInvoiceMutation = mutationOptions({
 
 ```ts
 // basic
-const { mutate } = useMutation(createInvoiceMutation);
+const mutation = useMutation(createInvoiceMutation);
+mutation.mutate(vars);
 
-// composed — add per-usage callbacks on top
-const { mutate } = useMutation({
-  ...createInvoiceMutation,
+// per-call — callbacks run AFTER the mutation-level onSuccess (cache invalidation still runs)
+mutation.mutate(vars, {
   onError: (err) => toast.error(err.message),
   onSuccess: (data) => {
-    // this runs AFTER the shared onSuccess above
     router.push(`/invoices/${data.id}`);
   }
 });
@@ -147,7 +146,7 @@ const { mutate } = useMutation({
 | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Use `queryOptions()` not custom hooks as the base abstraction | Works everywhere — loaders, server, imperative calls                   |
 | Keep options factories lean — no extra config params          | Best abstractions are not configurable                                 |
-| Compose extra options at the call site via spread             | Full TS inference without manual generics                              |
+| Add per-call callbacks via `mutate(vars, { ... })`            | Keeps the shared `onSuccess` (cache invalidation) intact               |
 | Import `getQueryClient()` in mutation files                   | Handles SSR/client correctly without prop drilling                     |
 | Co-locate `queryKey` inside `queryOptions`                    | Typed key reuse in `invalidateQueries`, `setQueryData`, `getQueryData` |
 | Custom hooks are fine — but built ON TOP of `queryOptions`    | Hooks for component convenience, `queryOptions` for sharing config     |

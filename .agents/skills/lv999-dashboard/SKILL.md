@@ -1,7 +1,7 @@
 ---
 name: lv999-dashboard
 description: |
-  Guide for building features, pages, tables, forms, themes, and navigation in this Next.js 16 shadcn dashboard template. Use this skill whenever the user wants to add a new page, create a feature module, build a data table, add a form, configure navigation items, add a theme, set up RBAC access control, or work with the dashboard's patterns and conventions. Also triggers when adding routes under /dashboard, working with Better Auth (self-hosted), creating mock APIs, or modifying the sidebar. Even if the user doesn't mention "dashboard" explicitly — if they're adding UI, pages, or features to this project, use this skill.
+  Guide for building features, pages, tables, forms, themes, and navigation in this Next.js 16 shadcn dashboard template. Use this skill whenever the user wants to add a new page, create a feature module, build a data table, add a form, configure navigation items, add a theme, set up RBAC access control, or work with the dashboard's patterns and conventions. Also triggers when adding routes under /dashboard, working with Better Auth (self-hosted), wiring a feature service to Drizzle or Route Handlers, or modifying the sidebar. Even if the user doesn't mention "dashboard" explicitly — if they're adding UI, pages, or features to this project, use this skill.
 ---
 
 # Dashboard Development Guide
@@ -23,7 +23,9 @@ This skill encodes the exact patterns and conventions used in this Next.js 16 + 
 | Filter/select options | `src/features/<name>/constants/`        |
 | Nav config            | `src/config/nav-config.ts`              |
 | Types                 | `src/types/index.ts`                    |
-| Mock data             | `src/constants/mock-api-<name>.ts`      |
+| Route handler         | `src/app/api/<domain>/.../route.ts`     |
+| DB schema             | `src/lib/db/schema.ts`                  |
+| API fetch wrapper     | `src/lib/api-client.ts`                 |
 | Search params         | `src/lib/searchparams.ts`               |
 | Query client          | `src/lib/query-client.ts`               |
 | Theme CSS             | `src/styles/themes/<name>.css`          |
@@ -37,147 +39,164 @@ This skill encodes the exact patterns and conventions used in this Next.js 16 + 
 
 When a user asks to add a feature (e.g., "add an orders page"), follow these steps in order. Each step below shows the minimal pattern — see reference files for full templates.
 
-### Step 1: Mock API (`src/constants/mock-api-<name>.ts`)
+### Step 1: Types + Service Layer (`src/features/<name>/api/`)
 
-See [references/mock-api-guide.md](references/mock-api-guide.md) for the complete template. Key structure:
+This project talks to a **real backend** — Drizzle ORM + PostgreSQL, Route Handlers, OSS/Redis/百炼. There is no mock layer: `service.ts` is the server-only file that knows where data comes from.
+
+**Types** (`api/types.ts`) — define entity, filter, response and payload types locally:
 
 ```tsx
-import { faker } from '@faker-js/faker';
-import { matchSorter } from 'match-sorter';
-import { delay } from './mock-api';
-
-export type Order = {
-  id: number;
+export interface Order {
+  id: string;
   customer: string;
   status: string;
   total: number;
-  created_at: string;
-  updated_at: string;
-};
+  createdAt: string;
+  updatedAt: string;
+}
 
-export const fakeOrders = {
-  records: [] as Order[],
-  initialize() {
-    /* generate with faker */
-  },
-  async getOrders({ page, limit, search, sort }) {
-    /* filter, sort, paginate, return { items, total_items } */
-  },
-  async getOrderById(id: number) {
-    /* find by id */
-  },
-  async createOrder(data) {
-    /* push to records */
-  },
-  async updateOrder(id, data) {
-    /* merge into record */
-  },
-  async deleteOrder(id) {
-    /* filter out */
-  }
-};
-fakeOrders.initialize();
+export interface OrderFilters {
+  page?: number;
+  limit?: number;
+  search?: string;
+  sort?: string;
+}
+export interface OrdersResponse {
+  items: Order[];
+  total: number;
+}
+export interface OrderMutationPayload {
+  customer: string;
+  status: string;
+  total: number;
+}
 ```
 
-Every method should call `await delay(800)` to simulate network latency. Use `matchSorter` for search. Return `{ items, total_items }` from list methods.
+**Service** (`api/service.ts`) — server-only data access (imported by Route Handlers and server-component prefetch). Pick the pattern that matches the backend:
 
-### Step 2: API Layer (`src/features/<name>/api/`)
-
-Each feature has 4 API files: **types** → **service** → **queries** → **mutations**.
-
-**Types** (`api/types.ts`) — re-export the entity type from mock API, plus filter/response/payload types:
+| Pattern | How |
+| --- | --- |
+| Server Actions + ORM | `'use server'` at the top of `service.ts`, call Drizzle directly |
+| Route Handlers + ORM (this project) | `service.ts` is server-only and calls Drizzle; Route Handlers import it; client `queries.ts` calls `/api/...` via `apiClient` |
+| BFF proxy | Route Handlers proxy to an external backend; `service.ts` holds the server-side mapping |
+| Direct external API | `service.ts` calls the external URL server-side with `fetch()` |
 
 ```tsx
-export type { Order } from '@/constants/mock-api-orders';
-export type OrderFilters = { page?: number; limit?: number; search?: string; sort?: string };
-export type OrdersResponse = { items: Order[]; total_items: number };
-export type OrderMutationPayload = { customer: string; status: string; total: number };
+import { getDb } from '@/lib/db';
+import type { OrderFilters, OrdersResponse } from './types';
+
+export async function getOrders(userId: string, filters: OrderFilters): Promise<OrdersResponse> {
+  const db = getDb();
+  // Drizzle: where/orderBy/limit/offset + a parallel count() query
+  return { items: [], total: 0 }; // replace with the real query result
+}
 ```
 
-**Service** (`api/service.ts`) — data access layer. One exported function per operation:
+Rules:
+
+- `service.ts` is **server-only** (it imports `@/lib/db`); never import it from a client component.
+- Client-side fetching goes through `queries.ts` (`apiClient` → Route Handler); components never touch `getDb()` or table schemas directly.
+- Every data endpoint needs a Route Handler under `src/app/api/...` with `requireUserId()` (or `isAdmin`) + the `apiError` envelope:
 
 ```tsx
-import { fakeOrders } from '@/constants/mock-api-orders';
-import type { OrderFilters, OrdersResponse, OrderMutationPayload } from './types';
+// src/app/api/orders/route.ts
+import { requireUserId } from '@/lib/auth-session';
+import { apiError } from '@/lib/api-error';
+import { getOrders } from '@/features/orders/api/service';
 
-export async function getOrders(filters: OrderFilters): Promise<OrdersResponse> {
-  return fakeOrders.getOrders(filters);
-}
-export async function getOrderById(id: number) {
-  return fakeOrders.getOrderById(id);
-}
-export async function createOrder(data: OrderMutationPayload) {
-  return fakeOrders.createOrder(data);
-}
-export async function updateOrder(id: number, data: OrderMutationPayload) {
-  return fakeOrders.updateOrder(id, data);
-}
-export async function deleteOrder(id: number) {
-  return fakeOrders.deleteOrder(id);
+export async function GET(request: Request) {
+  const userId = await requireUserId();
+  if (!userId) return apiError(401, 'unauthorized', 'Unauthorized');
+  // parse/validate query params → service → Response.json(result)
 }
 ```
 
-**Queries** (`api/queries.ts`) — query key factory + query options:
+Reference implementations: `src/features/agent/api/service.ts`, `src/features/credits/api/service.ts`.
+
+### Step 2: Queries + Mutations (`src/features/<name>/api/`)
+
+Client-side data flows through `apiClient` → Route Handler. Server components prefetch with the **same query key** but call the server-only `service.ts` directly (see `src/features/agent/components/assets/asset-listing.tsx`), so both paths share one cache entry.
+
+**Queries** (`api/queries.ts`) — query key factory + `queryOptions` (client fetches through `apiClient`):
 
 ```tsx
 import { queryOptions } from '@tanstack/react-query';
-import { getOrders, getOrderById } from './service';
-import type { Order, OrderFilters } from './types';
+import { apiClient } from '@/lib/api-client';
+import type { Order, OrderFilters, OrdersResponse } from './types';
 
-export type { Order };
+export function buildOrderQuery(filters: OrderFilters): string {
+  const params = new URLSearchParams();
+  if (filters.page) params.set('page', String(filters.page));
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.search) params.set('search', filters.search);
+  if (filters.sort) params.set('sort', filters.sort);
+  return params.toString();
+}
 
 export const orderKeys = {
   all: ['orders'] as const,
   list: (filters: OrderFilters) => [...orderKeys.all, 'list', filters] as const,
-  detail: (id: number) => [...orderKeys.all, 'detail', id] as const
+  detail: (id: string) => [...orderKeys.all, 'detail', id] as const
 };
 
 export const ordersQueryOptions = (filters: OrderFilters) =>
   queryOptions({
     queryKey: orderKeys.list(filters),
-    queryFn: () => getOrders(filters)
+    queryFn: () => apiClient<OrdersResponse>(`/orders?${buildOrderQuery(filters)}`)
   });
 
-export const orderByIdOptions = (id: number) =>
+export const orderByIdOptions = (id: string) =>
   queryOptions({
     queryKey: orderKeys.detail(id),
-    queryFn: () => getOrderById(id)
+    queryFn: () => apiClient<Order>(`/orders/${id}`)
   });
 ```
 
-**Mutations** (`api/mutations.ts`) — use `mutationOptions` + `getQueryClient()` (not custom hooks with `useQueryClient()`):
+`buildOrderQuery` follows the same URLSearchParams pattern as `buildAssetQuery` in `src/features/agent/api/queries.ts`.
+
+Server prefetch reuses the same key and calls the service directly:
+
+```tsx
+void queryClient.prefetchQuery({
+  queryKey: ordersQueryOptions(filters).queryKey,
+  queryFn: () => getOrders(userId, filters) // server-only service
+});
+```
+
+**Mutations** (`api/mutations.ts`) — use `mutationOptions` + `getQueryClient()` (not custom hooks with `useQueryClient()`), calling the Route Handler via `apiClient`:
 
 ```tsx
 import { mutationOptions } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api-client';
 import { getQueryClient } from '@/lib/query-client';
-import { createOrder, updateOrder, deleteOrder } from './service';
 import { orderKeys } from './queries';
 import type { OrderMutationPayload } from './types';
 
 export const createOrderMutation = mutationOptions({
-  mutationFn: (data: OrderMutationPayload) => createOrder(data),
+  mutationFn: (data: OrderMutationPayload) =>
+    apiClient<{ id: string }>('/orders', { method: 'POST', body: JSON.stringify(data) }),
   onSuccess: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 
 export const updateOrderMutation = mutationOptions({
-  mutationFn: ({ id, values }: { id: number; values: OrderMutationPayload }) =>
-    updateOrder(id, values),
+  mutationFn: ({ id, values }: { id: string; values: OrderMutationPayload }) =>
+    apiClient<{ id: string }>(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   onSuccess: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 
 export const deleteOrderMutation = mutationOptions({
-  mutationFn: (id: number) => deleteOrder(id),
+  mutationFn: (id: string) => apiClient<{ ok: true }>(`/orders/${id}`, { method: 'DELETE' }),
   onSuccess: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 ```
 
-`mutationOptions` is the right abstraction because it works outside React (event handlers, tests, utilities), composes via spread at the call site, and uses `getQueryClient()` which handles both SSR (fresh per request) and client (singleton) correctly. See [references/query-abstractions.md](references/query-abstractions.md) for the full rationale.
+`mutationOptions` is the right abstraction because it works outside React (event handlers, tests, utilities), is passed directly to `useMutation(options)`, and uses `getQueryClient()` which handles both SSR (fresh per request) and client (singleton) correctly. Add UI callbacks per call via `mutate(vars, { onSuccess })` — do NOT spread a new `onSuccess` into `useMutation`, which would replace the shared cache-invalidation callback. See [references/query-abstractions.md](references/query-abstractions.md) for the full rationale.
 
 ### Step 3: Zod Schema (`src/features/<name>/schemas/<name>.ts`)
 
@@ -200,14 +219,19 @@ Create `src/features/<name>/components/` with:
 **Listing page** (server component — `<name>-listing.tsx`):
 
 ```tsx
+import { Suspense } from 'react';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { requireUserId } from '@/lib/auth-session';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
 import { ordersQueryOptions } from '../api/queries';
+import { getOrders } from '../api/service';
 import { OrderTable, OrderTableSkeleton } from './orders-table';
-import { Suspense } from 'react';
 
-export default function OrderListingPage() {
+export default async function OrderListingPage() {
+  const userId = await requireUserId();
+  if (!userId) return null;
+
   const page = searchParamsCache.get('page');
   const search = searchParamsCache.get('name');
   const pageLimit = searchParamsCache.get('perPage');
@@ -221,7 +245,11 @@ export default function OrderListingPage() {
   };
 
   const queryClient = getQueryClient();
-  void queryClient.prefetchQuery(ordersQueryOptions(filters));
+  // Reuse the client queryKey, but call the server-only service directly.
+  void queryClient.prefetchQuery({
+    queryKey: ordersQueryOptions(filters).queryKey,
+    queryFn: () => getOrders(userId, filters)
+  });
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
@@ -269,7 +297,7 @@ export function OrderTable() {
   const { table } = useDataTable({
     data: data.items,
     columns,
-    pageCount: Math.ceil(data.total_items / params.perPage),
+    pageCount: Math.ceil(data.total / params.perPage),
     shallow: true,
     debounceMs: 500,
     initialState: { columnPinning: { right: ['actions'] } }
@@ -332,19 +360,20 @@ import { deleteOrderMutation } from '../../api/mutations';
 
 export const CellAction: React.FC<{ data: Order }> = ({ data }) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const deleteMutation = useMutation({
-    ...deleteOrderMutation,
-    onSuccess: () => {
-      toast.success('Deleted');
-      setDeleteOpen(false);
-    }
-  });
+  const deleteMutation = useMutation(deleteOrderMutation);
   return (
     <>
       <AlertModal
         isOpen={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        onConfirm={() => deleteMutation.mutate(data.id)}
+        onConfirm={() =>
+          deleteMutation.mutate(data.id, {
+            onSuccess: () => {
+              toast.success('Deleted');
+              setDeleteOpen(false);
+            }
+          })
+        }
         loading={deleteMutation.isPending}
       />
       <DropdownMenu modal={false}>
@@ -430,7 +459,7 @@ import OrderForm from './order-form';
 
 export default function OrderViewPage({ orderId }: { orderId: string }) {
   if (orderId === 'new') return <OrderForm initialData={null} pageTitle='Create Order' />;
-  const { data } = useSuspenseQuery(orderByIdOptions(Number(orderId)));
+  const { data } = useSuspenseQuery(orderByIdOptions(orderId));
   if (!data) notFound();
   return <OrderForm initialData={data} pageTitle='Edit Order' />;
 }
@@ -471,7 +500,7 @@ The full pattern is shown in Steps 1-4 above. The key structure:
 
 1. **Schema** — Zod schema + inferred type in `schemas/<name>.ts`
 2. **Form component** — `useAppForm({ defaultValues, validators: { onSubmit: schema }, onSubmit })` + `useFormFields<T>()` for typed fields
-3. **Mutations** — `useMutation({ ...createOrderMutation, onSuccess: () => { toast(); router.push() } })`, spread shared mutation options from `api/mutations.ts` and layer on UI callbacks
+3. **Mutations** — `useMutation(createOrderMutation)` from `api/mutations.ts`; add UI callbacks per call: `mutate(value, { onSuccess: () => { toast(); router.push() } })` — spreading a new `onSuccess` into `useMutation` would replace the shared cache invalidation
 4. **View page** — client component that checks `id === 'new'` for create vs `useSuspenseQuery(byIdOptions)` for edit
 
 ### Sheet Form (Inline create/edit in a side panel)
@@ -492,17 +521,23 @@ export function OrderFormSheet({
   onOpenChange: (open: boolean) => void;
 }) {
   const isEdit = !!order;
-  const mutation = useMutation({
-    ...(isEdit ? updateOrderMutation : createOrderMutation),
-    onSuccess: () => {
-      onOpenChange(false);
-    }
-  });
+  const createMutation = useMutation(createOrderMutation);
+  const updateMutation = useMutation(updateOrderMutation);
+  const isPending = createMutation.isPending || updateMutation.isPending;
   const form = useAppForm({
     defaultValues: { customer: order?.customer ?? '' /* ... */ } as OrderFormValues,
     validators: { onSubmit: orderSchema },
     onSubmit: async ({ value }) => {
-      await mutation.mutateAsync(value);
+      if (isEdit && order) {
+        await updateMutation.mutateAsync(
+          { id: order.id, values: value },
+          { onSuccess: () => onOpenChange(false) }
+        );
+      } else {
+        await createMutation.mutateAsync(value, {
+          onSuccess: () => onOpenChange(false)
+        });
+      }
     }
   });
   const { FormTextField, FormSelectField } = useFormFields<OrderFormValues>();
@@ -525,8 +560,8 @@ export function OrderFormSheet({
           <Button variant='outline' onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type='submit' form='order-sheet-form' disabled={mutation.isPending}>
-            {mutation.isPending ? 'Saving...' : isEdit ? 'Update' : 'Create'}
+          <Button type='submit' form='order-sheet-form' disabled={isPending}>
+            {isPending ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>
       </SheetContent>
@@ -552,22 +587,21 @@ The pattern is: server prefetch → HydrationBoundary → client useSuspenseQuer
 
 **Why `useSuspenseQuery` not `useQuery`:** `useQuery` doesn't integrate with Suspense — it shows loading even when data is prefetched. `useSuspenseQuery` picks up the dehydrated pending query. Once cached (within `staleTime: 60s`), subsequent visits are instant.
 
-**Mutations** use `mutationOptions` + `getQueryClient()` in `mutations.ts`, composed via spread at the call site:
+**Mutations** use `mutationOptions` + `getQueryClient()` in `mutations.ts`; the client calls the Route Handler via `apiClient`:
 
 ```tsx
 // In mutations.ts — shared config
 export const createOrderMutation = mutationOptions({
-  mutationFn: (data) => createOrder(data),
+  mutationFn: (data: OrderMutationPayload) =>
+    apiClient<{ id: string }>('/orders', { method: 'POST', body: JSON.stringify(data) }),
   onSuccess: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 
-// In component — spread + layer UI callbacks
-const mutation = useMutation({
-  ...createOrderMutation,
-  onSuccess: () => toast.success('Created')
-});
+// In component — callbacks on mutate() run in addition to mutationOptions.onSuccess
+const mutation = useMutation(createOrderMutation);
+mutation.mutate(data, { onSuccess: () => toast.success('Created') });
 ```
 
 See [references/query-abstractions.md](references/query-abstractions.md) for why `mutationOptions`/`queryOptions` are the right abstraction over custom hooks.
@@ -606,7 +640,7 @@ See [references/theming-guide.md](references/theming-guide.md) for the complete 
 - **`cn()`** for class merging — never concatenate className strings
 - **Server components by default** — only add `'use client'` when needed
 - **React Query** — `void prefetchQuery()` on server + `useSuspenseQuery` on client
-- **API layer** — `types.ts` → `service.ts` → `queries.ts` → `mutations.ts` per feature; `queryOptions`/`mutationOptions` as base abstractions (not custom hooks); `getQueryClient()` in mutations (not `useQueryClient()`); key factories (`entityKeys.all/list/detail`); components never import mock APIs directly
+- **API layer** — `types.ts` → `service.ts` (server-only) → `queries.ts` / `mutations.ts` (`apiClient`) → Route Handler; `queryOptions`/`mutationOptions` as base abstractions (not custom hooks); `getQueryClient()` in mutations (not `useQueryClient()`); key factories (`entityKeys.all/list/detail`); **client** components never import `service.ts` — Server Components / Route Handlers call it directly
 - **nuqs** — `searchParamsCache` on server, `useQueryStates` on client with `shallow: true`
 - **Icons** — only from `@/components/icons`, never from `@tabler/icons-react` directly
 - **Forms** — `useAppForm` + `useFormFields<T>()` from `@/components/ui/tanstack-form`

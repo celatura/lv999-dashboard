@@ -102,12 +102,14 @@ export default function OverviewLayout({
 Each slot is an async server component that fetches data then renders the chart:
 
 ```tsx
-import { delay } from '@/constants/mock-api';
+import { requireUserId } from '@/lib/auth-session';
+import { getAssetStats } from '@/features/overview/api/service';
 import { AreaGraph } from '@/features/overview/components/area-graph';
 
-export default async function AreaStatsPage() {
-  await delay(2000); // Simulates API fetch
-  return <AreaGraph />;
+export default async function AreaStats() {
+  const userId = await requireUserId();
+  const stats = await getAssetStats(userId);
+  return <AreaGraph dailyTrend={stats.dailyTrend} />;
 }
 ```
 
@@ -193,7 +195,7 @@ const chartConfig = {
   mobile: { label: 'Mobile', color: 'var(--chart-2)' }
 } satisfies ChartConfig;
 
-export function AreaGraph() {
+export function AreaChartDemo() {
   return (
     <Card className='@container/card'>
       <CardHeader>
@@ -295,7 +297,7 @@ Each chart has a matching skeleton component. Pattern:
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-export function AreaGraphSkeleton() {
+export function AreaChartSkeletonDemo() {
   return (
     <Card className='@container/card'>
       <CardHeader>
