@@ -1,9 +1,4 @@
-import type {
-  DataTableColumnMeta,
-  ExtendedColumnFilter,
-  FilterOperator,
-  FilterVariant
-} from '@/types/data-table';
+import type { DataTableColumnMeta } from '@/types/data-table';
 import {
   type Column,
   type RowData,
@@ -16,14 +11,14 @@ import {
   createFacetedMinMaxValues,
   createFacetedRowModel,
   createFacetedUniqueValues,
+  filterFn_includesString,
+  filterFn_weakEquals,
   metaHelper,
   rowPaginationFeature,
   rowSelectionFeature,
   rowSortingFeature,
   tableFeatures
 } from '@tanstack/react-table';
-
-import { dataTableConfig } from '@/config/data-table';
 
 /**
  * 全部数据表共用的 Table V9 特性集（tree-shakeable）。
@@ -42,6 +37,10 @@ export const dataTableFeatures = tableFeatures({
   rowPaginationFeature,
   rowSelectionFeature,
   rowSortingFeature,
+  filterFns: {
+    includesString: filterFn_includesString,
+    weakEquals: filterFn_weakEquals
+  },
   facetedRowModel: createFacetedRowModel(),
   facetedUniqueValues: createFacetedUniqueValues(),
   facetedMinMaxValues: createFacetedMinMaxValues(),
@@ -73,38 +72,4 @@ export function getCommonPinningStyles<TData extends RowData>({
     width: column.getSize(),
     zIndex: isPinned ? 1 : 0
   };
-}
-
-export function getFilterOperators(filterVariant: FilterVariant) {
-  const operatorMap: Record<FilterVariant, { label: string; value: FilterOperator }[]> = {
-    text: dataTableConfig.textOperators,
-    number: dataTableConfig.numericOperators,
-    range: dataTableConfig.numericOperators,
-    date: dataTableConfig.dateOperators,
-    dateRange: dataTableConfig.dateOperators,
-    boolean: dataTableConfig.booleanOperators,
-    select: dataTableConfig.selectOperators,
-    multiSelect: dataTableConfig.multiSelectOperators
-  };
-
-  return operatorMap[filterVariant] ?? dataTableConfig.textOperators;
-}
-
-export function getDefaultFilterOperator(filterVariant: FilterVariant) {
-  const operators = getFilterOperators(filterVariant);
-
-  return operators[0]?.value ?? (filterVariant === 'text' ? 'iLike' : 'eq');
-}
-
-export function getValidFilters<TData>(
-  filters: ExtendedColumnFilter<TData>[]
-): ExtendedColumnFilter<TData>[] {
-  return filters.filter(
-    (filter) =>
-      filter.operator === 'isEmpty' ||
-      filter.operator === 'isNotEmpty' ||
-      (Array.isArray(filter.value)
-        ? filter.value.length > 0
-        : filter.value !== '' && filter.value !== null && filter.value !== undefined)
-  );
 }

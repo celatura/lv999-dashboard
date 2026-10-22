@@ -55,6 +55,7 @@ export function AssetsTable() {
     data: data.assets,
     columns,
     pageCount,
+    getRowId: (asset) => asset.id,
     shallow: true,
     debounceMs: 500,
     initialState: {

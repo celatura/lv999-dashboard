@@ -19,9 +19,6 @@ export const searchParams = {
   /** 管理端用户列表搜索（邮箱 / 名称 / userId，ilike 匹配 user 表） */
   query: parseAsString,
   sort: parseAsString
-  // advanced filter
-  // filters: getFiltersStateParser().withDefault([]),
-  // joinOperator: parseAsStringEnum(['and', 'or']).withDefault('and')
 };
 
 export const searchParamsCache = createSearchParamsCache(searchParams);

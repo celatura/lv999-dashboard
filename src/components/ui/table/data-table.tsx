@@ -1,4 +1,6 @@
-import { type RowData, type Table, flexRender } from '@tanstack/react-table';
+'use client';
+
+import { type RowData, type SortingState, type Table, flexRender } from '@tanstack/react-table';
 import type * as React from 'react';
 
 import { DataTablePagination } from '@/components/ui/table/data-table-pagination';
@@ -23,6 +25,8 @@ export function DataTable<TData extends RowData>({
   actionBar,
   children
 }: DataTableProps<TData>) {
+  const sorting = table.store.state.sorting;
+
   return (
     <div className='flex flex-col space-y-4'>
       {children}
@@ -37,6 +41,11 @@ export function DataTable<TData extends RowData>({
                     <TableHead
                       key={header.id}
                       colSpan={header.colSpan}
+                      aria-sort={
+                        header.column.getCanSort()
+                          ? getAriaSort(sorting, header.column.id)
+                          : undefined
+                      }
                       style={{
                         ...getCommonPinningStyles({ column: header.column })
                       }}
@@ -67,7 +76,10 @@ export function DataTable<TData extends RowData>({
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={table.getAllColumns().length} className='h-24 text-center'>
+                  <TableCell
+                    colSpan={table.getVisibleLeafColumns().length || 1}
+                    className='h-24 text-center'
+                  >
                     暂无匹配数据
                   </TableCell>
                 </TableRow>
@@ -83,4 +95,10 @@ export function DataTable<TData extends RowData>({
       </div>
     </div>
   );
+}
+
+function getAriaSort(sorting: SortingState, columnId: string): React.AriaAttributes['aria-sort'] {
+  const sort = sorting.find((item) => item.id === columnId);
+  if (!sort) return undefined;
+  return sort.desc ? 'descending' : 'ascending';
 }
