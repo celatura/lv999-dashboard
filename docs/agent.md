@@ -24,14 +24,17 @@ LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然�
 src/features/agent/
 ├── api/
 │   ├── types.ts            # 类型契约（Conversation / ChatMessage / Asset / 过滤参数）
-│   ├── service.ts          # 数据访问层（server-only）：会话 / 消息 / 资产的 DB + OSS 操作
+│   ├── service.ts          # 数据访问层（服务端专用）：会话 / 消息 / 资产的 DB + OSS 操作
 │   ├── queries.ts          # TanStack Query options + 查询键工厂 agentKeys
 │   ├── mutations.ts        # 会话增删改的 mutation options
 │   ├── provider.ts         # resolveModel(key)：百炼直连（@ai-sdk/alibaba）
 │   ├── agent.ts            # buildAgent()、工具定义、agentValidationTools
+│   ├── skill-service.ts    # 技能解析（预置常量 + 自定义技能 DB）与合并列表 / CRUD
 │   ├── image-generation.ts # 图片生成通道（直连百炼 REST，T2I / I2I）
 │   ├── image-edit.ts       # 图生图核心流程（工具与直连端点复用）
 │   ├── video-generation.ts # 视频生成通道（AI SDK experimental_generateVideo + 内置轮询，T2V / I2V）
+│   ├── generation-error.ts # GenerationError（billable 计费分类）与错误链 haystack
+│   ├── model-availability.ts # 模型下线 / 不存在识别（403 access_denied / 404）
 │   ├── rate-limit.ts       # 固定窗口 Redis 限流
 │   └── stop-signal.ts      # 跨实例停止信号（Redis 标志 + 轮询）
 ├── components/
@@ -56,7 +59,7 @@ src/lib/redis.ts            # Redis 连接（getConnectedRedis）
 src/lib/api-error.ts        # 统一错误信封 apiError()
 ```
 
-**分层约定**：客户端组件 → `queries.ts` / `mutations.ts`（经 `apiClient` 调 `/api/agent/*`）→ Route Handler → `service.ts`（server-only）→ DB / OSS。客户端**不直接**引用 `service.ts`。
+**分层约定**：客户端组件 → `queries.ts` / `mutations.ts`（经 `apiClient` 调 `/api/agent/*`）→ Route Handler → `service.ts`（服务端专用，项目约定不强制 `import 'server-only'`）→ DB / OSS。客户端**不直接**引用 `service.ts`。
 
 ---
 
@@ -197,7 +200,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量（与预置未声明同语义）。
 - **id 命名空间分流**：`conversations.activeSkillId`（text 可空）存预置 key（字符串）或自定义技能 uuid；`isUuid` 分流「查 DB / 查常量」，无需额外标记列。会话创建 / 切换技能用 `isSkillReference`（预置 key **或** uuid）校验，uuid 的归属在解析时按 `userId` 过滤。
 - **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量与中文名表 `AGENT_TOOL_LABELS`；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界）。
-- **解析链**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，server-only）：`getSkillForUser(userId, skillId)` → uuid 查 DB（`userId` 归属过滤）映射为 `SkillRegistryEntry`、非 uuid 查预置常量 `getSkill`、无匹配 → `undefined`；`listSkillsForUser(userId)` 返回合并列表（预置 `source='builtin'` + 自定义 `source='custom'`）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skill?: SkillRegistryEntry | null`（不再是 `skillId`），由 `chat` 路由先 `await getSkillForUser(userId, conversation.activeSkillId)` 再传入。
+- **解析链**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`getSkillForUser(userId, skillId)` → uuid 查 DB（`userId` 归属过滤）映射为 `SkillRegistryEntry`、非 uuid 查预置常量 `getSkill`、无匹配 → `undefined`；`listSkillsForUser(userId)` 返回合并列表（预置 `source='builtin'` + 自定义 `source='custom'`）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skill?: SkillRegistryEntry | null`（不再是 `skillId`），由 `chat` 路由先 `await getSkillForUser(userId, conversation.activeSkillId)` 再传入。
 - **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（合并列表 `{ skills }`，选择器与管理页共用）/ `POST`（创建，Zod 校验 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除 + 把引用会话 `activeSkillId` 置 null 回退通用）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000`（控 system token）/ `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
 - **UI**：会话选择器（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）经 `useSkillList`（合并列表 `useQuery` + 预置兜底，非 suspense）渲染，自定义技能带「自定义」badge、底部「管理技能…」入口跳转管理页；技能管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（内置只读、可「复制为草稿」+ 自定义可编辑 / 删除）+ 创建 / 编辑对话框（名称 / 描述 / 专家指令 + 撰写提示 / 引导语 / 9 工具勾选 / 0-2 组示例）。
 - **防御**：技能被删除或非法 / 越权 id → `getSkillForUser` 返回 undefined，`buildAgent` 回退基础指令 + 全量工具，不报错（双保险：删除时已置空引用会话的 `activeSkillId`）；工具过滤只影响「模型能调什么」，不影响「历史消息能否被校验」（`agentValidationTools` 恒全量，见 §5）。
@@ -280,7 +283,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ## 9. API 端点一览
 
-所有端点在开头 `auth()` 校验 userId；错误统一走 `apiError()` 信封。
+所有端点在开头经 DAL 的 `requireUserId()` 校验 userId（未登录 401）；错误统一走 `apiError()` 信封。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -292,7 +295,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型 / `activeSkillId`）/ 删除会话 |
 | GET | `/api/agent/assets` | 资产列表（分页 / 搜索 / kind 筛选 / `favorite` 筛选 / 排序）|
 | POST | `/api/agent/assets` | 创建 design 资产（限流 scope `design` 30/分）——详见 design-editor.md |
-| GET / DELETE | `/api/agent/assets/[id]` | 资产详情（有 `storageKey` 时附签名 previewUrl，cover image + design）/ 删除 |
+| GET / DELETE | `/api/agent/assets/[id]` | 资产详情（有 `storageKey` 时附 3600s 签名 previewUrl，覆盖 image / video / design 预览；design 无预览 PNG 时为 null）/ 删除 |
 | PATCH | `/api/agent/assets/[id]` | 更新 design 资产（归属且 `kind==='design'`）|
 | POST | `/api/agent/assets/[id]/favorite` | 收藏 / 取消收藏（任意 kind，限流 60/分）|
 | POST | `/api/agent/assets/[id]/edit` | 直连图片编辑 I2I（不经聊天，限流 20/分，`maxDuration=300`）|
@@ -313,7 +316,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 错误信封（API 契约硬化 v1）
 
-服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
+服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `forbidden` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
 
 - **例外：`generation_failed`（502）的 `message` 为中文**——图片/视频生成失败原因（内容审核拒绝 / 上游限流 / 鉴权 / 参数 / 超时）已由 `GenerationError` 映射为用户可读文案，端点直接透传作为单一来源，客户端按 `code` 识别后原样展示（见 design 域的 `resolveAiImageError`）；其余 code 的 `message` 仍为简短英文。
 - **路径参数**：所有 `[id]` 路由先用 [`isUuid`](../src/lib/utils.ts) 预校验，非法格式返回 404 `not_found`（避免直达 DB 产生 500）。
@@ -335,7 +338,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | `batch-delete` | 10 次 | 60s / 用户 | 批量删除（单次 ≤100 个）|
 | `video` | 5 次 | 60s / 用户 | 视频生成（成本高于图片）——**在工具 `execute` 内校验**，命中抛中文错误由视频卡片展示（MVP 视频仅走流式 chat 路由，无法返回 HTTP 429）|
 
-请求体上限 `MAX_REQUEST_BYTES = 4MB`（chat / stop / favorite / image-edit / image-generate / batch-delete 共用）；chat 另限 `MAX_MESSAGES=200`、`MAX_PARTS_PER_MESSAGE=500`。
+请求体上限 `MAX_REQUEST_BYTES = 4MB`（chat / stop / favorite / image-edit / image-generate / batch-delete / design 创建与更新 / 知识库 documents POST 共用）；chat 另限 `MAX_MESSAGES=200`、`MAX_PARTS_PER_MESSAGE=500`。
 
 ### Credits 计费（402 余额不足）
 
@@ -370,6 +373,6 @@ bun scripts/db-apply-sql.ts
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`db-apply-sql.ts`（应用迁移 SQL）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 扣费 / 流水）、`credit-admin.ts`（Credits 发放 / 设定 CLI，见 [docs/credits.md](./credits.md) §9）、`db-apply-sql.ts`（应用迁移 SQL）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。

@@ -45,7 +45,7 @@ LV999 Dashboard 的**成本管控底座**：Agent 的对话 / 生图 / 生视频
 
 ---
 
-## 4. 计费服务（`features/credits/api/service.ts`，server-only）
+## 4. 计费服务（`features/credits/api/service.ts`，服务端专用）
 
 | 函数 | 行为 |
 | --- | --- |

@@ -91,7 +91,7 @@ result = await generateVideo({
 
 ## 6. Agent 集成（改 `src/features/agent/api/agent.ts`）
 
-新增 2 个工具，**同时**登记到 `agentValidationTools` 与 `buildAgent.tools`（与现有 6 个工具并列，共 8 个）：
+新增 2 个工具，**同时**登记到 `agentValidationTools` 与 `buildAgent.tools`（与现有 7 个工具并列，共 9 个）：
 
 | 工具 | 输入 | 行为 |
 | --- | --- | --- |

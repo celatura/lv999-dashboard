@@ -1,6 +1,6 @@
 # 添加新主题
 
-本指南说明如何为应用添加新主题。主题系统使用 CSS 自定义属性配合 `[data-theme]` 选择器，实现轻松的主题切换。
+本指南说明如何为应用添加新主题。主题系统使用 CSS 自定义属性配合 `[data-theme]` 选择器；当前默认主题由 `active_theme` cookie 决定（无有效值时回退 `DEFAULT_THEME`）。
 
 ## 主题添加流程
 
@@ -10,21 +10,21 @@
 2. **导入主题** → 在 `src/styles/theme.css` 中添加 `@import`
 3. **注册主题** → 在 `src/components/themes/theme.config.ts` 的 `THEMES` 数组中添加
 4. **添加字体（如需要）** → 如果使用自定义 Google Fonts，在 `src/components/themes/font.config.ts` 中导入
-5. **设为默认（可选）** → 更新 `src/components/themes/active-theme.tsx` 中的 `DEFAULT_THEME`
+5. **设为默认（可选）** → 更新 `src/components/themes/theme.config.ts` 中的 `DEFAULT_THEME`
 
 详细步骤请参见下方的**逐步指南**部分。
 
 ## 快速开始：设置默认主题
 
-要将新主题设为默认（无需主题切换器即可自动加载）：
+要切换默认主题（当前项目没有主题切换器 UI，主题由 `active_theme` cookie 决定；无有效 cookie 时用默认值）：
 
-1. 打开 `src/components/themes/active-theme.tsx`
-2. 修改第 12 行：`const DEFAULT_THEME = 'your-theme-name';`
+1. 打开 `src/components/themes/theme.config.ts`
+2. 修改 `export const DEFAULT_THEME = 'your-theme-name';`
 3. 保存并重启开发服务器
 
-就是这样！你的主题现在将成为所有新用户的默认主题。
+就是这样！你的主题现在将成为未设置偏好用户的默认主题。
 
-> **注意：** 在设置默认主题之前，请确保已完成上方步骤 1-3。
+> **注意：** 在设置默认主题之前，请确保已完成上方步骤 1-3；建议同时把该主题登记进 `THEMES` 数组——`layout.tsx` 只校验 **cookie 值**是否属于 `THEMES`（不合法则回退 `DEFAULT_THEME`），未登记的主题不会被 cookie 选中；`DEFAULT_THEME` 本身作为兜底值直接生效、不参与该校验。
 
 ## 主题结构
 
@@ -312,20 +312,17 @@ export const fontVariables = cn(
 
 **重要说明：**
 
-- 在 CSS 中使用字体的**显示名称**（如 `'Geist'`、`'Architects Daughter'`），不是 CSS 变量
+- 在 CSS 中使用字体的**显示名称**（如 `'Geist'`、`'Roboto'`），不是 CSS 变量
 - 字体必须在 `font.config.ts` 中导入，Next.js 才会加载它
 - `font.config.ts` 中的字体变量会通过 `layout.tsx` 自动应用到 body
 - 可以使用 `next/font/google` 中的任何 Google Font
 - 添加新字体前先检查 `font.config.ts` 中已有的字体 — 可能可以直接复用
 
-**示例：** `notebook` 主题使用了 `Architects Daughter`：
-
-- 在 `font.config.ts` 中以 `Architects_Daughter` 导入
-- 在 `notebook.css` 中以 `'Architects Daughter'` 使用（带引号和空格）
+> 当前 `font.config.ts` 只加载 Geist / Geist Mono；如需其它字体，按上述步骤自行添加。
 
 ### 步骤 6：设为默认主题（可选）
 
-如果你希望主题在用户首次访问应用时自动加载（无需使用主题切换器），更新默认主题常量：
+如果你希望主题在未设置偏好的用户首次访问时自动加载（当前无主题切换器 UI），更新默认主题常量：
 
 **文件：** `src/components/themes/theme.config.ts`
 
@@ -340,18 +337,16 @@ export const DEFAULT_THEME = 'your-theme-name'; // 从 'vercel' 改为你的主�
 **注意：**
 
 - 这是默认主题的**唯一真实来源** — 服务端渲染和客户端代码都会自动使用它
-- 这会使你的主题成为所有新用户的默认主题
-- 已选择过主题的现有用户仍会看到其保存的偏好（存储在 cookie 中）
+- 这会使你的主题成为未设置偏好用户的默认主题
+- 手动写入 `active_theme` cookie 的用户仍会看到其偏好（cookie 值合法时优先于 `DEFAULT_THEME`）
 - 默认主题在页面加载时立即应用（无未样式内容闪烁）
 
 ### 步骤 7：测试你的主题
 
 1. 启动开发服务器
-2. 打开 UI 中的主题选择器
-3. 选择你的新主题
-4. 验证亮色和暗色模式都正常工作
-5. 选择 "Your Theme Name (Scaled)" 测试缩放变体
-6. 如果设为默认主题，清除浏览器 cookie 并刷新以查看自动加载效果
+2. 把 `DEFAULT_THEME` 设为你的主题（或手动把 `active_theme` cookie 写成主题名）
+3. 验证亮色和暗色模式都正常工作（暗色由 next-themes 在 `<html>` 上加 `.dark` 类）
+4. 清除浏览器 cookie 并刷新，确认回退到 `DEFAULT_THEME`
 
 ## 快速参考：文件位置
 
@@ -361,7 +356,7 @@ export const DEFAULT_THEME = 'your-theme-name'; // 从 'vercel' 改为你的主�
 2. ✅ `src/styles/theme.css` — 导入主题文件
 3. ✅ `src/components/themes/theme.config.ts` — 在 `THEMES` 数组中添加主题
 4. ⚠️ `src/components/themes/font.config.ts` — 仅在需要时添加字体
-5. ⚠️ `src/components/themes/active-theme.tsx` — 仅在需要时设为默认
+5. ⚠️ `src/components/themes/theme.config.ts` — 仅在需要时设为默认
 
 ## 必需令牌
 
@@ -396,7 +391,7 @@ export const DEFAULT_THEME = 'your-theme-name'; // 从 'vercel' 改为你的主�
 
 ## 示例：完整主题
 
-完整示例请参见 `src/styles/themes/claude.css`，其中定义了所有令牌。
+完整示例请参见 `src/styles/themes/vercel.css`，其中定义了所有令牌。
 
 ## 示例：最小主题
 
@@ -436,10 +431,6 @@ oklch(亮度 色度 色相)
 --muted: oklch(0.5 0 0);
 ```
 
-## 缩放变体
-
-所有主题自动支持缩放变体。当用户选择 "Theme Name (Scaled)" 时，会应用 `.theme-scaled` 类，调整间距和文字大小。你的主题文件中无需额外 CSS。
-
 ## 最佳实践
 
 1. **使用描述性主题名**：使用 kebab-case（如 `ocean-blue`、`forest-green`）
@@ -453,7 +444,7 @@ oklch(亮度 色度 色相)
 ### 主题不显示
 
 - 检查文件是否在 `src/styles/theme.css` 中导入
-- 验证主题名称在 CSS 文件和 theme-selector.tsx 中一致
+- 验证主题名称与 `theme.config.ts` 中 `THEMES[].value` 完全一致（大小写敏感）
 - 确保文件已保存且开发服务器已重新加载
 
 ### 颜色不生效
@@ -470,7 +461,7 @@ oklch(亮度 色度 色相)
 
 ## 设置默认主题
 
-应用默认使用 `vercel` 主题。要更改新用户的默认主题：
+应用默认使用 `vercel` 主题。要更改未设置偏好用户的默认主题：
 
 ### 修改默认主题常量
 
@@ -489,7 +480,7 @@ export const DEFAULT_THEME = 'your-theme-name'; // 修改此值
 - **唯一真实来源**：`DEFAULT_THEME` 定义在 `theme.config.ts` 中，在所有需要的地方导入
 - **服务端**：立即应用在 HTML 的 `data-theme` 属性中（无闪烁）
 - **客户端**：作为无 cookie 偏好时的回退值
-- **用户偏好**：仍然尊重已保存的用户偏好（存储在 cookie 中）
+- **用户偏好**：手动写入 `active_theme` cookie 时优先使用该值（仅限 `THEMES` 中的合法值）
 - **自动化**：无需更新多个文件 — 修改一次即可全局生效
 
 **此方式的优势：**
@@ -556,40 +547,13 @@ export const fontVariables = cn(
 - **自动应用**：字体变量通过 `layout.tsx` 自动应用到 body 元素
 - **可用字体**：参见 [Next.js 字体优化文档](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) 了解可用的 Google Fonts
 
-### 示例：Notebook 主题
-
-`notebook` 主题使用了 `Architects Daughter`：
-
-**在 `font.config.ts` 中：**
-
-```typescript
-import { Architects_Daughter } from 'next/font/google';
-
-const fontArchitectsDaughter = Architects_Daughter({
-  subsets: ['latin'],
-  weight: '400',
-  variable: '--font-architects-daughter'
-});
-
-export const fontVariables = cn(
-  // ... 其他字体
-  fontArchitectsDaughter.variable
-);
-```
-
-**在 `notebook.css` 中：**
-
-```css
-[data-theme='notebook'] {
-  --font-sans: 'Architects Daughter', sans-serif;
-}
-```
+> 当前 `font.config.ts` 只加载 Geist / Geist Mono；如需其它字体，须先在 `font.config.ts` 中导入（见步骤 5）。
 
 ## 参考文件
 
-- **完整主题示例**：`src/styles/themes/claude.css`
+- **完整主题示例**：`src/styles/themes/vercel.css`
 - **主题聚合器**：`src/styles/theme.css`
-- **主题选择器组件**：`src/components/themes/theme-selector.tsx`
 - **主题提供者**：`src/components/themes/active-theme.tsx`
+- **明暗切换组件**：`src/components/themes/theme-mode-toggle.tsx`
 - **主题配置**（含默认主题）：`src/components/themes/theme.config.ts`
 - **字体配置**：`src/components/themes/font.config.ts`

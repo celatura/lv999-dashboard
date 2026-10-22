@@ -21,7 +21,7 @@ LV999 Dashboard 的**平台管理员后台**：管理员在 `/dashboard/admin/us
 
 ---
 
-## 3. 管理员鉴权（[`src/lib/admin.ts`](../src/lib/admin.ts)，server-only）
+## 3. 管理员鉴权（[`src/lib/admin.ts`](../src/lib/admin.ts)，服务端专用）
 
 ```ts
 export function isAdmin(userId: string | null | undefined): boolean {
@@ -35,19 +35,19 @@ export function isAdmin(userId: string | null | undefined): boolean {
 - **userId 语义**：为 **Better Auth user id**（注册后从 `user` 表或用户管理页取）。
 - **服务端强制是唯一底线**：
   - 页面 [`dashboard/admin/users/page.tsx`](../src/app/dashboard/admin/users/page.tsx)：`requireUserId()` 后 `!isAdmin → notFound()`。
-  - 每个 `/api/admin/*` 端点：`requireUserId()` → `!isAdmin → apiError(403, 'forbidden', …)`（[`api-error.ts`](../src/lib/api-error.ts) 的 `forbidden` code）。
+  - 每个 `/api/admin/*` 端点：`requireUserIdAuthoritative()`（强制回源 DB，避免 ≤60s cookieCache 吊销残留）→ `!isAdmin → apiError(403, 'forbidden', …)`（[`api-error.ts`](../src/lib/api-error.ts) 的 `forbidden` code）。
 - **入口可见性（仅 UX）**：[`dashboard/layout.tsx`](../src/app/dashboard/layout.tsx)（server）`const verified = await verifySession(); … const admin = isAdmin(verified.userId);` → `<AppSidebar isAdmin={admin} />` → 下拉「用户管理」项按 `isAdmin` 渲染。客户端可见性不作为权限依据。
 
 ---
 
-## 4. 数据访问（[`features/admin/api/service.ts`](../src/features/admin/api/service.ts)，server-only）
+## 4. 数据访问（[`features/admin/api/service.ts`](../src/features/admin/api/service.ts)，服务端专用）
 
 ### 4.1 列用户（查 Better Auth `user` 表 + 合并余额）
 
 ```ts
 // 「最近登录」由 session 表派生（user 表无 lastSignInAt 列）
 const lastActive = db
-  .select({ userId: session.userId, lastSignInAt: max(session.createdAt) })
+  .select({ userId: session.userId, lastSignInAt: max(session.createdAt).as('last_sign_in_at') })
   .from(session).groupBy(session.userId).as('last_active');
 
 const [rows, totalRows] = await Promise.all([
@@ -68,14 +68,14 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 ## 5. 级联删除用户（`deleteUserCascade`，不可逆重操作）
 
-顺序：**先断登录 → 再清数据 → 最后清对象存储**。
+顺序：**单个 DB 事务内先断登录 → 再清数据**，事务提交后**最后清对象存储**。
 
-1. **删 Better Auth 用户**：`db.delete(user).where(eq(user.id, userId))`——`session` / `account` 外键 `ON DELETE CASCADE` 一并清理，立即断登录，防删除过程中产生新数据。**已删（重跑）则影响 0 行，幂等继续**。
-2. **DB 事务**（`getDb().transaction`，全部 `where userId=`）：
-   - 先收集 `assets.storageKey`（供步骤 3）与**预数 `messages`**——`messages` 无 `userId` 列，靠 `conversations` 的 `ON DELETE CASCADE` 清理，而 cascade 不回传被级联行数，故删 `conversations` 前先按其 id `count(messages)`。
-   - 依次删：`knowledgeChunks`(by userId，显式) → `knowledgeDocuments`(cascade 兜底 chunks) → `assets` → `conversations`(cascade messages) → `creditLedger` → `creditsAccounts`。跨表外键均 cascade/set null，无 restrict 阻塞。
-3. **OSS 清理**：逐个 `getOssClient().delete(storageKey)`，失败仅 `console.warn` 不阻塞（沿用 `deleteAsset` 模式；DB 行已删，残留对象无访问路径）。
-- **返回** `DeleteUserResult`：各表删除行数（conversations/messages/assets/knowledgeDocuments/knowledgeChunks/creditLedger/creditsAccounts）+ `ossObjects`，供前端 toast 展示清理明细。
+1. **DB 事务**（`getDb().transaction`，任一步失败整体回滚、可安全重跑）：
+   - 先删 Better Auth 用户：`tx.delete(user).where(eq(user.id, userId))`——`session` / `account` 外键 `ON DELETE CASCADE` 一并清理，立即断登录，防删除过程中产生新数据。**已删（重跑）则影响 0 行，幂等继续**。
+   - 收集 `assets.storageKey`（供步骤 2）与**预数 `messages`**——`messages` 无 `userId` 列，靠 `conversations` 的 `ON DELETE CASCADE` 清理，而 cascade 不回传被级联行数，故删 `conversations` 前先按其 id `count(messages)`。
+   - 依次删业务表（全部 `where userId=`）：`skills`（该表无外键指向 auth user，须显式删）→ `knowledgeChunks`(显式) → `knowledgeDocuments`(cascade 兜底 chunks) → `assets` → `conversations`(cascade messages) → `creditLedger` → `creditsAccounts`。跨表外键均 cascade/set null，无 restrict 阻塞。
+2. **OSS 清理**（事务提交后）：按固定并发分批 `getOssServerClient().delete(storageKey)`，失败仅 `console.warn` 不阻塞（沿用 `deleteAsset` 模式；DB 行已删，残留对象无访问路径）。
+- **返回** `DeleteUserResult`：各表删除行数（conversations/messages/assets/**skills**/knowledgeDocuments/knowledgeChunks/creditLedger/creditsAccounts）+ `ossObjects`，供前端 toast 展示清理明细。
 - **防自删**：端点层拒绝 `id === 当前管理员 userId`（400），避免删自己后立即断登录、失去管理入口。
 
 ---
@@ -86,13 +86,13 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 ---
 
-## 7. API 端点（`/api/admin/*`，全部 `requireUserId()` + `isAdmin` 403 + 限流 scope `admin`）
+## 7. API 端点（`/api/admin/*`，全部 `requireUserIdAuthoritative()` + `isAdmin` 403 + 限流 scope `admin`）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/admin/users` | 用户列表（分页 `page`/`limit` + `query` 搜索 + `sort` 排序）+ 合并余额 |
 | POST | `/api/admin/users/[id]/credits` | 调 Credits：body `{ mode, amount, note? }`（Zod 校验）→ grantCredits/setBalance → 返回新余额 |
-| DELETE | `/api/admin/users/[id]` | 级联删除用户（`maxDuration=60`，长操作：删 user + 7 表事务 + 逐个 OSS）；拒绝删自己 |
+| DELETE | `/api/admin/users/[id]` | 级联删除用户（`maxDuration=60`，长操作：删 user + 8 表在同一事务内 + 事务提交后并发清 OSS）；拒绝删自己 |
 
 - 复用 `apiError` 信封；Better Auth user id 非 uuid，校验非空即可（不用 `isUuid`）。
 - 限流复用 agent 的 `checkRateLimit`，scope `admin`（防误操作刷写）。
@@ -113,7 +113,7 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 - **服务端鉴权是唯一安全底线**：客户端下拉可见性仅 UX；页面 `notFound()`、端点 403 才是真拦截。
 - **`messages` 无 userId 列**：删用户消息只能经 `conversations` 的 cascade，不能直接 `delete messages where userId`。
-- **删除不可逆**：先删 Better Auth 用户（级联 session/account 断登录）；DB 事务；OSS 失败仅告警；二次确认 + 防自删兜底。
+- **删除不可逆**：删 Better Auth 用户与业务表在**同一 DB 事务**内（级联 session/account 断登录）；OSS 失败仅告警；二次确认 + 防自删兜底。
 - **余额批量查**：`getBalancesByIds`（`where userId in`）避免逐用户 N+1。
 - **幂等**：删 user 影响 0 行时继续清理业务数据 / OSS，支持中断后重跑。
 
@@ -130,4 +130,4 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 - **鉴权**：非管理员访问 `/dashboard/admin/users` → notFound；调 admin 端点 → 403；账号下拉**不见**「用户管理」。`ADMIN_USER_IDS` 未配 → 所有人不可达。
 - **列表**：管理员进入 → 全部用户 + 正确余额；搜索 / 分页 / 排序可用；「最近登录」反映 session 活跃。
 - **调 Credits**：给某用户 grant 500 → 余额 +500 + `credit_ledger` 有 grant 流水；set → 余额被设定；该用户下次对话可用额度相应变化。
-- **删除**：删某测试号 → `user` 表无该行（session/account 级联清空、无法登录）、业务 7 表无其数据、OSS 无其图片/视频对象、列表移除、toast 显示清理计数；删自己 → 被拒（400）。
+- **删除**：删某测试号 → `user` 表无该行（session/account 级联清空、无法登录）、业务 8 表无其数据（含 `skills`）、OSS 无其图片/视频对象、列表移除、toast 显示清理计数；删自己 → 被拒（400）。

@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 - **选型 `@firecrawl/anydoc`（v0.2.4，MIT）**：单库覆盖 14 种格式（Word/PPT/Excel/OpenDocument/RTF/EPUB/CSV + 文本型 PDF），输出**结构化 GFM Markdown**（保留标题/表格/列表/脚注/公式转 LaTeX），中位 4.4ms、纯本地无网络无 API key。相比纯文本方案，**结构化 Markdown 让现有 `chunkText` 切分更语义化、检索更精准**。
 - **分派策略**（`extractTextFromFile`）：`md`/`txt`/`html` 本就是文本 → **零依赖**（UTF-8 decode / `stripFrontmatter` 去 YAML 头 / 复用 `htmlToText`）；office/pdf/epub/rtf/csv → `anydoc.toMarkdownBytes(buffer, format)`（**基于内容签名检测格式**，扩展名标错也能识别；CSV 无签名需 `formatFromExtension('csv')` 显式声明，其余传 `null` 交内容检测）。Buffer 本身即 Uint8Array，直接传入避免拷贝。
-- **NAPI 原生二进制的 serverless 适配**：anydoc Node 绑定是 napi-rs 原生 `.node`，[`next.config.ts`](../next.config.ts) 的 `serverExternalPackages` 含 `['ali-oss', '@firecrawl/anydoc']`（不参与打包，运行时由 Node 直接加载）。
+- **NAPI 原生二进制的 serverless 适配**：anydoc Node 绑定是 napi-rs 原生 `.node`，[`next.config.ts`](../next.config.ts) 的 `serverExternalPackages` 含 `['ali-oss', '@firecrawl/anydoc', 'nodemailer']`（不参与打包，运行时由 Node 直接加载）。
 - **错误映射**：anydoc 错误码（v0.2.x 小写驼峰）→ `KnowledgeExtractError`（snake_case code）→ HTTP：`needsOcr`→`needs_ocr`（扫描件/图片型 PDF，**未启用联网 OCR**）、`encrypted`→`encrypted`、`unsupported`→`unsupported_type`、`resourceLimit`→`too_large`、`malformed`/`missingPart`→`parse_failed`；原始 error 作 `cause` 保留 + `console.error` 记录，用户仅见中文提示。
 - **上限与防御**（`assertText`）：提取文本 `trim()` 为空 → `empty_text`（不建文档行）；超 `MAX_DOCUMENT_BYTES=100KB` → `too_large`。上传文件原始字节上限 `MAX_UPLOAD_FILE_BYTES=10MB`（端点校验）。允许扩展名白名单 `ACCEPTED_FILE_EXTENSIONS`（[`extract.ts`](../src/features/knowledge/lib/extract.ts)，19 种）后端强制校验，前端 accept 见 `KNOWLEDGE_FILE_ACCEPT`（[`constants/files.ts`](../src/features/knowledge/constants/files.ts)）。
 
@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 6. API 端点（`src/app/api/agent/knowledge/*`）
 
-遵循现有约定：`auth()` + `apiError` 信封 + `[id]` 路由 `isUuid` + 写入限流 scope `knowledge`（30 次/分/用户，带 `Retry-After`）。
+遵循现有约定：`requireUserId()`（DAL）+ `apiError` 信封 + `[id]` 路由 `isUuid` + 写入限流 scope `knowledge`（30 次/分/用户，带 `Retry-After`）。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
