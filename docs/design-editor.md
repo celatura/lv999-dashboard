@@ -19,8 +19,8 @@ LV999 Dashboard 的可视化创作模块：一个 Canva/Figma 式的**设计画�
 
 ## 2. 依赖与约束
 
-- `konva@10.5.0` + `react-konva@~19.2.7`（均发布 2026-09-08，满足 bunfig 7 天冷却；`~` 锁定不跳到需要升 React 的 19.3）。
-- **react-konva 主版本必须匹配 React 主版本**（React 19.2 → react-konva 19.2.x）。
+- `konva@10.9.0` + `react-konva@19.3.2`（与 React 19.3.1 对齐，package.json 中精确锁定）。
+- **react-konva 主/次版本必须匹配 React**（React 19.3 → react-konva 19.3.x）。
 - 未新增状态库；编辑器状态用 `useReducer` + Context（zustand 列为后备，面板增多/性能痛点时再平滑替换）。
 - **本地图片上传**复用现有基建：`FileUploader`（已本地化）+ OSS + `apiClient`（FormData）+ `sharp`（读图片尺寸，项目已有依赖，首次使用）；激活 assets 既有但未用的 `source='upload'`。
 - **未改数据库 schema**（复用 assets 现有列 `kind`/`content`/`storageKey`/`mime`/`source`）。

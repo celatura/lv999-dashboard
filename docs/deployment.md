@@ -84,7 +84,7 @@ docker run -d -p 3000:3000 \
 
 ## Vercel
 
-连接仓库 → 在 Dashboard 配置环境变量 → 部署（历史形态，仍可用；`vercel.json` 已移除，无平台专属配置）。
+连接仓库 → 在 Dashboard 配置环境变量 → 部署（历史形态，仍可用；`vercel.json` 已移除，无平台专属配置）。`package.json` 的 `engines.node=24.x` 会将部署运行时固定为 Node.js 24。
 
 ---
 
@@ -104,4 +104,4 @@ docker run -d -p 3000:3000 \
 
 ## Docker
 
-包含两个生产就绪的 Dockerfile：`Dockerfile`（Node.js）和 `Dockerfile.bun`（Bun）。`NEXT_PUBLIC_*` 变量需在构建时通过 `--build-arg` 传入，运行时密钥通过 `-e` 传入（示例见上文「构建与运行」）。
+包含两个生产就绪的 Dockerfile：`Dockerfile`（Node.js 24，可通过 `--build-arg NODE_VERSION=...` 覆盖）和 `Dockerfile.bun`（Bun）。`NEXT_PUBLIC_*` 变量需在构建时通过 `--build-arg` 传入，运行时密钥通过 `-e` 传入（示例见上文「构建与运行」）。

@@ -25,7 +25,8 @@
 | 类别 | 选型 |
 | --- | --- |
 | 框架 | Next.js 16（App Router） |
-| 语言 | TypeScript 5.9（strict） |
+| 运行时 | Node.js 24（见 `.nvmrc`）或 Bun |
+| 语言 | TypeScript 7（strict） |
 | UI 组件 | shadcn/ui（Base UI primitives） |
 | 样式 | Tailwind CSS v4 |
 | 认证 | Better Auth（自托管 · 邮箱密码 · 自定义头像） |
@@ -63,7 +64,7 @@
 
 ## 快速开始
 
-**前置要求**：Node.js 22（见 `.nvmrc`）或 Bun，推荐使用 Bun。
+**前置要求**：Node.js 24（见 `.nvmrc`）或 Bun，推荐使用 Bun。
 
 ```bash
 # 1. 安装依赖

@@ -7,7 +7,7 @@ description: TanStack Query v5 data fetching patterns including useSuspenseQuery
 
 ## Purpose
 
-Modern data fetching with TanStack Query v5 (latest: 5.90.5, November 2025), emphasizing Suspense-based queries, cache-first strategies, and centralized API services.
+Modern data fetching with TanStack Query v5 (latest: 5.104.5, October 2026), emphasizing Suspense-based queries, cache-first strategies, and centralized API services.
 
 **Note**: v5 (released October 2023) has breaking changes from v4:
 
