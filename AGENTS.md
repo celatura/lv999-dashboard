@@ -15,7 +15,7 @@ This file provides essential information for AI coding agents working on this pr
 - **Authentication**: Better Auth (self-hosted; email + password)
 - **Charts**: Recharts
 - **Containerization**: Docker (Node.js & Bun Dockerfiles)
-- **Package Manager**: Bun (preferred) or npm
+- **Package Manager**: Bun (preferred; `lint:fix` invokes `bun format`) or npm
 
 The project follows a feature-based folder structure designed for scalability in SaaS applications, internal tools, and admin panels.
 
@@ -27,7 +27,7 @@ The project follows a feature-based folder structure designed for scalability in
 
 - Next.js 16.4 with App Router
 - React 19.3
-- Node.js 24
+- Node.js 24 (Node/Docker deployment) / Bun (local dev, recommended; Bun Dockerfile available)
 - TypeScript 7 (native compiler) with strict mode enabled
 
 ### Styling & UI
@@ -61,7 +61,7 @@ The project follows a feature-based folder structure designed for scalability in
 - TanStack Table for data tables
 - TanStack React Query for data fetching and mutations
 - Recharts for analytics/charts
-- Service layer per feature (`api/types.ts` → `api/service.ts` (server-only) → `api/queries.ts` / `api/mutations.ts` → Route Handler)
+- Service layer per feature (`api/types.ts` → `api/service.ts` (server-side) → `api/queries.ts` / `api/mutations.ts` → Route Handler)
 - Route handlers at `src/app/api/` (client-side data boundary; BFF proxies when needed)
 - Real backend is already wired in: Drizzle ORM + PostgreSQL; the agent / design / knowledge / credits features hit DB / OSS / Redis / Alibaba Cloud Model Studio directly
 - API client utility in `src/lib/api-client.ts` (for fetch-based patterns)
@@ -80,16 +80,17 @@ The project follows a feature-based folder structure designed for scalability in
 ```
 /src
 ├── app/                    # Next.js App Router
-│   ├── auth/              # Authentication routes (sign-in, sign-up)
+│   ├── auth/              # Authentication routes (sign-in, sign-up, forgot/reset password)
 │   ├── dashboard/         # Dashboard routes
 │   │   ├── overview/      # Analytics (parallel routes @area_stats/@bar_stats/@pie_stats/@sales)
 │   │   ├── agent/         # Agent creation (conversations + [conversationId])
+│   │   ├── skills/        # Expert skills management
 │   │   ├── assets/        # My assets (assets table)
 │   │   ├── design/        # Design canvas (new + [id] editor)
 │   │   ├── knowledge/     # RAG knowledge base
 │   │   ├── admin/         # User management (isAdmin only)
 │   │   └── profile/       # User profile (+ credits)
-│   ├── api/               # Route handlers: agent (chat/conversations/assets/knowledge/…) + admin
+│   ├── api/               # Route handlers: agent (chat/conversations/assets/knowledge/skills/credits), auth, admin, avatar, health, user
 │   ├── layout.tsx         # Root layout with providers
 │   ├── page.tsx           # Landing page
 │   ├── global-error.tsx   # Global error boundary
@@ -98,14 +99,14 @@ The project follows a feature-based folder structure designed for scalability in
 ├── components/
 │   ├── ui/                # shadcn/ui components (50+ components)
 │   ├── layout/            # Layout components (sidebar, header, etc.)
-│   ├── forms/             # Field components (shadcn TanStack Form anatomy) + demos
+│   ├── forms/             # Field components (shadcn TanStack Form anatomy)
 │   ├── themes/            # Theme system components
 │   ├── kbar/              # Command+K search bar
 │   ├── icons.tsx          # Icon registry
 │   └── ...
 │
 ├── features/              # Feature-based modules
-│   ├── agent/             # Agent creation (chat / assets / generation)
+│   ├── agent/             # Agent creation (chat / skills / assets / generation)
 │   ├── design/            # Design canvas (Konva editor)
 │   ├── knowledge/         # RAG knowledge base (pgvector)
 │   ├── credits/           # Credits billing (accounts + ledger)
@@ -144,6 +145,9 @@ The project follows a feature-based folder structure designed for scalability in
 │   ├── auth.md            # Better Auth (self-hosted): architecture / DAL / security
 │   ├── user-management.md # Admin user management & server-side auth
 │   ├── nav-rbac.md        # Navigation RBAC documentation
+│   ├── forms.md           # TanStack Form + shadcn field anatomy
+│   ├── video-generation.md # Video generation channel
+│   ├── deployment.md      # Deployment (Docker / Vercel)
 │   └── themes.md          # Theme customization guide
 
 Dockerfile                 # Node.js production Dockerfile
@@ -211,6 +215,17 @@ SMTP_FROM=
 # Admin whitelist (comma-separated Better Auth user ids; empty = no admin)
 ADMIN_USER_IDS=
 ```
+
+### Full Environment Set
+
+The auth block above is only enough to sign in. Core app features also need:
+
+- `DATABASE_URL` — PostgreSQL (overview / agent / knowledge / design / credits)
+- `DASHSCOPE_API_KEY` — Alibaba Cloud Model Studio (chat / image / video / embeddings)
+- `OSS_REGION`, `OSS_BUCKET`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET` — asset storage
+- `REDIS_URL` — resumable streams, stop signals, rate limiting
+
+For Docker / self-hosting, also set `BUILD_STANDALONE=true`. See [`env.example.txt`](./env.example.txt) for the full commented list and [docs/agent.md](./docs/agent.md) for the module-level breakdown.
 
 ## Code Style Guidelines
 
@@ -294,7 +309,7 @@ export const navGroups: NavGroup[] = [
 
 ### Access Control Properties (vestigial)
 
-The `NavItem.access` field and its properties (`requireOrg` / `permission` / `role` / `plan` / `feature`) still exist in `src/types/index.ts` for backward compatibility, **but org-based checks no longer resolve**: `use-nav.ts` hardcodes the access context to `hasOrg = false`, so any item carrying `requireOrg` / `permission` / `role` is **hidden** in the current single-user deployment. Prefer leaving `access` off — show admin-only entries via the server-side `isAdmin` path below instead.
+The `NavItem.access` field and its properties (`requireOrg` / `permission` / `role` / `plan` / `feature`) still exist in `src/types/index.ts` for backward compatibility, **but org-based checks no longer resolve**: `use-nav.ts` hardcodes the access context to `hasOrg = false`, so any item carrying `requireOrg` / `permission` / `role` is **hidden** in the current single-admin (no-org) deployment. Prefer leaving `access` off — show admin-only entries via the server-side `isAdmin` path below instead.
 
 ### Client-Side Filtering
 
@@ -308,19 +323,21 @@ Better Auth is self-hosted; see [docs/auth.md](./docs/auth.md) for the full arch
 
 ### Protected Routes
 
-The `/dashboard` layout gates on a real session (`verifySession`); `proxy.ts` only does an optimistic cookie redirect (not a security boundary). For admin-only pages / endpoints, enforce the server-side whitelist `isAdmin` (`src/lib/admin.ts`, backed by `ADMIN_USER_IDS`). This is the ONLY security boundary — client-side entry visibility is UX.
+The `/dashboard` layout gates on a real session (`verifySession`); `src/proxy.ts` only does an optimistic cookie redirect (not a security boundary). For admin-only pages / endpoints, enforce the server-side whitelist `isAdmin` (`src/lib/admin.ts`, backed by `ADMIN_USER_IDS`). This is the ONLY security boundary — client-side entry visibility is UX.
 
 ```tsx
-import { redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { requireUserId } from '@/lib/auth-session';
 import { isAdmin } from '@/lib/admin';
 
 export default async function AdminPage() {
   const userId = await requireUserId();
-  if (!isAdmin(userId)) redirect('/dashboard/overview');
+  if (!isAdmin(userId)) notFound();
   // ...
 }
 ```
+
+Pages use `notFound()` rather than a redirect so non-admins cannot confirm that the admin page exists.
 
 In route handlers, return `401` when `requireUserId()` is null and `403` for non-admins. Never call `auth.api.getSession` directly — always go through the DAL. See [docs/user-management.md](./docs/user-management.md).
 
@@ -340,19 +357,19 @@ Each feature has an API layer (add `mutations.ts` when the feature has writes):
 ```
 src/features/<name>/api/
   types.ts      ← Type contract (response shapes, filters, payloads)
-  service.ts    ← Server-only data access (Drizzle / external API) — imported by Route Handlers + server prefetch
+  service.ts    ← Server-side data access (Drizzle / external API) — imported by Route Handlers + server prefetch
   queries.ts    ← Query keys + queryOptions (client: apiClient → Route Handler)
   mutations.ts  ← mutationOptions (client: apiClient → Route Handler)
 ```
 
-**`service.ts` is the server-only data boundary.** Client code never imports it; client reads/writes go through `queries.ts` / `mutations.ts` via `apiClient`. Server Components prefetch with the same query key and call `service.ts` directly, so server and client share one cache entry.
+**`service.ts` is the server-side data boundary.** Client code never imports it; client reads/writes go through `queries.ts` / `mutations.ts` via `apiClient`. Server Components prefetch with the same query key and call `service.ts` directly, so server and client share one cache entry. This is a project convention rather than a build-time guarantee — the service files do not currently `import 'server-only'`.
 
 #### Backend Patterns
 
 | Pattern                                            | How to implement                                                                                                     |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Server Actions + ORM** (Prisma/Drizzle/Supabase) | Add `'use server'` at top of `service.ts`, call ORM directly                                                         |
-| **Route Handlers + ORM** (this project)            | `service.ts` is server-only and calls the ORM (Drizzle); Route Handlers import it; client `queries.ts` fetches `/api/...` via `apiClient` |
+| **Route Handlers + ORM** (this project)            | `service.ts` is server-side and calls the ORM (Drizzle); Route Handlers import it; client `queries.ts` fetches `/api/...` via `apiClient` |
 | **BFF** (Next.js proxies to Laravel/Go/etc.)       | Route Handlers proxy to the external backend; `service.ts` holds the server-side mapping; client calls `apiClient`    |
 | **Direct external API**                            | `service.ts` calls the external URL server-side via `fetch()`                                                        |
 
@@ -382,12 +399,12 @@ The project uses TanStack React Query with server-side prefetching and client-si
 
 1. **Query keys** defined in `queries.ts` — shared between server prefetch and client hooks; the client `queryFn` uses `apiClient`
 2. **Server prefetch** using `void queryClient.prefetchQuery()` + `HydrationBoundary` + `dehydrate` — `void` (fire-and-forget) is the standard TanStack pattern for Next.js App Router
-3. **Client fetch** using `useSuspenseQuery()` — integrates with React Suspense so prefetched data streams in without showing a loading skeleton on first load
-4. **Suspense boundary** wraps the client component — shows a fallback skeleton only on subsequent client-side navigations when cache is empty
+3. **Client fetch** using `useSuspenseQuery()` — integrates with React Suspense; if the `void` prefetch has not resolved by hydration, the client suspends and the fallback shows while data streams in
+4. **Suspense boundary** wraps the client component — the fallback can appear on the first load while the pending prefetch resolves, and on subsequent client-side navigations when cache is empty; cached visits within `staleTime` show no skeleton
 
 ```tsx
 // Server component: prefetch + dehydrate.
-// Reuse the client queryKey, but call the server-only service directly —
+// Reuse the client queryKey, but call the server-side service directly —
 // apiClient uses a relative /api URL and cannot run inside a Server Component.
 const queryClient = getQueryClient();
 void queryClient.prefetchQuery({
@@ -425,7 +442,7 @@ The server prefetch `queryFn` must return exactly the same shape as the client `
 
 ### Mutations
 
-Client components never import the server-only `service.ts`. Write operations go through `apiClient` — usually encapsulated in `api/mutations.ts` as `mutationOptions`, passed directly to `useMutation(options)`; add UI callbacks per call via `mutate(vars, { onSuccess })`:
+Client components never import the server-side `service.ts`. Write operations go through `apiClient` — usually encapsulated in `api/mutations.ts` as `mutationOptions`, passed directly to `useMutation(options)`; add UI callbacks per call via `mutate(vars, { onSuccess })`:
 
 ```tsx
 import { createEntityMutation } from '../api/mutations';
@@ -460,7 +477,7 @@ Use `nuqs` for search params state:
 Tables use TanStack Table with React Query:
 
 - Query options in `features/*/api/queries.ts`
-- Column definitions in `features/*/components/*-tables/columns.tsx`
+- Column definitions in `features/*/components/*-table*/columns.tsx`
 - Table component in `src/components/ui/table/data-table.tsx`
 - Column pinning via `initialState.columnPinning` in `useDataTable`
 
@@ -498,7 +515,9 @@ Recommended test locations:
 
 Canonical guide: [docs/deployment.md](./docs/deployment.md) (Vercel, production environment variables, Docker).
 
-### Vercel (Recommended)
+### Vercel (Supported)
+
+Vercel is supported, but the canonical deployment target is Docker self-hosting — see [docs/deployment.md](./docs/deployment.md).
 
 1. Connect repository to Vercel
 2. Add environment variables in dashboard
@@ -511,16 +530,20 @@ Ensure these are set in your deployment platform:
 - `BETTER_AUTH_SECRET` (min 32 chars) and `BETTER_AUTH_URL` (HTTPS)
 - `DATABASE_URL`; `SMTP_*` if password-reset email is needed
 - `ADMIN_USER_IDS` (Better Auth user ids) for the admin backend
+- `DASHSCOPE_API_KEY` for chat / image / video / embeddings
+- `OSS_REGION`, `OSS_BUCKET`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET` for asset storage
+- `REDIS_URL` for resumable streams, stop signals, and rate limiting
+- `BUILD_STANDALONE=true` for Docker builds (not needed on Vercel)
 - All `NEXT_PUBLIC_*` variables for client-side access
 
-### Docker
+### Docker (Recommended)
 
 Production-ready Dockerfiles are included:
 
 - `Dockerfile` — Node.js-based
 - `Dockerfile.bun` — Bun-based
 
-Both use `output: 'standalone'` in `next.config.ts`. Pass `NEXT_PUBLIC_*` vars as `--build-arg` at build time, and runtime secrets via `-e` at run time.
+Both Dockerfiles set `BUILD_STANDALONE=true`, which makes `next.config.ts` emit standalone output. Pass `NEXT_PUBLIC_*` vars as `--build-arg` at build time, and runtime secrets via `-e` at run time.
 
 ### Build Considerations
 
@@ -531,9 +554,9 @@ Both use `output: 'standalone'` in `next.config.ts`. Pass `NEXT_PUBLIC_*` vars a
 
 ## Icon System
 
-**All icons come from a single source: `src/components/icons.tsx`.**
+**Application code must use the icon registry in `src/components/icons.tsx`.**
 
-The project uses `@tabler/icons-react` as the sole icon package. Every icon is re-exported through a centralized `Icons` object — **never import directly from `@tabler/icons-react` or any other icon package**.
+The project uses `@tabler/icons-react` as the sole icon package. Feature, page, layout, and other application code must import icons through the centralized `Icons` object — **never import directly from `@tabler/icons-react` or any other icon package in application code**. The shadcn primitives under `src/components/ui/` are the exception: they import Tabler icons directly, matching the shadcn source they are generated from; do not refactor them just to route through `Icons`.
 
 ### Usage
 
@@ -593,7 +616,7 @@ export const Icons = {
 ### Adding a New Feature (End-to-End)
 
 1. Create `src/features/<name>/api/types.ts` — response types, filter types, mutation payloads
-2. Create `src/features/<name>/api/service.ts` (server-only) — data access functions (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis)
+2. Create `src/features/<name>/api/service.ts` (server-side) — data access functions (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis)
 3. Create `src/features/<name>/api/queries.ts` and `mutations.ts` (when the feature writes) — `apiClient` → Route Handler
 4. Create Route Handlers in `src/app/api/<name>/` — required for client-facing reads/writes; only skip for server-component-only features
 5. Create page route: `src/app/dashboard/<name>/page.tsx`
@@ -610,7 +633,7 @@ export const Icons = {
 ### Adding a shadcn Component
 
 ```bash
-npx shadcn add component-name
+bunx shadcn@latest add component-name
 ```
 
 ### Adding a New Theme
@@ -664,12 +687,12 @@ See "Theming System" section above or `docs/themes.md`.
 5. **Follow existing patterns** - look at similar components before creating new ones
 6. **Environment variables** - prefix with `NEXT_PUBLIC_` for client-side access
 7. **shadcn components** - don't modify files in `src/components/ui/` directly; extend them instead
-8. **Icons** - NEVER import icons directly from `@tabler/icons-react` or any other icon package. All icons must be registered in `src/components/icons.tsx` and imported as `import { Icons } from '@/components/icons'`. To add a new icon: add the tabler import to `icons.tsx`, add a semantic key to the `Icons` object, then use `Icons.keyName` in your component.
+8. **Icons** - In application / feature code, NEVER import icons directly from `@tabler/icons-react` or any other icon package. Register new icons in `src/components/icons.tsx` and use `import { Icons } from '@/components/icons'`. To add a new icon: add the tabler import to `icons.tsx`, add a semantic key to the `Icons` object, then use `Icons.keyName` in your component. Exception: shadcn primitives in `src/components/ui/` may import Tabler icons directly; do not refactor them just for this rule.
 9. **Page headers** - Always use `PageContainer` props (`pageTitle`, `pageDescription`, `pageHeaderAction`) for page headers. Never import `<Heading>` manually in pages — `PageContainer` handles that internally.
 10. **Forms** - Use `useAppForm` from `@/lib/form` with `form.AppField` rendering the shared field components (`field.TextField`, `field.SelectField`, …) from `@/components/forms/fields`. Each component follows the official shadcn TanStack Form anatomy; drop down to raw `form.Field` render props for one-off custom fields. Never use `useState` inside a render prop — extract stateful controls into components.
-11. **Button loading** - Use `<Button isLoading={isPending}>` for loading states. Uses CSS Grid overlap trick for zero layout shift. When `isLoading` is not passed, button behaves as default shadcn. `SubmitButton` in forms handles this automatically via form `isSubmitting` state.
-12. **Data layer** - `types.ts` → `service.ts` (server-only) → `queries.ts` / `mutations.ts` → Route Handler. Client components import only types and queries/mutations; `service.ts` is called by Route Handlers and Server Components (prefetch) — never from client code. Services hit real backends (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis).
-13. **Model registries** - Keep the internal key stable (it is the persisted `conversations.model` value and the credits pricing key); only change `providerModelId`. Prefer **mainline model names over date-suffixed snapshots** — Alibaba retires snapshots with 30 days' notice vs 3 months for mainline models. Callers must route model errors through `detectModelUnavailable()` (`features/agent/api/model-availability.ts`) so retired/unpurchased models (`403 access_denied`) are not reported as auth failures. Run `bun run scripts/model-audit.ts` after any retirement notice (`--image` / `--video` / `--all` add the paid channels). See docs/agent.md §7.
+11. **Button loading** - Use `<LoadingButton loading={isPending}>` from `@/components/ui/loading-button` for loading states (the base `Button` has no loading prop). It overlays a Spinner and keeps the label in layout (`opacity-0`), so toggling never shifts layout. When `loading` is not passed, it behaves like a normal `Button`. `SubmitButton` in forms wires this automatically via form `isSubmitting`.
+12. **Data layer** - `types.ts` → `service.ts` (server-side) → `queries.ts` / `mutations.ts` → Route Handler. Client components import only types and queries/mutations; `service.ts` is called by Route Handlers and Server Components (prefetch) — never from client code. Services hit real backends (Drizzle/PostgreSQL, OSS, Alibaba Cloud Model Studio, Redis).
+13. **Model registries** - Keep the internal key stable (it is the persisted `conversations.model` value and the credits pricing key); only change `providerModelId`. Prefer **mainline model names over date-suffixed snapshots** — Alibaba retires snapshots with 30 days' notice vs 3 months for mainline models. Callers must route model errors through `detectModelUnavailable()` (`src/features/agent/api/model-availability.ts`) so retired/unpurchased models (`403 access_denied`) are not reported as auth failures. Run `bun run scripts/model-audit.ts` after any retirement notice (`--image` / `--video` / `--all` add the paid channels). See docs/agent.md §7.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
