@@ -76,7 +76,7 @@ Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVer
 
 - 登录成功：`router.refresh()` + `router.replace(redirectUrl)`（回跳原路径）。
 - 侧边栏 / 个人资料：user 由服务端会话注入（无客户端二次拉取，无头像闪烁）；登出走 `signOut()`。
-- 个人资料页 [`profile-settings.tsx`](../src/features/profile/components/profile-settings.tsx)：头像（上传 / 更换 / 删除，见 §5.1）+ 改名字（`updateUser`）+ 改密码（`changePassword`，`revokeOtherSessions`）+ 登出；邮箱只读（改邮箱需二次验证，延后）。
+- 个人资料页 [`profile-settings.tsx`](../src/features/profile/components/profile-settings.tsx)：头像（上传 / 更换 / 删除，见 §5.1）+ 改名字（`updateUser`）+ 改密码（`changePassword`，`revokeOtherSessions`）+ 登出；邮箱只读（当前不支持改邮箱）。
 
 **密码重置流程**：`requestPasswordReset({ email, redirectTo })` → 服务端发信，链接为 `<baseURL>/api/auth/reset-password/<token>?callbackURL=<redirectTo>` → 用户点击 → 服务端校验 token 后重定向到 `redirectTo?token=<token>`（即 `/auth/reset-password`）→ 页面读 token → `resetPassword({ newPassword, token })` → 旧会话全部失效 → 跳登录页。
 

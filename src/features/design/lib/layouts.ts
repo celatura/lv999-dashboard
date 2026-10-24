@@ -13,7 +13,7 @@ import { generateObjectId } from './document';
  * 模型只负责内容（标题文案 / 图片 prompt / 选哪个版式），因此不存在自由坐标导致的乱排。
  *
  * 主图一律 **contain 等比适配**（不裁切、不变形），比例不合时的留白由背景色承担——
- * 文档模型的 image 对象没有 crop 字段，cover 裁切延后。
+ * 文档模型的 image 对象没有 crop 字段，因此只做 contain 适配。
  *
  * 本文件只被服务端（Agent 工具 composeDesign）引用，不进客户端 bundle。
  */

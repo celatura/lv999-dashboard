@@ -119,13 +119,7 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 ---
 
-## 10. 明确延后（未实现）
-
-停用 / 冻结（软删除，Better Auth `ban` / admin 插件）、批量调 Credits / 批量删除、用户角色权限、复杂筛选、「用户管理」进主导航（当前仅账号下拉入口；如需可用 `NavItem.access` 扩展 + `use-nav` 支持 isAdmin）、移除 CLI `credit-admin.ts`（保留为应急后备，与 Web 共用同一 service）。
-
----
-
-## 11. 手动验收清单
+## 10. 手动验收清单
 
 - **鉴权**：非管理员访问 `/dashboard/admin/users` → notFound；调 admin 端点 → 403；账号下拉**不见**「用户管理」。`ADMIN_USER_IDS` 未配 → 所有人不可达。
 - **列表**：管理员进入 → 全部用户 + 正确余额；搜索 / 分页 / 排序可用；「最近登录」反映 session 活跃。

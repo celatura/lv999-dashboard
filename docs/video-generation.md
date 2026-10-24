@@ -145,13 +145,7 @@ result = await generateVideo({
 
 ---
 
-## 11. 明确延后（未实现）
-
-直连 T2V/I2V 端点（`/api/agent/videos`，MVP 仅走对话）、视频编辑（V2V / 参考生视频 r2v）、多镜头叙事 UI（`shotType`）、音频文件传入（`audioUrl`）、水印/seed/分辨率选择器 UI、时长元数据落库与徽标、视频缩略图预生成存储（当前 OSS 动态截帧）、本地视频上传。
-
----
-
-## 12. 手动验收清单
+## 11. 手动验收清单
 
 - **P0 冒烟**（[`scripts/video-smoke.ts`](../scripts/video-smoke.ts)）：`bun scripts/video-smoke.ts` → wan3.0-video 生成 5s/720P/16:9 → 下载 → 转存 OSS → 签名 URL 播放（Range 返回 200/206 + `video/*`）→ OSS 视频截帧封面（200 + `image/*`）全链路通过；首要验证国内端点 `videoBaseURL`。
 - **T2V**：对话「生成一段小猫奔跑的 5 秒视频」→ Agent 调 `createVideoAsset` → 1-3 分钟内对话出现可播放视频卡片（poster 封面 + 可拖动进度 + 有声）。

@@ -220,15 +220,54 @@ export interface Box {
 }
 
 /**
+ * 以 (originX, originY) 为旋转中心、按角度（度）展开四角后的 AABB。
+ * 与 Konva `Node#getClientRect` 的内核同构（`Transform#_getTransformedRect`：
+ * 四角变换后取 min/max）；Konva 的 Rect/Text/Image 绕节点左上角 (x,y) 旋转，
+ * 正角为顺时针（y 轴向下）。
+ * 注：仅复刻变换内核；不含 strokeWidth / shadow，Text 的宽高为估算而非 measureText。
+ */
+function rotatedBox(
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+  rotation: number
+): Box {
+  if (!rotation) return { x: originX, y: originY, width, height };
+  const rad = (rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const corners: [number, number][] = [
+    [0, 0],
+    [width, 0],
+    [width, height],
+    [0, height]
+  ];
+  for (const [localX, localY] of corners) {
+    const x = originX + localX * cos - localY * sin;
+    const y = originY + localX * sin + localY * cos;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
  * 对象的轴对齐包围盒（吸附/对齐共用的几何口径）。
- * 未旋转时精确；旋转对象以其未旋转尺寸近似（MVP 取舍，精确旋转吸附延后）。
+ * 旋转对象按旋转后的四角计算真实 AABB；Circle 旋转不改变包围盒。
  * 文字宽高按字号与行数估算（Konva 未渲染时的近似度量）。
  */
 export function objectBounds(object: DesignObject): Box {
   switch (object.type) {
     case 'rect':
     case 'image':
-      return { x: object.x, y: object.y, width: object.width, height: object.height };
+      return rotatedBox(object.x, object.y, object.width, object.height, object.rotation);
     case 'circle':
       return {
         x: object.x - object.radius,
@@ -241,7 +280,7 @@ export function objectBounds(object: DesignObject): Box {
       const longest = lines.reduce((max, line) => Math.max(max, line.length), 1);
       const width = object.width ?? Math.max(1, longest * object.fontSize * 0.6);
       const height = Math.max(1, lines.length) * object.fontSize * 1.2;
-      return { x: object.x, y: object.y, width, height };
+      return rotatedBox(object.x, object.y, width, height, object.rotation);
     }
   }
 }

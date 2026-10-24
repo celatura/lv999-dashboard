@@ -11,7 +11,6 @@ LV999 Dashboard 的可视化创作模块：一个 Canva/Figma 式的**设计画�
 - **入口**：`/dashboard/design`（新建空白画布）与 `/dashboard/design/[id]`（打开已存设计）；产出在 `/dashboard/assets`（我的资产）统一管理，行操作有「编辑」直达编辑器。
 - **技术形态**：react-konva 纯客户端组件，经 `next/dynamic({ ssr: false })` 挂载（canvas 无法 SSR），**不走**项目的 SSR+Suspense 数据范式。
 - **能力**：加文字 / 矩形 / 圆 / 图片（从资产选 **或本地上传**）、**画布内 AI 生图（工具栏）/ AI 改图（属性面板，替换当前对象或作为新对象插入）**、**对话内一句话生成整版（`composeDesign` 产出直接在本画布打开）**、选中/移动/缩放/旋转、**多选（Shift 点选）**、**复制粘贴（Ctrl+C/V/D）**、**拖拽吸附对齐 + 参考线**、删除、图层前后、批量对齐、**文字水平对齐（左/中/右，需换行宽度）**、撤销重做、缩放平移、文字 overlay 编辑（中文 IME 安全）、属性面板（单选编辑 / 多选批量）、保存 / 打开 / 导出 PNG / 回存资产。
-- **明确延后**：框选（marquee，与空白拖拽平移冲突，多选仅 Shift 点选）、模板库、多页、富文本排版引擎、分组、协作、zustand；**AI 侧**：画布内「AI 整版 / 改整版」入口（增量修改文档）、服务端预览渲染（中文字体风险）、cover 裁切（需 crop 字段）、模型自由坐标布局、画布内 AI 改文字/智能排版、生成历史面板、批量 AI 改图（多选对象逐个改）、生图模型/参数高级设置、**画布内生成中断（abort）**（端点超时兜底；聊天内「停止」不受影响）。
 
 **核心设计原则（Konva 官方铁律）**：Konva 节点只是交互层，文档是独立的可序列化纯数据；拖拽/变换只在**操作结束**（`onDragEnd`/`onTransformEnd`）提交回 React；图片对象只存**资产引用 `assetId`**，不存图片字节。
 
@@ -103,7 +102,7 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 - `lib/editor-context.tsx`：`EditorProvider` —— 组合 reducer + 相机（zoom/position）+ 文字编辑态 + save/export + **会话内剪贴板**（`clipboardRef` 快照 + `pasteCountRef` 累加偏移 + `clipboardCount` 供按钮 disabled）；暴露多选（`select(ids)`/`toggleSelect`/`clearSelection`）、批量提交（`commitObjects`/`removeObjects`）、复制粘贴（`copy`/`paste`/`duplicate`）、`insertImage(assetId, natural)`（AI 生图/改图与选图/上传共用插入入口）；latest-ref 保持回调稳定。**快捷键让位**：除了输入框/文字编辑态，存在 `[role="dialog"]` 弹层（插入图片 / AI 生成 / AI 修改 / 命令面板）时整体跳过画布快捷键，避免焦点在弹层内时 Delete/方向键误改（误删）画布。**预览按需导出**：`save()` 仅在「文档真有改动」或「打开时无预览」（`dirty || !initialHasPreview`）时才导出并附带 `previewPng`——预览上传是 2.5MB 级且 `toDataURL` 同步阻塞主线程，只改标题或重复保存不必重做（服务端 `updateDesignAsset` 按 `previewPng` 存在性更新，不传则不动 storageKey/sizeBytes）；注意不能整体早退（title 不在 document 里，`isDirty` 不反映标题变化）。`hasPreviewRef` 的语义是「预览与已存文档一致」：仅当本次尝试过导出才由结果决定（尝试了但失败/超预算 → false，下次保存补导）。另有 `savingRef` 并发闸门：工具栏按钮有 `disabled={isSaving}` 但 Ctrl/Cmd+S 的 keydown 没有，按住连发会重复导出/重复上传，**新建页上还会开出两条资产**。`isDirty` 已 memo 化（避免每次滚轮/平移都 stringify 整份文档），保存成功后写回 `savedSnapshot` state 触发重算（快照用 state 而非 ref，memo 依赖才与读取值一致）。
 - `hooks/use-editor-reducer.ts`：`{ past, present(document), future, selectedIds[] }`（原单选 `selectedId` 已废弃）；action 含批量 `add-objects`/`update-objects`/`remove-objects`/`reorder-many`/`duplicate-objects`/`paste-objects` + `select`/`toggle-select`/`clear-select`；**一次完整操作（含批量）提交一条历史**。`ObjectPatch` 含 **`assetId`**（仅 image 对象有意义），使「AI 改图 → 替换当前对象」就是一次 `update-object`（一条历史，undo 可回退替换）；亦含 **`align`**（仅 text 对象有意义，属性面板的对齐切换就是一次 `update-object`）。
-- `lib/document.ts`：对象工厂 / `reorderObject`·`reorderObjects`（图层）/ `objectBounds`（对象→AABB，旋转取包围盒）/ `unionBox`（多框并集）/ `cloneObjectWithOffset`（克隆 + 新 `generateObjectId` + 偏移）/ **`imageReplacePatch`（AI 改图替换：只换 `assetId` 引用 + 按新图自然尺寸 contain 等比适配原外接框、保持视觉中心（含旋转：Konva 绕节点原点旋转，按旋转后中心反推新原点），绝不拉伸变形；natural 缺省时沿用原框）** / `parseDesignDocument`（读库 JSON，损坏回退空白）。
+- `lib/document.ts`：对象工厂 / `reorderObject`·`reorderObjects`（图层）/ `objectBounds`（对象→AABB；rect/image 取旋转后的真实 AABB，text 为估算框，circle 旋转不变）/ `unionBox`（多框并集）/ `cloneObjectWithOffset`（克隆 + 新 `generateObjectId` + 偏移）/ **`imageReplacePatch`（AI 改图替换：只换 `assetId` 引用 + 按新图自然尺寸 contain 等比适配原外接框、保持视觉中心（含旋转：Konva 绕节点原点旋转，按旋转后中心反推新原点），绝不拉伸变形；natural 缺省时沿用原框）** / `parseDesignDocument`（读库 JSON，损坏回退空白）。
 - `lib/snap.ts`：`computeSnap`（移动框的 left/center-x/right × top/center-y/bottom 对齐到其他对象 + 画布，阈值内取最近，返回吸附坐标 + 参考线）/ `snapThreshold`（屏幕px / zoom）/ `sameGuides`（避免拖拽中频繁 setState）。纯函数无 Konva 依赖。
 - `lib/layouts.ts`：**版式模板（服务端纯函数，无 Konva / 无 IO，不进客户端 bundle）**——见 6.1。
 - `lib/export.ts`：`exportStageToDataURL` —— 导出前隐藏 Transformer、临时把相机归一并将 Stage 尺寸设为文档尺寸，`pixelRatio` 按最长边上限折算（默认 maxDimension 2560）。**`maxPixelRatio` 默认 1（只缩不放）**：上采样不增细节只增体积，且保存用预览 PNG 同时是「我的资产」的**下载产物**（`sizeBytes` 口径 = 下载体积），缩边会让下载图小于画布。`exportPreviewBase64` 按阶梯 `{1920, 1280, 960} × pixelRatio 1` 取首个落在 `PREVIEW_BASE64_BUDGET`（3MB base64 ≈ 2.25MB PNG，留出文档 JSON 与 4MB 请求体余量）内的结果，**全超则返回 undefined 丢预览保文档**（带超限载荷必撞 413、整次保存含文档都存不下；不传 previewPng 只是本次不刷新预览，下次保存再试）——**5 个预设画布均 1:1 原尺寸导出**（1920×1080 不再是 1280×720）；当前 UI 只提供预设尺寸（最长边 ≤1920），1920 上限是为未来自定义尺寸预留的缩边兜底。工具栏「导出」同口径（2560 上限、不上采样）。
@@ -122,7 +121,7 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 ### 6.1 一句话生成整版设计（Agent 工具 `composeDesign`）
 
-入口在**对话**而非画布（画布内「AI 整版 / 改整版」入口延后）：用户说「做一张秋日漫步的小红书封面，标题《杭州秋日漫步》」→ Agent 调 [`composeDesign`](../src/features/agent/api/agent.ts) → 对话内返回可点卡片（[`tool-design-part.tsx`](../src/features/agent/components/chat/tool-design-part.tsx)）→ 进本画布微调。
+入口在**对话**而非画布：用户说「做一张秋日漫步的小红书封面，标题《杭州秋日漫步》」→ Agent 调 [`composeDesign`](../src/features/agent/api/agent.ts) → 对话内返回可点卡片（[`tool-design-part.tsx`](../src/features/agent/components/chat/tool-design-part.tsx)）→ 进本画布微调。
 
 **职责划分（布局质量不交给模型）**：模型只给内容（标题文案 / 图片 prompt / 选哪个版式）；**坐标、字号、对齐、留白全由服务端代码计算**，因此不存在自由坐标导致的乱排。
 
@@ -130,7 +129,7 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 - `composeDesignDocument({ layout, aspect?, image, text })` → 完整 `DesignDocument`：解析画布尺寸 → 执行版式 → sanitize → `designDocumentSchema.safeParse` 终校验（失败回落「主图 + 标题」兜底版式）。
 - **3 个版式**：`top-image`（上图下文：主图贴顶占上部 ~60%，文字块在剩余空间垂直居中，带装饰条）、`full-image-bar`（全图 + 底部半透明标题条，条高按文字块自适应、钳制在画布高 16%~42%）、`left-image`（左图右文，主图占左 56%；**竖版画布自动退化为 top-image**）。
-- **contain 适配**：主图一律等比缩放至完全落入区域（不裁切不变形，与 `imageReplacePatch` 同口径），比例不合时的留白由背景色承担（cover 裁切需 crop 字段，延后）。`imageRegionRatio(layout, aspect)` 回传版式主图区域的宽高比，供工具从文生图比例档中挑最接近的一档（主图贴合区域 → 几乎无留白；画布比例仍由 `aspect` 决定）。
+- **contain 适配**：主图一律等比缩放至完全落入区域（不裁切不变形，与 `imageReplacePatch` 同口径），比例不合时的留白由背景色承担。`imageRegionRatio(layout, aspect)` 回传版式主图区域的宽高比，供工具从文生图比例档中挑最接近的一档（主图贴合区域 → 几乎无留白；画布比例仍由 `aspect` 决定）。
 - **文字度量**：`estimateTextWidth`（CJK ≈ 1×fontSize、其余 ≈ 0.55×，带安全系数）+ `estimateLines` + `fitFontSize`（超长标题逐档缩字号直到满足最大行数）+ **`pickFontSize`（短文案优先单行）**：只需缩 ≤15% 字号就能一行排下时按单行，避免 Konva 对 CJK 按字断行把「城市漫步地图」拆成「城市漫步地 / 图」；长标题仍走多行（缩到单行会小到不可读）。字号再按画布宽相对 1080 等比缩放并钳制上下限；文字块高度按 Konva `lineHeight=1` 的口径（行数 × 字号）累加，保证与渲染一致。
 - **配色**：MVP 固定两套（浅底深字 / 深底浅字），由版式自选（`full-image-bar` 用深色），模型不参与配色决策。
 - **sanitize**：对象坐标/尺寸钳制到画布内、对象数 ≤ `MAX_DOCUMENT_OBJECTS`、image 的 `assetId` 只允许本次文生图产出的主图（防模型臆造 id）。
@@ -167,7 +166,7 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 ## 9. 手动验收清单
 
-新建 → 拖拽/缩放/旋转 → 加资产图片 → **上传本地图片（PNG/JPEG/WebP→插入画布 + 资产列表现「上传」来源）** → **工具栏「AI 生成图片」：填 prompt + 选比例 → 生成中 spinner/禁重复提交/禁关闭 → 图插入画布（等比居中选中）+「我的资产」新增 image（content=prompt）+ Credits 扣 image 档（流水 meta 记 assetId）；余额 0 → 402 文案且无上游调用；审核拒绝 → 中文错误 + 不扣费** → **选中 image → 属性面板「AI 修改」：填指令 →「替换」后对象 assetId 变为新资产（位置保持、不变形、**undo 一步回退替换**）；「新增」则多一个对象；新资产 `sourceAssetId` 指向源；Credits 扣 image 档（edit=true）** → **Shift 多选多个对象→整体拖动/删除/对齐** → **Ctrl+C/V 复制粘贴、Ctrl+D 快速复制（新 id + 偏移）** → **拖动吸附到其他对象边缘/中心与画布中线（蓝色参考线，松手即对齐）** → 改文字（中文输入法）→ **选中标题改对齐（左/中/右，仅带换行宽度的文字展示该组）** → 撤销重做（批量操作一步回退）→ 保存 → 在「我的资产」见 design 预览 → 点「编辑」重新打开 → 导出 PNG。
+新建 → 拖拽/缩放/旋转 → 加资产图片 → **上传本地图片（PNG/JPEG/WebP→插入画布 + 资产列表现「上传」来源）** → **工具栏「AI 生成图片」：填 prompt + 选比例 → 生成中 spinner/禁重复提交/禁关闭 → 图插入画布（等比居中选中）+「我的资产」新增 image（content=prompt）+ Credits 扣 image 档（流水 meta 记 assetId）；余额 0 → 402 文案且无上游调用；审核拒绝 → 中文错误 + 不扣费** → **选中 image → 属性面板「AI 修改」：填指令 →「替换」后对象 assetId 变为新资产（位置保持、不变形、**undo 一步回退替换**）；「新增」则多一个对象；新资产 `sourceAssetId` 指向源；Credits 扣 image 档（edit=true）** → **Shift 多选多个对象→整体拖动/删除/对齐** → **Ctrl+C/V 复制粘贴、Ctrl+D 快速复制（新 id + 偏移）** → **拖动吸附到其他对象边缘/中心与画布中线（蓝色参考线，松手即对齐）** → **旋转 45°/90° 的矩形/图片拖到另一对象左侧：参考线贴旋转后最左沿、松手后视觉边齐平；多选含旋转对象做左/右/顶/底对齐：视觉边齐平（非按旋转前原点）** → 改文字（中文输入法）→ **选中标题改对齐（左/中/右，仅带换行宽度的文字展示该组）** → 撤销重做（批量操作一步回退）→ 保存 → 在「我的资产」见 design 预览 → 点「编辑」重新打开 → 导出 PNG。
 
 **AI 整版（对话入口）**：对话说「做一张 3:4 小红书封面，主题是秋日漫步，标题《杭州秋日漫步》，副标题『周末去哪儿』」→ 工具 loading（含文生图 20-70s）→ 对话现 design 卡片 → 点「打开编辑」进画布：主图不变形、标题居中且有字号层次、无越界/乱排；**3 种版式各试一次**（`top-image` / `full-image-bar` / `left-image`），横版 `aspect` 试 `left-image`、竖版试 `left-image` 应退化为上图下文；Credits 只扣 image 档（流水详情为「图片生成（整版设计主图）」）、design 不额外扣；余额 0 → 中文余额不足且无上游调用；该 design 在资产列表为虚线占位 + 「AI 整版 · 打开编辑生成预览」，画布保存后缩略图出现、`sizeBytes` 更正为 PNG 体积、**下载到的 PNG 尺寸 = 画布尺寸**（1920×1080 画布不得出现 1280×720 这种缩边）。
 
