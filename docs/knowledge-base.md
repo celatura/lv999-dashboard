@@ -105,9 +105,3 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 - **HTML 入库先抽正文**：html 资产经 `htmlToText` 去标签，不把 markup/CSS/JS 向量化。
 - **失败即清理**：摄取失败清空半截片段并置 `failed`，避免残留片段被检索。
 - **迁移**：`bunx drizzle-kit generate` + 手动补 HNSW 索引 SQL + `bun scripts/db-apply-sql.ts`（RDS 下 `db:push` 静默失败）。
-
----
-
-## 9. 明确延后（未实现）
-
-扫描件/图片型 PDF 的 OCR（anydoc 报 `needsOcr` 即拒，未启用其 `ocr:'hosted'` 联网 OCR）、重排（rerank）、多知识库分组、chunk 参数调优 UI、异步摄取（当前同步 + 100KB 上限）、原始文件存 OSS 与下载、多文件批量上传、非 UTF-8 编码探测、Markdown 标题感知切分。

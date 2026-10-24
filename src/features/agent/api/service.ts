@@ -40,6 +40,44 @@ type ConversationRow = typeof conversations.$inferSelect;
 type MessageRow = typeof messages.$inferSelect;
 type AssetRow = typeof assets.$inferSelect;
 
+/** 资产元信息行：不含 content（markdown/html 正文，单条可达数十 KB） */
+type AssetMetaRow = Pick<
+  AssetRow,
+  | 'id'
+  | 'conversationId'
+  | 'sourceAssetId'
+  | 'source'
+  | 'kind'
+  | 'title'
+  | 'status'
+  | 'favorite'
+  | 'storageKey'
+  | 'mime'
+  | 'sizeBytes'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+/**
+ * 列表列选择：显式列出而非 `SELECT *`，避免把 content 整列拉出来再丢弃
+ * （正文只在资产详情 getAsset / readAsset 时按需查）。
+ */
+const assetMetaColumns = {
+  id: assets.id,
+  conversationId: assets.conversationId,
+  sourceAssetId: assets.sourceAssetId,
+  source: assets.source,
+  kind: assets.kind,
+  title: assets.title,
+  status: assets.status,
+  favorite: assets.favorite,
+  storageKey: assets.storageKey,
+  mime: assets.mime,
+  sizeBytes: assets.sizeBytes,
+  createdAt: assets.createdAt,
+  updatedAt: assets.updatedAt
+};
+
 function toConversation(row: ConversationRow): Conversation {
   return {
     id: row.id,
@@ -63,7 +101,7 @@ function toChatMessage(row: MessageRow): ChatMessage {
   };
 }
 
-function toAsset(row: AssetRow): Asset {
+function toAsset(row: AssetMetaRow): Asset {
   return {
     id: row.id,
     conversationId: row.conversationId,
@@ -660,7 +698,7 @@ export async function listAssets(userId: string, filters: AssetFilters): Promise
   const [[{ total }], rows] = await Promise.all([
     db.select({ total: count() }).from(assets).where(where),
     db
-      .select()
+      .select(assetMetaColumns)
       .from(assets)
       .where(where)
       .orderBy(parseAssetOrderBy(filters.sort))

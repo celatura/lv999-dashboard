@@ -21,11 +21,14 @@ export async function GET(_request: Request, context: RouteContext) {
     return apiError(404, 'not_found', 'Document not found');
   }
 
-  const document = await getDocumentDetail(userId, id);
+  // 元信息与片段列表互不依赖，并行查询（少一次 DB 往返）；详情不存在时多查一次片段可忽略
+  const [document, chunks] = await Promise.all([
+    getDocumentDetail(userId, id),
+    listChunks(userId, id)
+  ]);
   if (!document) {
     return apiError(404, 'not_found', 'Document not found');
   }
-  const chunks = await listChunks(userId, id);
   return Response.json({ document, chunks });
 }
 

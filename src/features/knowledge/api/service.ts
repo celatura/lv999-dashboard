@@ -21,10 +21,31 @@ import type {
 
 type DocumentRow = typeof knowledgeDocuments.$inferSelect;
 
+/** 元信息行：不含 content（单篇可达 100KB，列表无人读取） */
+type DocumentMetaRow = Pick<
+  DocumentRow,
+  'id' | 'title' | 'source' | 'sourceAssetId' | 'status' | 'chunkCount' | 'createdAt' | 'updatedAt'
+>;
+
+/**
+ * 列表与写入回传的列选择：显式列出而非 `SELECT *`，避免把 content 整列拉出来再丢弃
+ * （正文只在文档详情、重试读取时按需查）。
+ */
+const documentMetaColumns = {
+  id: knowledgeDocuments.id,
+  title: knowledgeDocuments.title,
+  source: knowledgeDocuments.source,
+  sourceAssetId: knowledgeDocuments.sourceAssetId,
+  status: knowledgeDocuments.status,
+  chunkCount: knowledgeDocuments.chunkCount,
+  createdAt: knowledgeDocuments.createdAt,
+  updatedAt: knowledgeDocuments.updatedAt
+};
+
 /** 片段插入批大小：单条 SQL 体积可控（每片段含 1024 维向量字面量） */
 const CHUNK_INSERT_BATCH = 50;
 
-function toDocument(row: DocumentRow, sourceAssetTitle: string | null): KnowledgeDocument {
+function toDocument(row: DocumentMetaRow, sourceAssetTitle: string | null): KnowledgeDocument {
   return {
     id: row.id,
     title: row.title,
@@ -94,7 +115,7 @@ export async function listDocuments(
   const [[{ total }], rows] = await Promise.all([
     db.select({ total: count() }).from(knowledgeDocuments).where(where),
     db
-      .select({ document: knowledgeDocuments, sourceAssetTitle: assets.title })
+      .select({ document: documentMetaColumns, sourceAssetTitle: assets.title })
       .from(knowledgeDocuments)
       .leftJoin(assets, eq(knowledgeDocuments.sourceAssetId, assets.id))
       .where(where)
@@ -131,7 +152,8 @@ export async function createDocument(params: {
       status: 'processing',
       chunkCount: 0
     })
-    .returning();
+    // 只回传元信息列：调用方仅用 id，不回拽 content（单篇可达 100KB）
+    .returning(documentMetaColumns);
   return toDocument(rows[0], null);
 }
 
