@@ -253,8 +253,6 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | `wan3.0-video` | 万相 3.0（官方推荐最新，原生音画同步，2-30s）| 统一 T2V+I2V | ✅ |
 | `wan3.0-video-prime` | 万相 3.0 优速版（生成更快）| 统一 T2V+I2V | |
 
-> 2026-09-30：移除 wan2.6-t2v / wan2.6-i2v-flash 两个「后备」条目（官方已推荐 Wan 3.0，且注册表无调用路径），避免扩大老旧模型退役批次的排查面。
-
 视频生成走 AI SDK v7 `experimental_generateVideo` + `@ai-sdk/alibaba` 的 `videoModel()`（provider 内置异步任务轮询），经**独立单例** `getAlibabaVideoProvider()` 配置国内 `videoBaseURL='https://dashscope.aliyuncs.com'`（默认指向 intl 新加坡，国内 key 必须覆盖）。完整架构与封面截帧机制见 [docs/video-generation.md](./video-generation.md)。
 
 ### 模型下线与可用性自查

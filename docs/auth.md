@@ -106,13 +106,9 @@ Better Auth 注册不带头像，`user.image` 恒空 → 全站首字母占位�
 
 ---
 
-## 6. 用户管理后台（查本地 DB）
+## 6. 用户管理后台
 
-[`features/admin/api/service.ts`](../src/features/admin/api/service.ts)：
-
-- **`listUsers`**：查 Better Auth `user` 表（分页 + 搜索 email/name/id + 排序 createdAt）+ 合并 `credits_accounts` 余额（批量查避免 N+1）。「最近登录」由 `session` 表派生（`max(session.createdAt)` 子查询 leftJoin，user 表无 lastSignInAt 列）。
-- **`deleteUserCascade`**：**单个 DB 事务原子**依次删 ① Better Auth `user`（`session`/`account` 外键 ON DELETE CASCADE 断登录）+ ② 业务 8 表（conversations / messages(级联) / assets / **skills**（无外键须显式删）/ knowledge_documents / knowledge_chunks / credit_ledger / credits_accounts）——任一步失败整体回滚、可安全重跑；事务提交后再 ③ 清 OSS 对象（失败仅告警）。注：DB 会话即时失效，但被删/吊销用户凭 cookie 缓存最长 ≤60s 仍可能通过旧请求（见 §7 cookieCache）。
-- 端点 / 鉴权（isAdmin 403）/ 限流不变。
+列表、级联删除、`isAdmin` 鉴权与验收清单见 [docs/user-management.md](./user-management.md)。认证相关的唯一注意点：DB 会话删除/吊销即时生效，但被删用户凭 cookieCache 最长 ≤60s 仍可能通过旧请求（见 §7）。
 
 ---
 
