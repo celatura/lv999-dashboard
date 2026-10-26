@@ -15,6 +15,7 @@
     "out/**",
     "build/**",
     "node_modules/**",
+    ".agents/**",
     "pnpm-lock.yaml",
     "**/*.md",
     "**/*.mdc",
