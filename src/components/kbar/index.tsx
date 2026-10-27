@@ -69,7 +69,7 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
           <KBarAnimator className='bg-popover text-popover-foreground ring-foreground/10 relative mx-auto w-full max-w-[600px] overflow-hidden rounded-xl shadow-lg ring-1'>
             <div className='bg-popover sticky top-0 z-10 border-b'>
               <KBarSearch
-                placeholder='搜索页面或命令...'
+                defaultPlaceholder='搜索页面或命令...'
                 className='placeholder:text-muted-foreground w-full border-none bg-transparent px-4 py-3.5 text-sm outline-hidden focus:ring-0 focus:outline-hidden'
               />
             </div>
