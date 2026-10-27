@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { checkBalance } from '@/features/credits/api/service';
@@ -35,7 +35,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
  * 应答与 POST /documents 同构（DocumentIngestResult）。
  */
 export async function POST(request: Request) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

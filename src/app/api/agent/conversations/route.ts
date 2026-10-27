@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { createConversation, listConversations } from '@/features/agent/api/service';
 import { DEFAULT_MODEL, isModelKey } from '@/features/agent/constants/models';
@@ -7,7 +7,7 @@ import { isSkillReference } from '@/features/agent/constants/skills';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -17,7 +17,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

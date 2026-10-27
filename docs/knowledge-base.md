@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 ## 6. API 端点（`src/app/api/agent/knowledge/*`）
 
-遵循现有约定：`requireUserId()`（DAL）+ `apiError` 信封 + `[id]` 路由 `isUuid` + 写入限流 scope `knowledge`（30 次/分/用户，带 `Retry-After`）。
+遵循现有约定：`getUserId()`（DAL）+ `apiError` 信封 + `[id]` 路由 `isUuid` + 写入限流 scope `knowledge`（30 次/分/用户，带 `Retry-After`）。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

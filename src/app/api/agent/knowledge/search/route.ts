@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { knowledgeSearchRequestSchema } from '@/features/knowledge/api/types';
@@ -17,7 +17,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
  * 纯读语义、零计费（embedQuery 已豁免，见 docs/credits.md §6.3）。
  */
 export async function POST(request: Request) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
@@ -8,7 +8,7 @@ import type { AssetFilters } from '../../api/types';
 import { AssetsTable } from './asset-tables';
 
 export default async function AssetListingPage() {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) return null;
 
   const page = searchParamsCache.get('page');

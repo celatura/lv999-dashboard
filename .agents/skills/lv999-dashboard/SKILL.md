@@ -96,16 +96,16 @@ Rules:
 
 - `service.ts` is **server-only** (it imports `@/lib/db`); never import it from a client component.
 - Client-side fetching goes through `queries.ts` (`apiClient` → Route Handler); components never touch `getDb()` or table schemas directly.
-- Every data endpoint needs a Route Handler under `src/app/api/...` with `requireUserId()` (or `isAdmin`) + the `apiError` envelope:
+- Every data endpoint needs a Route Handler under `src/app/api/...` with `getUserId()` (or `isAdmin`) + the `apiError` envelope:
 
 ```tsx
 // src/app/api/orders/route.ts
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { getOrders } from '@/features/orders/api/service';
 
 export async function GET(request: Request) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) return apiError(401, 'unauthorized', 'Unauthorized');
   // parse/validate query params → service → Response.json(result)
 }
@@ -221,7 +221,7 @@ Create `src/features/<name>/components/` with:
 ```tsx
 import { Suspense } from 'react';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
 import { ordersQueryOptions } from '../api/queries';
@@ -229,7 +229,7 @@ import { getOrders } from '../api/service';
 import { OrderTable, OrderTableSkeleton } from './orders-table';
 
 export default async function OrderListingPage() {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) return null;
 
   const page = searchParamsCache.get('page');

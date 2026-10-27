@@ -9,7 +9,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  *
  * ⚠️ cookie 存在 ≠ 会话有效（可能过期/伪造）。**真实鉴权**在各 page / route 的
  * `verifySession()`（见 `lib/auth-session.ts`）：dashboard/layout 无有效会话会 redirect，
- * 各 API 路由 `requireUserId()` 为空返回 401。此处只负责 UX 分流，勿当安全边界。
+ * 各 API 路由 `getUserId()` 为空返回 401。此处只负责 UX 分流，勿当安全边界。
  */
 export default function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -27,6 +27,6 @@ export default function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // 仅在进入受保护的 /dashboard 段时做乐观分流；API 路由各自 requireUserId 返回 401。
+  // 仅在进入受保护的 /dashboard 段时做乐观分流；API 路由各自 getUserId 返回 401。
   matcher: ['/dashboard/:path*']
 };

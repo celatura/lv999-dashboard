@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
@@ -10,7 +10,7 @@ import { CreditsBalanceBanner } from './credits-balance-banner';
 import { CreditsTable, CreditsTableSkeleton } from './credits-tables';
 
 export default async function CreditsListing() {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) return null;
 
   const kind = searchParamsCache.get('kind');

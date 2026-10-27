@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { getAsset } from '@/features/agent/api/service';
@@ -29,7 +29,7 @@ function buildFileName(title: string, kind: string, mime: string | null): string
 }
 
 export async function GET(_request: Request, context: RouteContext) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

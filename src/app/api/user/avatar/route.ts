@@ -1,4 +1,4 @@
-import { requireUserIdAuthoritative } from '@/lib/auth-session';
+import { getUserIdAuthoritative } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { avatarObjectKey, getOssServerClient, putObject } from '@/lib/oss';
@@ -27,7 +27,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
  * userId 只取自会话（不接受参数，防越权改他人头像）；头像为纯存储，不接 Credits。
  */
 export async function POST(request: Request) {
-  const userId = await requireUserIdAuthoritative();
+  const userId = await getUserIdAuthoritative();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
  * 与设置对称走 updateUser（原生支持 null），避免 Drizzle 直改导致的 ≤60s cookieCache 旧值。
  */
 export async function DELETE() {
-  const userId = await requireUserIdAuthoritative();
+  const userId = await getUserIdAuthoritative();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }

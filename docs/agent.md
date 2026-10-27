@@ -281,7 +281,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ## 9. API 端点一览
 
-所有端点在开头经 DAL 的 `requireUserId()` 校验 userId（未登录 401）；错误统一走 `apiError()` 信封。
+所有端点在开头经 DAL 的 `getUserId()` 校验 userId（未登录 401）；错误统一走 `apiError()` 信封。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

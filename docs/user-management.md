@@ -34,8 +34,8 @@ export function isAdmin(userId: string | null | undefined): boolean {
 - **安全默认**：`ADMIN_USER_IDS` 未配置 / 配错 → `isAdmin` 恒 false → 管理页对所有人不可达、admin 端点一律 403。
 - **userId 语义**：为 **Better Auth user id**（注册后从 `user` 表或用户管理页取）。
 - **服务端强制是唯一底线**：
-  - 页面 [`dashboard/admin/users/page.tsx`](../src/app/dashboard/admin/users/page.tsx)：`requireUserId()` 后 `!isAdmin → notFound()`。
-  - 每个 `/api/admin/*` 端点：`requireUserIdAuthoritative()`（强制回源 DB，避免 ≤60s cookieCache 吊销残留）→ `!isAdmin → apiError(403, 'forbidden', …)`（[`api-error.ts`](../src/lib/api-error.ts) 的 `forbidden` code）。
+  - 页面 [`dashboard/admin/users/page.tsx`](../src/app/dashboard/admin/users/page.tsx)：`getUserId()` 后 `!isAdmin → notFound()`。
+  - 每个 `/api/admin/*` 端点：`getUserIdAuthoritative()`（强制回源 DB，避免 ≤60s cookieCache 吊销残留）→ `!isAdmin → apiError(403, 'forbidden', …)`（[`api-error.ts`](../src/lib/api-error.ts) 的 `forbidden` code）。
 - **入口可见性（仅 UX）**：[`dashboard/layout.tsx`](../src/app/dashboard/layout.tsx)（server）`const verified = await verifySession(); … const admin = isAdmin(verified.userId);` → `<AppSidebar isAdmin={admin} />` → 下拉「用户管理」项按 `isAdmin` 渲染。客户端可见性不作为权限依据。
 
 ---
@@ -86,7 +86,7 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 ---
 
-## 7. API 端点（`/api/admin/*`，全部 `requireUserIdAuthoritative()` + `isAdmin` 403 + 限流 scope `admin`）
+## 7. API 端点（`/api/admin/*`，全部 `getUserIdAuthoritative()` + `isAdmin` 403 + 限流 scope `admin`）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

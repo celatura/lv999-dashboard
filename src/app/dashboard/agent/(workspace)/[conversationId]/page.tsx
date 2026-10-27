@@ -1,4 +1,4 @@
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { notFound } from 'next/navigation';
 import type { UIMessage } from 'ai';
 import { getConversation, listMessages } from '@/features/agent/api/service';
@@ -13,7 +13,7 @@ type PageProps = {
 };
 
 export default async function ConversationPage({ params }: PageProps) {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!userId) notFound();
 
   const { conversationId } = await params;

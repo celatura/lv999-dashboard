@@ -14,7 +14,7 @@
 | 路由 | [`src/app/api/auth/[...all]/route.ts`](../src/app/api/auth/%5B...all%5D/route.ts) | `toNextJsHandler(auth)` 挂载全部认证端点（Node runtime） |
 | DB schema | [`src/lib/db/auth-schema.ts`](../src/lib/db/auth-schema.ts) | `npx auth generate` 产出的 user / session / account / verification / rate_limit 五表 |
 | 客户端 | [`src/lib/auth-client.ts`](../src/lib/auth-client.ts) | `createAuthClient()`（`better-auth/react`）：signIn / signUp / signOut / useSession / updateUser / changePassword / requestPasswordReset / resetPassword |
-| **DAL** | [`src/lib/auth-session.ts`](../src/lib/auth-session.ts) | **服务端会话读取单一入口**：`verifySession()` / `requireUserId()`（React `cache()` 去重） |
+| **DAL** | [`src/lib/auth-session.ts`](../src/lib/auth-session.ts) | **服务端会话读取单一入口**：`verifySession()` / `getUserId()`（React `cache()` 去重） |
 | 邮件 | [`src/lib/mailer.ts`](../src/lib/mailer.ts) | nodemailer + SMTP，用于密码重置邮件（未配置 SMTP 时告警跳过，不阻塞） |
 | 代理 | [`src/proxy.ts`](../src/proxy.ts) | Edge 乐观分流：无会话 cookie → 重定向登录页（**非安全边界**） |
 
@@ -27,10 +27,10 @@
 所有服务端代码（Route Handler / server 页 / listing）统一经 DAL 取当前用户：
 
 ```ts
-import { verifySession, requireUserId } from '@/lib/auth-session';
+import { verifySession, getUserId } from '@/lib/auth-session';
 
 // Route Handler：保留原有 401 信封语义
-const userId = await requireUserId(); // string | null（未登录返回 null，不抛错）
+const userId = await getUserId(); // string | null（未登录返回 null，不抛错）
 if (!userId) return apiError(401, 'unauthorized', 'Unauthorized');
 
 // server 页 / layout：需要完整用户对象时
@@ -39,8 +39,8 @@ if (!verified) redirect('/auth/sign-in');
 ```
 
 - `verifySession()`：`auth.api.getSession({ headers: await headers() })` + React `cache()`，同一请求内多次调用只查一次（cookieCache 命中时甚至不查 DB）。
-- `requireUserId()`：只取 userId，**刻意返回 `null` 而非抛错**，让调用方原有的 `if (!userId)` 分支（401 / notFound / 空渲染）逐字不变。
-- `verifySessionAuthoritative()` / `requireUserIdAuthoritative()`：带 `disableCookieCache: true` 强制回源 DB，绕过 cookieCache ≤60s 窗口——用于「吊销即时性」敏感的判权（`/api/admin/*` 端点）。普通只读列表仍用 `verifySession()` 享受缓存。
+- `getUserId()`：只取 userId，**刻意返回 `null` 而非抛错**，让调用方原有的 `if (!userId)` 分支（401 / notFound / 空渲染）逐字不变。
+- `verifySessionAuthoritative()` / `getUserIdAuthoritative()`：带 `disableCookieCache: true` 强制回源 DB，绕过 cookieCache ≤60s 窗口——用于「吊销即时性」敏感的判权（`/api/admin/*` 端点）。普通只读列表仍用 `verifySession()` 享受缓存。
 - 收益：未来更换认证实现或加缓存只改这一处。
 
 ---
@@ -49,7 +49,7 @@ if (!verified) redirect('/auth/sign-in');
 
 - **`proxy.ts`（Edge，乐观分流）**：`getSessionCookie(request)` 仅检查会话 cookie 是否存在（纯字符串解析，不查 DB / 不验签），无则重定向 `/auth/sign-in?redirect_url=<原路径>`。matcher 仅 `/dashboard/:path*`。⚠️ cookie 存在 ≠ 会话有效，**不可当安全边界**。
 - **`dashboard/layout.tsx`（真实校验）**：`verifySession()` 无有效会话则 `redirect('/auth/sign-in')`；据此服务端计算 `isAdmin` 并把 user 注入侧边栏。
-- **各 API 路由**：`requireUserId()` 为空返回 401；归属即权限（越权返回 404）。`/api/admin/*` 用 `requireUserIdAuthoritative()`（强制回源 DB，规避 ≤60s 吊销残留）。
+- **各 API 路由**：`getUserId()` 为空返回 401；归属即权限（越权返回 404）。`/api/admin/*` 用 `getUserIdAuthoritative()`（强制回源 DB，规避 ≤60s 吊销残留）。
 - **登录 / 注册页**：已登录访问 → `verifySession()` 命中则回跳目标（避免登录态停留登录页）。
 
 ---
@@ -90,7 +90,7 @@ Better Auth 注册不带头像，`user.image` 恒空 → 全站首字母占位�
 | --- | --- | --- |
 | 存储 key | [`oss.ts` `avatarObjectKey`](../src/lib/oss.ts) | OSS 私有桶 `avatars/{userId}.png`，**单 key 覆盖写**（换头像即覆盖，无版本累积） |
 | 服务端处理 | [`features/profile/lib/avatar.ts`](../src/features/profile/lib/avatar.ts) | `normalizeAvatar`（sharp 256×256 cover → png）+ `commitUserImage`（updateUser 写回 + 转发 cookie） |
-| 上传 / 删除 | [`POST` / `DELETE /api/user/avatar`](../src/app/api/user/avatar/route.ts) | userId **只取自会话**（`requireUserIdAuthoritative`，防越权）；限流 scope `avatar` 10/分 |
+| 上传 / 删除 | [`POST` / `DELETE /api/user/avatar`](../src/app/api/user/avatar/route.ts) | userId **只取自会话**（`getUserIdAuthoritative`，防越权）；限流 scope `avatar` 10/分 |
 | 代理展示 | [`GET /api/avatar/[userId]`](../src/app/api/avatar/%5BuserId%5D/route.ts) | 登录即可（头像半公开）；签名拉 OSS → 同源回传字节 + `Cache-Control: private, max-age=300`；无对象 → 404 |
 | 前端入口 | [`avatar-card.tsx`](../src/features/profile/components/avatar-card.tsx) | 预览 + 上传 / 更换 + 删除（确认）；成功后乐观更新 src（`?v=` 破缓存）+ `router.refresh()` |
 

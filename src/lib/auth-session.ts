@@ -6,12 +6,12 @@ import { auth, type Session } from '@/lib/auth';
 /**
  * 认证 Data Access Layer（DAL，server-only）—— 全站会话读取的**单一入口**。
  *
- * 全站 Route Handler / server 页 / listing 的会话读取统一经 `verifySession()` / `requireUserId()`
+ * 全站 Route Handler / server 页 / listing 的会话读取统一经 `verifySession()` / `getUserId()`
  * 取当前用户，未来更换认证实现或加缓存只改这一处（官方 DAL 最佳实践）。
  *
  * - `verifySession()`：`auth.api.getSession({ headers })` + React `cache()` 去重——
  *   同一请求内多次调用只查一次（cookieCache 命中时甚至不查 DB）。
- * - `requireUserId()`：只取 userId，未登录返回 `null`（**不抛错**）——
+ * - `getUserId()`：只取 userId，未登录返回 `null`（**不抛错**）——
  *   刻意保留 `null` 语义，让调用方原有的 `if (!userId) return apiError(401, …)` /
  *   `if (!userId) return null` / `if (!userId) notFound()` 分支逐字不变，401 信封语义完全一致。
  *
@@ -44,7 +44,7 @@ export const verifySession = cache(async (): Promise<VerifiedSession | null> => 
  * 取当前登录 userId；未登录返回 `null`（由调用方映射为 401 / notFound / 空渲染）。
  * 语义等价于原 `const { userId } = await auth()`，可逐处机械替换。
  */
-export async function requireUserId(): Promise<string | null> {
+export async function getUserId(): Promise<string | null> {
   const verified = await verifySession();
   return verified?.userId ?? null;
 }
@@ -63,8 +63,8 @@ export const verifySessionAuthoritative = cache(async (): Promise<VerifiedSessio
   return { userId: session.user.id, user: session.user, session: session.session };
 });
 
-/** 同 requireUserId，但强制回源 DB（敏感判权 / 扣费写路径用）。 */
-export async function requireUserIdAuthoritative(): Promise<string | null> {
+/** 同 getUserId，但强制回源 DB（敏感判权 / 扣费写路径用）。 */
+export async function getUserIdAuthoritative(): Promise<string | null> {
   const verified = await verifySessionAuthoritative();
   return verified?.userId ?? null;
 }

@@ -54,7 +54,7 @@ The project follows a feature-based folder structure designed for scalability in
 
 - Better Auth (self-hosted) for authentication; the Drizzle adapter reuses the existing RDS — see [docs/auth.md](./docs/auth.md)
 - Email + password only (OAuth / 2FA / organization plugins deferred); core business is isolated by `userId` (single-admin model)
-- Server-side session reads go through the DAL `src/lib/auth-session.ts` (`verifySession` / `requireUserId`); client-side nav filtering is UX only, real authorization is server-side `isAdmin` (see "Authentication Patterns")
+- Server-side session reads go through the DAL `src/lib/auth-session.ts` (`verifySession` / `getUserId`); client-side nav filtering is UX only, real authorization is server-side `isAdmin` (see "Authentication Patterns")
 
 ### Data & APIs
 
@@ -327,11 +327,11 @@ The `/dashboard` layout gates on a real session (`verifySession`); `src/proxy.ts
 
 ```tsx
 import { notFound } from 'next/navigation';
-import { requireUserId } from '@/lib/auth-session';
+import { getUserId } from '@/lib/auth-session';
 import { isAdmin } from '@/lib/admin';
 
 export default async function AdminPage() {
-  const userId = await requireUserId();
+  const userId = await getUserId();
   if (!isAdmin(userId)) notFound();
   // ...
 }
@@ -339,7 +339,7 @@ export default async function AdminPage() {
 
 Pages use `notFound()` rather than a redirect so non-admins cannot confirm that the admin page exists.
 
-In route handlers, return `401` when `requireUserId()` is null and `403` for non-admins. Never call `auth.api.getSession` directly — always go through the DAL. See [docs/user-management.md](./docs/user-management.md).
+In route handlers, return `401` when `getUserId()` is null and `403` for non-admins. Never call `auth.api.getSession` directly — always go through the DAL. See [docs/user-management.md](./docs/user-management.md).
 
 ### Session in Components
 
