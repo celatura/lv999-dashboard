@@ -111,9 +111,12 @@ export function AssetReferencePicker({
           </DialogDescription>
         </DialogHeader>
 
-        <div className='flex flex-col gap-3'>
+        {/* min-w-0：DialogContent 是 grid，子项默认 min-width:auto 会被长标题（truncate 的 nowrap）
+            撑到超出弹窗宽度，导致右侧 Badge / 勾选框溢出到弹窗外 */}
+        <div className='flex min-w-0 flex-col gap-3'>
           <div className='flex flex-wrap items-center gap-2'>
-            <div className='relative min-w-0 flex-1'>
+            {/* min-w-44：窄屏时保证搜索框有可用宽度，装不下就整组筛选项换行，而不是把输入框挤到只剩几十像素 */}
+            <div className='relative min-w-44 flex-1'>
               <Icons.search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
               <Input
                 value={searchInput}
