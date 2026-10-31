@@ -45,7 +45,8 @@ export function ConversationSidebar() {
         </Link>
         <p className='text-muted-foreground mt-2 text-center text-xs'>按创建时间排序</p>
       </div>
-      <div className='min-h-0 flex-1 overflow-y-auto px-2 pb-3'>
+      {/* 让列表中的绝对定位元素受滚动容器约束，避免撑开页面。 */}
+      <div className='relative min-h-0 flex-1 overflow-y-auto px-2 pb-3'>
         <Suspense fallback={<SidebarSkeleton />}>
           <ConversationList />
         </Suspense>
