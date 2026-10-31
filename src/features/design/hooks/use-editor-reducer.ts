@@ -43,9 +43,7 @@ export interface ObjectPatchEntry {
 export type DocumentPatch = Partial<Pick<DesignDocument, 'width' | 'height' | 'background'>>;
 
 export type EditorAction =
-  | { type: 'set-document'; document: DesignDocument; selectedIds?: string[] }
   | { type: 'add-object'; object: DesignObject }
-  | { type: 'add-objects'; objects: DesignObject[] }
   | { type: 'duplicate-objects'; ids: string[]; offset: number }
   | { type: 'paste-objects'; objects: DesignObject[]; offset: number }
   | { type: 'update-object'; id: string; patch: ObjectPatch }
@@ -88,30 +86,12 @@ function sameSelection(a: string[], b: string[]): boolean {
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
-    case 'set-document':
-      return {
-        past: [],
-        present: action.document,
-        future: [],
-        selectedIds: action.selectedIds ?? []
-      };
-
     case 'add-object':
       return pushHistory(
         state,
         { ...state.present, objects: [...state.present.objects, action.object] },
         [action.object.id]
       );
-
-    // 批量新增（粘贴）：一次入历史，选中新对象
-    case 'add-objects': {
-      if (action.objects.length === 0) return state;
-      return pushHistory(
-        state,
-        { ...state.present, objects: [...state.present.objects, ...action.objects] },
-        action.objects.map((object) => object.id)
-      );
-    }
 
     // 复制选中并立即偏移（Ctrl+D）：从 present 取源，克隆新 id，选中新副本
     case 'duplicate-objects': {

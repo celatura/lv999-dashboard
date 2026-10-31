@@ -13,18 +13,17 @@ import {
   useMemo,
   useRef,
   useState,
-  type Dispatch,
   type ReactNode,
   type RefObject
 } from 'react';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api-client';
+import { clamp } from '@/lib/utils';
 import { createDesignMutation, updateDesignMutation } from '../api/mutations';
 import type { DesignDocument, DesignObject } from '../api/types';
 import { ZOOM_MAX, ZOOM_MIN } from '../constants/canvas';
 import {
   useEditorReducer,
-  type EditorAction,
   type ObjectPatch,
   type ObjectPatchEntry
 } from '../hooks/use-editor-reducer';
@@ -44,7 +43,6 @@ interface EditorContextValue {
   canRedo: boolean;
   canPaste: boolean;
   isDirty: boolean;
-  dispatch: Dispatch<EditorAction>;
 
   // 选择（稳定回调）
   select: (ids: string[]) => void;
@@ -97,10 +95,6 @@ interface EditorContextValue {
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 /** 复制/粘贴的默认偏移（px，文档坐标）；连续粘贴按次数累加避免重叠 */
 const PASTE_OFFSET = 24;
@@ -577,7 +571,6 @@ export function EditorProvider({
       canRedo: state.future.length > 0,
       canPaste: clipboardCount > 0,
       isDirty,
-      dispatch,
       select,
       toggleSelect,
       clearSelection,
@@ -622,7 +615,6 @@ export function EditorProvider({
       selectedObject,
       clipboardCount,
       isDirty,
-      dispatch,
       select,
       toggleSelect,
       clearSelection,

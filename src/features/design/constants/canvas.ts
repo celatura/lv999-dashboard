@@ -58,10 +58,9 @@ export const OBJECT_DEFAULTS = {
   }
 } as const;
 
-/** 缩放范围（相对指针缩放 / 工具栏缩放） */
+/** 缩放范围（相对指针缩放 / 工具栏缩放按 1.2 倍率步进） */
 export const ZOOM_MIN = 0.1;
 export const ZOOM_MAX = 4;
-export const ZOOM_STEP = 0.1;
 
 /** 创建一个空白文档（version=1） */
 export function createEmptyDocument(preset?: { width: number; height: number }): DesignDocument {

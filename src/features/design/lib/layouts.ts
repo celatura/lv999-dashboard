@@ -1,10 +1,11 @@
+import { clamp } from '@/lib/utils';
 import {
   designDocumentSchema,
   MAX_DOCUMENT_OBJECTS,
   type DesignDocument,
   type DesignObject
 } from '../api/types';
-import { generateObjectId } from './document';
+import { generateObjectId, type Box } from './document';
 
 /**
  * 版式模板（服务端纯函数，无 Konva / 无 IO）。
@@ -93,13 +94,6 @@ export interface ComposedLayout {
   objects: DesignObject[];
 }
 
-interface Box {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 /** 字号缩放基准画布宽（1080 = 竖版 3:4 预设宽） */
 const REFERENCE_WIDTH = 1080;
 
@@ -115,10 +109,6 @@ const WIDE_CHAR_PATTERN =
 
 /** 估算宽度的安全系数：Konva 按词/字实际断行，估算略放宽以避免行数被低估 */
 const WIDTH_SAFETY_FACTOR = 1.06;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 /**
  * contain 等比适配：把自然尺寸缩放至完全落入 box（不裁切、不变形），在 box 内水平居中；
@@ -505,20 +495,9 @@ function sanitizeObjects(
 ): DesignObject[] {
   const sanitized: DesignObject[] = [];
   for (const object of objects.slice(0, MAX_DOCUMENT_OBJECTS)) {
-    if (object.type === 'image') {
-      if (object.assetId !== allowedAssetId) continue;
-      const width = clamp(object.width, 1, canvas.width);
-      const height = clamp(object.height, 1, canvas.height);
-      sanitized.push({
-        ...object,
-        width,
-        height,
-        x: clamp(object.x, 0, Math.max(0, canvas.width - width)),
-        y: clamp(object.y, 0, Math.max(0, canvas.height - height))
-      });
-      continue;
-    }
-    if (object.type === 'rect') {
+    // image 额外校验引用：assetId 只允许本次文生图产出的主图（防模型臆造 id）
+    if (object.type === 'image' || object.type === 'rect') {
+      if (object.type === 'image' && object.assetId !== allowedAssetId) continue;
       const width = clamp(object.width, 1, canvas.width);
       const height = clamp(object.height, 1, canvas.height);
       sanitized.push({

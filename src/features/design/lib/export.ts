@@ -77,25 +77,25 @@ export function dataUrlToBase64(dataUrl: string): string {
  */
 export const PREVIEW_BASE64_BUDGET = 3 * 1024 * 1024;
 
-/** 预览降档阶梯：优先画布原尺寸（不放大），超预算逐级缩边 */
-const PREVIEW_LADDER: Required<ExportOptions>[] = [
-  { maxDimension: 1920, maxPixelRatio: 1 },
-  { maxDimension: 1280, maxPixelRatio: 1 },
-  { maxDimension: 960, maxPixelRatio: 1 }
-];
+/**
+ * 预览导出最长边上限（1 = 只缩不放）：当前 UI 仅提供 5 个预设画布（最长边 ≤1920），
+ * 因此实际永远 1:1 原尺寸导出；该上限只是引入自定义画布尺寸后的缩边兜底，
+ * 届时如需体积降级再恢复降档阶梯。
+ */
+const PREVIEW_MAX_DIMENSION = 1920;
 
 /**
- * 导出保存用预览 PNG（base64）：按阶梯取首个落在体积预算内的结果。
- * **全部超预算时返回 undefined（丢预览保文档）**：带着超限载荷上去必撞 4MB 请求体卡口，
- * 整次保存 413、文档一个字节也存不下，而且每次重试都失败；服务端按 previewPng 存在性
- * 更新，不传只是「本次没刷新预览」，下次保存会再试一次。
+ * 导出保存用预览 PNG（base64）；超出体积预算时返回 undefined（丢预览保文档）：
+ * 带着超限载荷上去必撞 4MB 请求体卡口，整次保存 413、文档一个字节也存不下，
+ * 而且每次重试都失败；服务端按 previewPng 存在性更新，不传只是「本次没刷新预览」，
+ * 下次保存会再试一次。
  */
 export function exportPreviewBase64(stage: Konva.Stage, doc: DesignDocument): string | undefined {
-  for (const options of PREVIEW_LADDER) {
-    const base64 = dataUrlToBase64(exportStageToDataURL(stage, doc, options));
-    if (base64.length <= PREVIEW_BASE64_BUDGET) return base64;
-  }
-  console.warn('[design] preview png exceeds budget at every tier, skipping preview upload');
+  const base64 = dataUrlToBase64(
+    exportStageToDataURL(stage, doc, { maxDimension: PREVIEW_MAX_DIMENSION })
+  );
+  if (base64.length <= PREVIEW_BASE64_BUDGET) return base64;
+  console.warn('[design] preview png exceeds budget, skipping preview upload');
   return undefined;
 }
 

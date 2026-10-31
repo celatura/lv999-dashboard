@@ -178,6 +178,16 @@ function ObjectProperties({ object }: { object: DesignObject }) {
 /** 多选对齐方式：以选区包围盒为基准，按对象自身包围盒的差值平移（类型无关，圆/文字同样适用） */
 type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
 
+/** 对齐按钮（label + aria）：数据驱动，避免 6 份重复 JSX */
+const ALIGN_OPTIONS: { mode: AlignMode; label: string; aria: string }[] = [
+  { mode: 'left', label: '左', aria: '左对齐' },
+  { mode: 'centerX', label: '中', aria: '水平居中' },
+  { mode: 'right', label: '右', aria: '右对齐' },
+  { mode: 'top', label: '顶', aria: '顶对齐' },
+  { mode: 'centerY', label: '中', aria: '垂直居中' },
+  { mode: 'bottom', label: '底', aria: '底对齐' }
+];
+
 function computeAlignPatches(objects: DesignObject[], mode: AlignMode): ObjectPatchEntry[] {
   if (objects.length < 2) return [];
   const bbox = unionBox(objects.map(objectBounds));
@@ -235,60 +245,18 @@ function MultiProperties() {
       <div className='space-y-1.5'>
         <span className='text-muted-foreground text-xs'>对齐</span>
         <div className='grid grid-cols-3 gap-1.5'>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='左对齐'
-            title='左对齐'
-            onClick={() => align('left')}
-          >
-            左
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='水平居中'
-            title='水平居中'
-            onClick={() => align('centerX')}
-          >
-            中
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='右对齐'
-            title='右对齐'
-            onClick={() => align('right')}
-          >
-            右
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='顶对齐'
-            title='顶对齐'
-            onClick={() => align('top')}
-          >
-            顶
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='垂直居中'
-            title='垂直居中'
-            onClick={() => align('centerY')}
-          >
-            中
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            aria-label='底对齐'
-            title='底对齐'
-            onClick={() => align('bottom')}
-          >
-            底
-          </Button>
+          {ALIGN_OPTIONS.map((option) => (
+            <Button
+              key={option.mode}
+              variant='outline'
+              size='sm'
+              aria-label={option.aria}
+              title={option.aria}
+              onClick={() => align(option.mode)}
+            >
+              {option.label}
+            </Button>
+          ))}
         </div>
       </div>
 
