@@ -4,7 +4,7 @@ import { after } from 'next/server';
 import { createResumableStreamContext } from 'resumable-stream';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
-import { clearConversationActiveStream, getConversation } from '@/features/agent/api/service';
+import { getConversation } from '@/features/agent/api/service';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +13,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * 恢复端点：useChat({ resume: true }) 在挂载时（刷新/切回会话）自动 GET 此路由。
  * - 无活跃流：204（客户端直接使用数据库中的消息）
- * - 有活跃流：重连到进行中的流，先回放已缓冲内容再持续推送
+ * - 有活跃流：重连到进行中的流；流尚未建立或无法恢复时返回可重试的 503
  */
 export async function GET(_request: Request, context: RouteContext) {
   const userId = await getUserId();
@@ -38,9 +38,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const streamContext = createResumableStreamContext({ waitUntil: after });
   const stream = await streamContext.resumeExistingStream(activeStreamId);
   if (!stream) {
-    // 流已结束或不存在（生产者实例异常退出等）：清理残留引用，后续以数据库消息为准
-    await clearConversationActiveStream(id, activeStreamId);
-    return new Response(null, { status: 204 });
+    return apiError(503, 'stream_unavailable', 'Stream not available');
   }
 
   return new Response(stream, { headers: UI_MESSAGE_STREAM_HEADERS });

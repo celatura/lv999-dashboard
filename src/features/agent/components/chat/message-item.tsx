@@ -172,7 +172,7 @@ export const MessageItem = memo(function MessageItem({
                   <Button
                     variant='ghost'
                     size='icon-sm'
-                    aria-label='重新生成回复'
+                    aria-label='重新生成回复（将再次消耗 Credits，可能再次生成资产）'
                     disabled={isActive}
                     onClick={() => onRegenerate?.()}
                   >
@@ -180,7 +180,7 @@ export const MessageItem = memo(function MessageItem({
                   </Button>
                 }
               />
-              <TooltipContent>重试</TooltipContent>
+              <TooltipContent>重新生成会再次消耗 Credits，可能再次生成资产</TooltipContent>
             </Tooltip>
           )}
         </MessageFooter>

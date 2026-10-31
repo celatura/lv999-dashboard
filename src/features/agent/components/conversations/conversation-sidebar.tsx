@@ -3,10 +3,11 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation, useSuspenseQuery } from '@tanstack/react-query';
+import { useMutation, useSuspenseInfiniteQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertModal } from '@/components/modal/alert-modal';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { LoadingButton } from '@/components/ui/loading-button';
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,7 @@ export function ConversationSidebar() {
         >
           <Icons.add /> 新建会话
         </Link>
+        <p className='text-muted-foreground mt-2 text-center text-xs'>按创建时间排序</p>
       </div>
       <div className='min-h-0 flex-1 overflow-y-auto px-2 pb-3'>
         <Suspense fallback={<SidebarSkeleton />}>
@@ -98,7 +100,9 @@ function SidebarSkeleton() {
 }
 
 function ConversationList() {
-  const { data } = useSuspenseQuery(conversationsQueryOptions());
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useSuspenseInfiniteQuery(
+    conversationsQueryOptions()
+  );
   const pathname = usePathname();
   const router = useRouter();
   const [renaming, setRenaming] = useState<Conversation | null>(null);
@@ -107,6 +111,15 @@ function ConversationList() {
 
   const updateMutation = useMutation(updateConversationMutation);
   const deleteMutation = useMutation(deleteConversationMutation);
+  const seen = new Set<string>();
+  const conversations = data.pages.flatMap((page) =>
+    page.conversations.filter((conversation) => {
+      if (seen.has(conversation.id)) return false;
+      seen.add(conversation.id);
+      return true;
+    })
+  );
+  const assetCounts = Object.assign({}, ...data.pages.map((page) => page.assetCounts));
 
   const submitRename = () => {
     if (!renaming) return;
@@ -142,14 +155,14 @@ function ConversationList() {
   return (
     <>
       <nav className='flex flex-col gap-0.5'>
-        {data.conversations.length === 0 && (
+        {conversations.length === 0 && (
           <p className='text-muted-foreground px-2 py-3 text-xs'>
             还没有会话，点击上方「新建会话」开始创作。
           </p>
         )}
-        {data.conversations.map((conversation) => {
+        {conversations.map((conversation) => {
           const active = pathname === `/dashboard/agent/${conversation.id}`;
-          const assetCount = data.assetCounts[conversation.id] ?? 0;
+          const assetCount = assetCounts[conversation.id] ?? 0;
           return (
             <div
               key={conversation.id}
@@ -209,6 +222,22 @@ function ConversationList() {
           );
         })}
       </nav>
+      {hasNextPage && (
+        <LoadingButton
+          variant='ghost'
+          size='sm'
+          className='mt-2 w-full'
+          loading={isFetchingNextPage}
+          loadingLabel='正在加载更多会话'
+          onClick={() => {
+            void fetchNextPage({ throwOnError: true }).catch(() =>
+              toast.error('加载更多会话失败，请重试')
+            );
+          }}
+        >
+          加载更多
+        </LoadingButton>
+      )}
 
       <Dialog
         open={renaming !== null}

@@ -122,6 +122,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 - 每开新流先生成 `streamId` 并**立即**登记到 `conversations.activeStreamId`（防止窗口期刷新重连到旧流或拿 204）。
 - 客户端 `useChat({ resume })` 按官方模式由服务端 `activeStreamId` 决定是否重连（仅存在活跃流时为 true）：有活跃流时挂载自动 `GET /api/agent/chat/[id]/stream` 重连（刷新 / 切回实时恢复）；无活跃流时不发重连请求（其 204 分支会把刚发送消息的 `submitted` 状态重置回 `ready`，导致发送按钮延迟变「停止」）。
 - `streamId` 随响应消息 `metadata` 下发，供客户端停止时携带最新流 id。
+- 活跃流登记后若重连时 Redis 流尚未创建或无法恢复，重连端点返回 `stream_unavailable` 而不清除登记；用户可重新连接或显式停止。正常完成或停止时由生产者/停止端点清理登记。
 - **必须提供 `generateMessageId`**：否则响应消息 id 为空串，会在 `messages` 主键上跨会话冲突（历史事故：串会话 + 消息丢失）。
 
 ### 4.2 新会话首条消息交接
@@ -133,9 +134,11 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 见 [`stop-signal.ts`](../src/features/agent/api/stop-signal.ts) 与 [`chat/[id]/stop/route.ts`](../src/app/api/agent/chat/[id]/stop/route.ts)。serverless 多实例下无持久执行平台时的方案：
 
 1. stop 端点保存客户端部分快照（`onConflictDoNothing`，只插不覆盖）。
-2. 向 Redis 写入 `agent:stop:{streamId}` 标志（TTL 300s）。
+2. 向 Redis 写入 `agent:stop:{conversationId}:{streamId}` 标志（TTL 300s）；为旧版已活跃流兼容写入旧格式标志。
 3. 生成路由每 2 秒轮询该标志，命中后 `abort` 底层生成（真取消）。
 4. 校验后清理 `activeStreamId`（仅当仍指向同一流，避免误清之后启动的新流）。
+
+客户端在发起请求前生成流 id，即使还未收到首个流消息也可请求停止。停止请求可先于生成路由登记流；生成路由在登记前和调用模型前检查已排队的停止信号，登记后的信号由轮询处理。登记使用比较并更新，较晚到达的旧请求不会覆盖其他页面已经启动的新流；竞争失败返回 `stream_changed`。客户端等待 stop 端点确认信号已登记，再断开本地流；这不是上游取消已完成的保证。请求失败或超时会提示生成可能仍在继续；消息快照超过请求体上限时，仅发送流 id 并提醒用户以服务端保存结果为准。停止已发起的付费任务仍可能产生费用，见 [credits.md](./credits.md)。
 
 > **离开页面 / 卸载 ≠ 停止**：离开属于断开，应保持可恢复；只有点击停止按钮才真取消。
 
@@ -157,6 +160,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 
 - **为什么**：让模型**确定性地**拿到 assetId，无需再调 `findAssets` 检索（指令第 5 条明确「消息中出现 [引用资产] 块时，直接使用块内给出的 id」）。
 - **仍是普通 text 消息**：不改流式协议、不影响 `validateUIMessages`。
+- **图片能力边界**：引用只传图片资产 id，不会把像素送给对话模型；`readAsset` 仅返回可能为空的生成提示词。图片仍可由图片编辑或图生视频工具使用，但模型不能据此声称看见或识别了图片；用户需用文字描述关键信息。
 - **解析**：[`parseAssetReferenceBlock`](../src/features/agent/lib/asset-reference.ts) 在气泡渲染与会话自动标题时剥离引用块只留用户原文（标题不应带机器可读块）。
 - **标题归一**：标题内的换行 / 连续空白归一为单空格，避免破坏逐行解析。
 
@@ -168,6 +172,12 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **重新生成**（仅**最后一条** assistant 消息）：调 `useChat` 的 `regenerate()`（无参 = 末尾消息）；tooltip 明示「将再次消耗 Credits」（重roll = 新一轮模型调用）。**不对历史中间消息提供**——`regenerate(messageId)` 会截断其后所有对话。
 - **流式禁用**：`isActive` 时两按钮禁用（内容未完整 / 防并发重roll）。
 - **memo 纪律**：[`message-item.tsx`](../src/features/agent/components/chat/message-item.tsx) 是 memo 化的（Streamdown 解析贵）；操作栏新增 props 仅稳定回调（`onRegenerate` 为 chat-window 的 useCallback）+ 布尔（`isLastAssistant`），复制 ✓ 态自持 CopyButton 内部；**不传 `isGenerating`**（每轮生成翻转两次会击穿 memo、重渲染全部历史）——流式只发生在末尾，`isActive` 已等价覆盖禁用语义。
+
+### 4.7 会话设置、列表与限制
+
+- 模型和技能切换等待服务端保存后才更新显示，期间暂停发送；保存和读取各有 10 秒超时。保存失败时重新读取权威设置，无法读取时须手动重试同步。对话请求携带当前显示的模型和技能，若与服务端不一致返回 `settings_changed`，客户端可同步后重试。
+- 侧边栏每次加载 50 个会话，按不可变的创建时间和 id 倒序游标分页，避免活跃会话更新时间改变时遗漏记录；界面注明排序方式。每页只统计该页会话资产；会话更新或生成结束仅刷新包含该会话的已加载页，新建和删除则刷新整个列表。
+- 对话请求最多 200 条消息、单条 500 个 part、请求体 4 MB。触及大小限制时可编辑失败消息，或将输入与资产引用带到新会话；后者通过客户端内存一次性交接，页面刷新会丢弃未交接草稿。
 
 ---
 
@@ -288,7 +298,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | POST | `/api/agent/chat` | 发起生成，返回可恢复 SSE 流（`runtime=nodejs`，`maxDuration=300`）|
 | GET | `/api/agent/chat/[id]/stream` | 重连进行中的流（`resume`）|
 | POST | `/api/agent/chat/[id]/stop` | 停止生成（保存快照 + 写停止信号）|
-| GET | `/api/agent/conversations` | 会话列表（含每会话资产数 `assetCounts`，供侧边栏 badge）|
+| GET | `/api/agent/conversations?cursor=...` | 会话列表（按创建时间倒序游标分页，每页 50 条；返回 `conversations` / 当前页 `assetCounts` / `nextCursor`，首次省略 cursor，无下一页时为 null）|
 | POST | `/api/agent/conversations` | 创建会话（可带 `activeSkillId` 激活技能）|
 | PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型 / `activeSkillId`）/ 删除会话 |
 | GET | `/api/agent/assets` | 资产列表（分页 / 搜索 / kind 筛选 / `favorite` 筛选 / 排序）|
@@ -314,7 +324,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 错误信封（API 契约硬化 v1）
 
-服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `forbidden` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
+服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `forbidden` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `settings_changed` / `stream_changed` / `stream_unavailable` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
 
 - **例外：`generation_failed`（502）的 `message` 为中文**——图片/视频生成失败原因（内容审核拒绝 / 上游限流 / 鉴权 / 参数 / 超时）已由 `GenerationError` 映射为用户可读文案，端点直接透传作为单一来源，客户端按 `code` 识别后原样展示（见 design 域的 `resolveAiImageError`）；其余 code 的 `message` 仍为简短英文。
 - **路径参数**：所有 `[id]` 路由先用 [`isUuid`](../src/lib/utils.ts) 预校验，非法格式返回 404 `not_found`（避免直达 DB 产生 500）。

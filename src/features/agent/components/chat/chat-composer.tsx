@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useState, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/ui/loading-button';
 import { Textarea } from '@/components/ui/textarea';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
@@ -23,6 +24,9 @@ interface ChatComposerProps {
   onSubmit: () => void;
   onStop: () => void;
   isGenerating: boolean;
+  isStopping: boolean;
+  canStop: boolean;
+  controlsDisabled: boolean;
   model: string;
   onModelChange: (value: string) => void;
   /** 会话级技能 id（null = 通用） */
@@ -41,6 +45,9 @@ export function ChatComposer({
   onSubmit,
   onStop,
   isGenerating,
+  isStopping,
+  canStop,
+  controlsDisabled,
   model,
   onModelChange,
   skillId,
@@ -55,7 +62,7 @@ export function ChatComposer({
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      if (!isGenerating && value.trim()) {
+      if (!isGenerating && !controlsDisabled && value.trim()) {
         onSubmit();
       }
     }
@@ -108,6 +115,11 @@ export function ChatComposer({
             })}
           </ul>
         )}
+        {referencedAssets.some((asset) => asset.kind === 'image') && (
+          <p className='text-muted-foreground text-xs'>
+            图片可用于修改或生成视频，但 Agent 不能直接看到图片内容；请用文字描述关键信息。
+          </p>
+        )}
         <Textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -118,8 +130,16 @@ export function ChatComposer({
         />
         <div className='flex items-center justify-between gap-2'>
           <div className='flex min-w-0 items-center gap-2'>
-            <ModelSelector value={model} onChange={onModelChange} disabled={isGenerating} />
-            <SkillSelector value={skillId} onChange={onSkillChange} disabled={isGenerating} />
+            <ModelSelector
+              value={model}
+              onChange={onModelChange}
+              disabled={isGenerating || controlsDisabled}
+            />
+            <SkillSelector
+              value={skillId}
+              onChange={onSkillChange}
+              disabled={isGenerating || controlsDisabled}
+            />
             <Button
               variant='outline'
               size='sm'
@@ -133,11 +153,19 @@ export function ChatComposer({
             </Button>
           </div>
           {isGenerating ? (
-            <Button variant='outline' size='sm' onClick={onStop}>
+            <LoadingButton
+              variant='outline'
+              size='sm'
+              onClick={onStop}
+              disabled={!canStop}
+              loading={isStopping}
+              loadingLabel='正在停止生成'
+              title={canStop ? '停止已发起的生成仍可能产生费用' : '正在建立生成，请稍候'}
+            >
               <Icons.stop /> 停止
-            </Button>
+            </LoadingButton>
           ) : (
-            <Button size='sm' onClick={onSubmit} disabled={!value.trim()}>
+            <Button size='sm' onClick={onSubmit} disabled={!value.trim() || controlsDisabled}>
               <Icons.send /> 发送
             </Button>
           )}

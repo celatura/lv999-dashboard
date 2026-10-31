@@ -3,16 +3,19 @@ import { apiError } from '@/lib/api-error';
 import { createConversation, listConversations } from '@/features/agent/api/service';
 import { DEFAULT_MODEL, isModelKey } from '@/features/agent/constants/models';
 import { isSkillReference } from '@/features/agent/constants/skills';
+import { parseConversationCursor } from '@/features/agent/lib/conversation-pagination';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await getUserId();
   if (!userId) {
     return apiError(401, 'unauthorized', 'Unauthorized');
   }
-  // 直接返回 ConversationsResponse（conversations + assetCounts），与客户端 queryFn 形状一致
-  const result = await listConversations(userId);
+  const value = new URL(request.url).searchParams.get('cursor');
+  const cursor = value === null ? null : parseConversationCursor(value);
+  if (value !== null && !cursor) return apiError(400, 'invalid_request', 'Invalid cursor');
+  const result = await listConversations(userId, cursor);
   return Response.json(result);
 }
 

@@ -2,6 +2,10 @@ import { mutationOptions } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { getQueryClient } from '@/lib/query-client';
 import { agentKeys } from './queries';
+import {
+  cancelConversationPageRefreshes,
+  refreshConversationPageWithNotice
+} from '../lib/refresh-conversations';
 import type {
   Conversation,
   CreateConversationPayload,
@@ -14,7 +18,9 @@ import type {
 
 /** 会话域失效：仅会话列表（标题/时间戳）变化，不连带资产查询 */
 function invalidateConversations(): void {
-  void getQueryClient().invalidateQueries({ queryKey: agentKeys.conversations() });
+  const queryClient = getQueryClient();
+  cancelConversationPageRefreshes(queryClient);
+  void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
 }
 
 /** 技能域失效：合并列表（预置 + 自定义）变化，selector 与管理页同步刷新 */
@@ -38,12 +44,21 @@ export const createConversationMutation = mutationOptions({
 });
 
 export const updateConversationMutation = mutationOptions({
-  mutationFn: ({ id, values }: { id: string; values: UpdateConversationPayload }) =>
+  mutationFn: ({
+    id,
+    values,
+    signal
+  }: {
+    id: string;
+    values: UpdateConversationPayload;
+    signal?: AbortSignal;
+  }) =>
     apiClient<Conversation>(`/agent/conversations/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(values)
+      body: JSON.stringify(values),
+      signal
     }),
-  onSettled: invalidateConversations
+  onSettled: (_data, _error, { id }) => refreshConversationPageWithNotice(getQueryClient(), id)
 });
 
 export const deleteConversationMutation = mutationOptions({

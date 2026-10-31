@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import type {
   AssetDetail,
@@ -32,10 +32,19 @@ export function buildAssetQuery(filters: AssetFilters): string {
   return params.toString();
 }
 
+export function fetchConversationPage(cursor: string | null): Promise<ConversationsResponse> {
+  const params = new URLSearchParams();
+  if (cursor) params.set('cursor', cursor);
+  const query = params.toString();
+  return apiClient<ConversationsResponse>(`/agent/conversations${query ? `?${query}` : ''}`);
+}
+
 export const conversationsQueryOptions = () =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: agentKeys.conversations(),
-    queryFn: () => apiClient<ConversationsResponse>('/agent/conversations')
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => fetchConversationPage(pageParam),
+    getNextPageParam: (lastPage) => lastPage.nextCursor
   });
 
 export const assetsQueryOptions = (filters: AssetFilters) =>

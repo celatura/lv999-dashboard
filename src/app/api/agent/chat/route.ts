@@ -1,6 +1,7 @@
 import { getUserId } from '@/lib/auth-session';
 import {
   convertToModelMessages,
+  createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
   toUIMessageStream,
@@ -29,14 +30,20 @@ import {
   syncConversationMessages,
   touchConversation
 } from '@/features/agent/api/service';
-import { requestAgentStop, watchAgentStop } from '@/features/agent/api/stop-signal';
+import {
+  consumeAgentStop,
+  requestAgentStop,
+  watchAgentStop
+} from '@/features/agent/api/stop-signal';
 import { detectModelUnavailable } from '@/features/agent/api/model-availability';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
+import { matchesConversationSettings } from '@/features/agent/lib/conversation-settings';
 import { chargeCredits, checkBalance } from '@/features/credits/api/service';
 import { priceChat } from '@/features/credits/lib/pricing';
 import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/credits';
 import { apiError } from '@/lib/api-error';
+import { isUuid } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -51,6 +58,14 @@ function extractText(message: UIMessage): string {
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map((part) => part.text)
     .join(' ');
+}
+
+function cancelledStreamResponse(): Response {
+  return createUIMessageStreamResponse({
+    stream: createUIMessageStream({
+      execute: ({ writer }) => writer.write({ type: 'abort' })
+    })
+  });
 }
 
 export async function POST(request: Request) {
@@ -74,7 +89,13 @@ export async function POST(request: Request) {
   if (Buffer.byteLength(rawBody, 'utf8') > MAX_REQUEST_BYTES) {
     return apiError(413, 'payload_too_large', 'Request body too large');
   }
-  let body: { messages?: unknown; conversationId?: unknown };
+  let body: {
+    messages?: unknown;
+    conversationId?: unknown;
+    expectedModel?: unknown;
+    expectedSkillId?: unknown;
+    streamId?: unknown;
+  };
   try {
     body = JSON.parse(rawBody) as typeof body;
   } catch {
@@ -85,6 +106,12 @@ export async function POST(request: Request) {
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : undefined;
   if (!Array.isArray(messages) || messages.length === 0 || !conversationId) {
     return apiError(400, 'invalid_request', 'messages and conversationId are required');
+  }
+  if (
+    body.streamId !== undefined &&
+    (typeof body.streamId !== 'string' || !isUuid(body.streamId))
+  ) {
+    return apiError(400, 'invalid_request', 'Invalid stream id');
   }
   if (
     messages.length > MAX_MESSAGES ||
@@ -117,6 +144,9 @@ export async function POST(request: Request) {
   if (!conversation) {
     return apiError(404, 'not_found', 'Conversation not found');
   }
+  if (!matchesConversationSettings(body, conversation)) {
+    return apiError(409, 'settings_changed', 'Conversation settings changed');
+  }
 
   // 计费入口拦截：限流后、建流前；余额 ≤0 直接 402（不发起上游调用，杜绝陌生人刷爆 API）
   // 并行：技能解析（uuid → 查 DB 归属 / 预置 key → 常量 / 无 → undefined）与余额校验互不依赖
@@ -142,32 +172,50 @@ export async function POST(request: Request) {
 
   // 开新流前先登记活跃流（官方要求开始新流时立即更新，防止窗口期刷新重连到旧流或拿 204）；
   // 停止信号消费端：stop 端点写 Redis 标志 → 这里轮询命中后 abort 底层生成（真取消）。
-  const streamId = generateId();
+  const streamId = typeof body.streamId === 'string' ? body.streamId : generateId();
 
-  // 并行组 3：用户消息落库、活跃流登记、标题生成与旧流停止信号互不依赖
-  //（DB 不同列写入 / Redis 信号），并行执行；
-  // cleanup 保持在 saveUserMessage 之后（守卫：仅当该用户消息仍是会话最后一条用户消息）。
-  // 并发防护：若仍有旧流在运行（如网络中断造成的幽灵生产），先发出停止信号再开新流
-  const staleStreamStop = conversation.activeStreamId
-    ? requestAgentStop(conversation.activeStreamId)
-    : Promise.resolve();
   const lastUserMessage = messages.toReversed().find((message) => message.role === 'user');
-  if (lastUserMessage) {
-    const userText = extractText(lastUserMessage);
-    // 请求开始先落用户消息（异常场景不丢输入），并使用首条消息生成会话标题
-    await Promise.all([
-      saveUserMessage(conversationId, lastUserMessage),
-      setConversationActiveStream(conversationId, streamId),
-      userText ? applyAutoTitle(userId, conversation, userText) : Promise.resolve(),
-      staleStreamStop
-    ]);
-    await cleanupSupersededResponses(conversationId, lastUserMessage.id);
-  } else {
-    await Promise.all([setConversationActiveStream(conversationId, streamId), staleStreamStop]);
+  if (await consumeAgentStop(conversationId, streamId)) {
+    if (lastUserMessage) {
+      await saveUserMessage(conversationId, lastUserMessage);
+    }
+    return cancelledStreamResponse();
+  }
+  const claimed = await setConversationActiveStream(
+    conversationId,
+    streamId,
+    conversation.activeStreamId
+  );
+  if (!claimed) {
+    return apiError(409, 'stream_changed', 'Conversation stream changed');
+  }
+
+  try {
+    const staleStreamStop = conversation.activeStreamId
+      ? requestAgentStop(conversationId, conversation.activeStreamId, true)
+      : Promise.resolve();
+    if (lastUserMessage) {
+      const userText = extractText(lastUserMessage);
+      await Promise.all([
+        saveUserMessage(conversationId, lastUserMessage),
+        userText ? applyAutoTitle(userId, conversation, userText) : Promise.resolve(),
+        staleStreamStop
+      ]);
+      await cleanupSupersededResponses(conversationId, lastUserMessage.id);
+    } else {
+      await staleStreamStop;
+    }
+    if (await consumeAgentStop(conversationId, streamId)) {
+      await clearConversationActiveStream(conversationId, streamId);
+      return cancelledStreamResponse();
+    }
+  } catch (error) {
+    await clearConversationActiveStream(conversationId, streamId);
+    throw error;
   }
 
   const abortController = new AbortController();
-  const stopWatching = watchAgentStop(streamId, () => {
+  const stopWatching = watchAgentStop(conversationId, streamId, () => {
     abortController.abort();
   });
 
@@ -253,7 +301,6 @@ export async function POST(request: Request) {
       try {
         const streamContext = createResumableStreamContext({ waitUntil: after });
         await streamContext.createNewResumableStream(streamId, () => stream);
-        await setConversationActiveStream(conversationId, streamId);
       } catch (error) {
         // 降级：建立失败时清理活跃流登记并取消该分支，主响应仍继续直接流式返回
         console.error('[agent] resumable stream setup failed:', error);

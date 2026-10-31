@@ -49,11 +49,6 @@ export async function POST(request: Request, context: RouteContext) {
     return apiError(404, 'not_found', 'Conversation not found');
   }
 
-  const activeStreamId = conversation.activeStreamId;
-  if (!activeStreamId) {
-    return Response.json({ success: true });
-  }
-
   // 请求体大小上限（复用 chat 路由的 4MB 约定）：assistantMessage 会原样入库，先设防
   const rawBody = await request.text();
   if (Buffer.byteLength(rawBody, 'utf8') > MAX_REQUEST_BYTES) {
@@ -66,15 +61,23 @@ export async function POST(request: Request, context: RouteContext) {
     body = {};
   }
 
-  // 客户端携带了流 id 且与当前不一致 → 过期请求，忽略（避免误杀之后启动的新流）
-  if (body.activeStreamId != null && body.activeStreamId !== activeStreamId) {
-    return Response.json({ success: true });
+  const activeStreamId = conversation.activeStreamId;
+  const requestedStreamId = body.activeStreamId ?? activeStreamId;
+  if (!requestedStreamId) {
+    return Response.json({ success: true, outcome: 'already_finished' });
+  }
+  if (typeof requestedStreamId !== 'string' || requestedStreamId.length > 128) {
+    return apiError(400, 'invalid_request', 'Invalid stream id');
+  }
+  const isActive = requestedStreamId === activeStreamId;
+  if (!isActive && !isUuid(requestedStreamId)) {
+    return Response.json({ success: true, outcome: 'stale' });
   }
 
-  if (body.assistantMessage) {
+  if (isActive && body.assistantMessage) {
     await saveAssistantSnapshot(id, body.assistantMessage);
   }
-  await requestAgentStop(activeStreamId);
-  await clearConversationActiveStream(id, activeStreamId);
-  return Response.json({ success: true });
+  await requestAgentStop(id, requestedStreamId, isActive);
+  if (isActive) await clearConversationActiveStream(id, requestedStreamId);
+  return Response.json({ success: true, outcome: 'requested' });
 }

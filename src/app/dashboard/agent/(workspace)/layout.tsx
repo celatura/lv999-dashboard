@@ -1,7 +1,7 @@
 import { getUserId } from '@/lib/auth-session';
 import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
-import { agentKeys } from '@/features/agent/api/queries';
+import { conversationsQueryOptions } from '@/features/agent/api/queries';
 import { listConversations } from '@/features/agent/api/service';
 import { ConversationSidebar } from '@/features/agent/components/conversations/conversation-sidebar';
 
@@ -14,12 +14,14 @@ export default async function AgentWorkspaceLayout({ children }: { children: Rea
   if (!userId) return null;
 
   const queryClient = getQueryClient();
-  // 注意：预取数据的结构必须与客户端 queryFn（ConversationsResponse = conversations + assetCounts）一致，
-  // 否则水合后的 useSuspenseQuery 会拿到错误形状的数据。
-  void queryClient.prefetchQuery({
-    queryKey: agentKeys.conversations(),
-    queryFn: () => listConversations(userId)
-  });
+  void queryClient
+    .infiniteQuery({
+      ...conversationsQueryOptions(),
+      queryFn: () => listConversations(userId)
+    })
+    .catch((error: unknown) => {
+      console.error('[agent] conversation prefetch failed', error);
+    });
 
   // 根节点必须带 flex-1：dashboard 外壳的 InfobarProvider 用 flex 行包裹页面内容，
   // 缺省会按内容收缩（shrink-to-fit）导致工作区靠左停靠、右侧留大块空白（历史 bug）。

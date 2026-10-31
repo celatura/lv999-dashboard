@@ -6,10 +6,13 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   gt,
   ilike,
   inArray,
-  isNotNull,
+  isNull,
+  lt,
+  or,
   sql,
   type SQL
 } from 'drizzle-orm';
@@ -18,6 +21,7 @@ import { getDb } from '@/lib/db';
 import { assets, conversations, messages } from '@/lib/db/schema';
 import { assetObjectKey, getOssServerClient, putObject } from '@/lib/oss';
 import { DEFAULT_CONVERSATION_TITLE, buildConversationTitle } from '../constants/conversation';
+import { CONVERSATIONS_PAGE_SIZE, type ConversationCursor } from '../lib/conversation-pagination';
 import type {
   Asset,
   AssetDetail,
@@ -124,31 +128,50 @@ function toAsset(row: AssetMetaRow): Asset {
 // Conversations
 // ---------------------------------------------------------------------------
 
-/**
- * 会话列表 + 每会话资产数：列表与分组计数互不依赖，并行查询；
- * 计数只统计仍挂在会话下的资产（conversationId 非空），一次 group by 拿全。
- */
-export async function listConversations(userId: string): Promise<ConversationsResponse> {
+export async function listConversations(
+  userId: string,
+  cursor: ConversationCursor | null = null
+): Promise<ConversationsResponse> {
   const db = getDb();
-  const [rows, countRows] = await Promise.all([
-    db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.userId, userId))
-      .orderBy(desc(conversations.updatedAt))
-      .limit(50),
-    db
-      .select({ conversationId: assets.conversationId, total: count() })
-      .from(assets)
-      .where(and(eq(assets.userId, userId), isNotNull(assets.conversationId)))
-      .groupBy(assets.conversationId)
-  ]);
+  const cursorTimestamp = cursor ? sql`${cursor.createdAt}::timestamptz` : undefined;
+  const rows = await db
+    .select({
+      ...getTableColumns(conversations),
+      cursorCreatedAt: sql<string>`to_char(${conversations.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        cursor && cursorTimestamp
+          ? or(
+              lt(conversations.createdAt, cursorTimestamp),
+              and(eq(conversations.createdAt, cursorTimestamp), lt(conversations.id, cursor.id))
+            )
+          : undefined
+      )
+    )
+    .orderBy(desc(conversations.createdAt), desc(conversations.id))
+    .limit(CONVERSATIONS_PAGE_SIZE + 1);
+  const items = rows.slice(0, CONVERSATIONS_PAGE_SIZE);
+  const ids = items.map((item) => item.id);
+  const countRows =
+    ids.length === 0
+      ? []
+      : await db
+          .select({ conversationId: assets.conversationId, total: count() })
+          .from(assets)
+          .where(and(eq(assets.userId, userId), inArray(assets.conversationId, ids)))
+          .groupBy(assets.conversationId);
 
   const assetCounts: Record<string, number> = {};
   for (const row of countRows) {
     if (row.conversationId) assetCounts[row.conversationId] = Number(row.total);
   }
-  return { conversations: rows.map(toConversation), assetCounts };
+  const last = items.at(-1);
+  const nextCursor =
+    rows.length > CONVERSATIONS_PAGE_SIZE && last ? `${last.cursorCreatedAt}~${last.id}` : null;
+  return { conversations: items.map(toConversation), assetCounts, nextCursor };
 }
 
 /**
@@ -219,13 +242,23 @@ export async function touchConversation(conversationId: string): Promise<void> {
 /** 记录会话当前的活跃可恢复流（刷新后据此重连） */
 export async function setConversationActiveStream(
   conversationId: string,
-  activeStreamId: string
-): Promise<void> {
+  activeStreamId: string,
+  expectedStreamId: string | null
+): Promise<boolean> {
   const db = getDb();
-  await db
+  const rows = await db
     .update(conversations)
     .set({ activeStreamId })
-    .where(eq(conversations.id, conversationId));
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        expectedStreamId === null
+          ? isNull(conversations.activeStreamId)
+          : eq(conversations.activeStreamId, expectedStreamId)
+      )
+    )
+    .returning({ id: conversations.id });
+  return rows.length > 0;
 }
 
 /** 仅在引用仍指向同一流时清除（避免误清掉之后启动的新流） */

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { apiClient } from '@/lib/api-client';
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -18,40 +19,27 @@ import {
 } from '@/components/ui/message-scroller';
 import { createConversationMutation, updateConversationMutation } from '../../api/mutations';
 import { agentKeys } from '../../api/queries';
-import type { Conversation } from '../../api/types';
+import { ASSET_KIND_VALUES, type AssetKind, type Conversation } from '../../api/types';
 import { ConversationDrawer } from '../conversations/conversation-sidebar';
-import { DEFAULT_MODEL, MODEL_UNAVAILABLE_MESSAGES } from '../../constants/models';
-import { buildAssetReferenceText, type ReferencedAsset } from '../../lib/asset-reference';
+import { DEFAULT_MODEL } from '../../constants/models';
+import {
+  buildAssetReferenceText,
+  parseAssetReferenceBlock,
+  type ReferencedAsset
+} from '../../lib/asset-reference';
+import { resolveChatError } from '../../lib/chat-error';
+import { buildStopRequestBody } from '../../lib/stop-request';
+import { refreshConversationPageWithNotice } from '../../lib/refresh-conversations';
 import {
   clearPendingFirstMessage,
   setPendingFirstMessage,
-  takePendingFirstMessage
+  setPendingNewConversationDraft,
+  takePendingFirstMessage,
+  takePendingNewConversationDraft
 } from '../../lib/pending-first-message';
 import { ChatComposer } from './chat-composer';
 import { ChatEmptyState } from './chat-empty-state';
 import { MessageItem } from './message-item';
-import { INSUFFICIENT_CREDITS_MESSAGE } from '@/features/credits/constants/credits';
-
-/**
- * 解析对话流错误文案。
- * DefaultChatTransport 对非 2xx 响应抛 `new Error(await response.text())`，
- * 故 402 时 error.message 为错误信封 JSON 串；解析出 insufficient_credits 映射为余额不足文案。
- * 流内错误（服务端 toUIMessageStream 的 onError）以 errorText 抵达本组件：
- * 模型已下线/不存在这类已是可操作中文的文案直接原样展示，不再退化为通用提示。
- * 注意：下方是「精确匹配」而非模糊匹配 —— 服务端 onError 必须原样返回常量文案
- * （chat/route.ts 已注明），一旦被包装/加前缀就会静默退化，等于放弃可操作性。
- */
-function resolveChatErrorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  if ((MODEL_UNAVAILABLE_MESSAGES as readonly string[]).includes(raw)) return raw;
-  try {
-    const parsed = JSON.parse(raw) as { error?: { code?: string } };
-    if (parsed?.error?.code === 'insufficient_credits') return INSUFFICIENT_CREDITS_MESSAGE;
-  } catch {
-    // 非 JSON（网络错误 / 中断等），走默认文案
-  }
-  return '生成出错了，请重试。';
-}
 
 interface ChatWindowProps {
   conversation?: Conversation;
@@ -70,9 +58,18 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const [initialConversationId] = useState(conversation?.id);
   const conversationIdRef = useRef(conversation?.id);
   const [input, setInput] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [model, setModel] = useState(conversation?.model ?? DEFAULT_MODEL);
   // 会话级技能（专家模式）：与模型选择同构，切换即持久化到会话
   const [skillId, setSkillId] = useState<string | null>(conversation?.activeSkillId ?? null);
+  const settingsRef = useRef({ model, skillId });
+  const [isSyncingSettings, setIsSyncingSettings] = useState(false);
+  const [settingsUnavailable, setSettingsUnavailable] = useState(false);
+  const settingsRequestRef = useRef(false);
+  const stopRequestRef = useRef(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const requestStreamIdRef = useRef<string | null>(conversation?.activeStreamId ?? null);
+  const [stoppedStreamId, setStoppedStreamId] = useState<string | null>(null);
   // 已选定的引用资产：提交时以机器可读块注入文本，让模型确定性地拿到 assetId
   const [referencedAssets, setReferencedAssets] = useState<ReferencedAsset[]>([]);
   const queryClient = useQueryClient();
@@ -81,27 +78,35 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const createConversation = useMutation(createConversationMutation);
   const updateConversation = useMutation(updateConversationMutation);
 
-  const { messages, sendMessage, status, stop, error, regenerate } = useChat({
-    id: initialConversationId,
-    messages: initialMessages,
-    // 官方恢复语义（Resume Streams 官方示例）：仅「服务端已知存在活跃流」才重连，
-    // 不对既有会话无条件重连——新会话「创建 → 导航 → 挂载即发送首条消息」时，
-    // 挂载重连 GET 的 204 分支（SDK 内部 setStatus('ready')）会把 sendMessage
-    // 刚置上的 'submitted' 改回 'ready'，发送按钮要等首个 chunk 才变「停止」。
-    resume: Boolean(conversation?.activeStreamId),
-    transport: new DefaultChatTransport({
-      api: '/api/agent/chat',
-      body: () => ({ conversationId: conversationIdRef.current }),
-      prepareReconnectToStreamRequest: ({ id }) => ({
-        api: `/api/agent/chat/${id}/stream`
-      })
-    }),
-    onFinish: () => {
-      // 分域失效：会话列表（标题/updatedAt 变化）+ 资产列表（聊天中可能新增资产）
-      void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
-      void queryClient.invalidateQueries({ queryKey: agentKeys.assetsRoot() });
-    }
-  });
+  const { messages, sendMessage, status, stop, error, regenerate, clearError, resumeStream } =
+    useChat({
+      id: initialConversationId,
+      messages: initialMessages,
+      // 官方恢复语义（Resume Streams 官方示例）：仅「服务端已知存在活跃流」才重连，
+      // 不对既有会话无条件重连——新会话「创建 → 导航 → 挂载即发送首条消息」时，
+      // 挂载重连 GET 的 204 分支（SDK 内部 setStatus('ready')）会把 sendMessage
+      // 刚置上的 'submitted' 改回 'ready'，发送按钮要等首个 chunk 才变「停止」。
+      resume: Boolean(conversation?.activeStreamId),
+      transport: new DefaultChatTransport({
+        api: '/api/agent/chat',
+        body: () => ({
+          conversationId: conversationIdRef.current,
+          expectedModel: settingsRef.current.model,
+          expectedSkillId: settingsRef.current.skillId,
+          streamId: requestStreamIdRef.current
+        }),
+        prepareReconnectToStreamRequest: ({ id }) => ({
+          api: `/api/agent/chat/${id}/stream`
+        })
+      }),
+      onFinish: () => {
+        // 分域失效：会话列表（标题/updatedAt 变化）+ 资产列表（聊天中可能新增资产）
+        if (conversationIdRef.current) {
+          refreshConversationPageWithNotice(queryClient, conversationIdRef.current);
+        }
+        void queryClient.invalidateQueries({ queryKey: agentKeys.assetsRoot() });
+      }
+    });
 
   // 新会话首页 → 会话页的一次性首条消息交接（真实导航完成后由本页发送）。
   // 回到新会话首页（无 id）时丢弃未消费的交接，避免陈旧消息被误发送。
@@ -115,11 +120,17 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   useEffect(() => {
     if (!initialConversationId) {
       clearPendingFirstMessage();
+      const draft = takePendingNewConversationDraft();
+      if (draft) {
+        setInput(draft.text);
+        setReferencedAssets(draft.references);
+      }
       return;
     }
     const timer = setTimeout(() => {
       const pendingText = takePendingFirstMessage(initialConversationId);
       if (pendingText) {
+        requestStreamIdRef.current = crypto.randomUUID();
         void sendMessage({ text: pendingText });
       }
     }, 0);
@@ -127,11 +138,33 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   }, [initialConversationId, sendMessage]);
 
   const isGenerating = status === 'submitted' || status === 'streaming';
+  const chatError = error ? resolveChatError(error) : null;
+  const controlsDisabled =
+    isSyncingSettings ||
+    settingsUnavailable ||
+    isStopping ||
+    createConversation.isPending ||
+    Boolean(chatError?.isSizeLimit);
+  const lastMessage = messages.at(-1);
+  const assistantMessage = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+  const activeStreamId =
+    (assistantMessage?.metadata as { streamId?: string } | undefined)?.streamId ?? null;
+  const requestStreamId =
+    status === 'streaming'
+      ? (activeStreamId ?? requestStreamIdRef.current)
+      : (requestStreamIdRef.current ?? activeStreamId);
+  const canStop = Boolean(requestStreamId && requestStreamId !== stoppedStreamId);
+
+  useEffect(() => {
+    if (status === 'streaming' && activeStreamId) requestStreamIdRef.current = activeStreamId;
+  }, [status, activeStreamId]);
 
   // 重新生成最后一条回复（regenerate() 无参 = 末尾 assistant 消息）。
   // regenerate 本身是 Chat 实例上的方法（引用恒定），useCallback 只是把这层包装也固定下来：
   // MessageItem 是 memo 化的，回调引用一变就会重渲染全部历史消息（Streamdown 解析贵）。
   const handleRegenerate = useCallback(() => {
+    if (settingsRequestRef.current || stopRequestRef.current) return;
+    requestStreamIdRef.current = crypto.randomUUID();
     void regenerate();
   }, [regenerate]);
 
@@ -148,7 +181,14 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
 
   const handleSubmit = async () => {
     const userText = input.trim();
-    if (!userText || isGenerating || createConversation.isPending) return;
+    if (
+      !userText ||
+      isGenerating ||
+      controlsDisabled ||
+      settingsRequestRef.current ||
+      stopRequestRef.current
+    )
+      return;
     const text = buildAssetReferenceText(referencedAssets, userText);
 
     if (!conversationIdRef.current) {
@@ -169,47 +209,151 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
 
     setInput('');
     setReferencedAssets([]);
-    void sendMessage({ text });
+    requestStreamIdRef.current = crypto.randomUUID();
+    const messageId = editingMessageId ?? undefined;
+    setEditingMessageId(null);
+    void sendMessage({ text, messageId });
   };
 
-  // 停止：先通知服务端取消生产（并保存部分快照），再关闭本地读取。
-  // 流 id 取当前 assistant 消息 metadata 中的值（随流下发、始终为最新）；
-  // SSR 冻结的 conversation prop 在本页生命周期内不会更新，不能用于停止请求——
-  // 否则会与 stop 端点的防误杀守卫冲突导致停止静默失效。
-  // 注意：不要在任何"离开页面/卸载"场景调用 stop 端点——离开属于断开，应保持可恢复。
-  const handleStop = () => {
-    const conversationId = conversationIdRef.current;
-    if (conversationId) {
-      const last = messages.at(-1);
-      const assistantMessage = last?.role === 'assistant' ? last : undefined;
-      const activeStreamId =
-        (assistantMessage?.metadata as { streamId?: string } | undefined)?.streamId ?? null;
-      void fetch(`/api/agent/chat/${conversationId}/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assistantMessage, activeStreamId })
-      }).catch(() => {
-        // 失败静默可接受（服务端会继续生产，与可恢复流设计自洽）；仅避免未处理的 rejection
-      });
+  const recoverFailedDraft = (): {
+    text: string;
+    references: ReferencedAsset[];
+    id: string;
+  } | null => {
+    if (input.trim() || referencedAssets.length > 0) {
+      toast.error('请先保存或清空输入框中的草稿。');
+      return null;
     }
-    stop();
+    const message = messages.toReversed().find((item) => item.role === 'user');
+    const raw = message?.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n\n');
+    if (!message || !raw) {
+      toast.error('无法恢复原始输入，请复制消息后重试。');
+      return null;
+    }
+    const parsed = parseAssetReferenceBlock(raw);
+    const references: ReferencedAsset[] = [];
+    for (const reference of parsed.references) {
+      const kind = ASSET_KIND_VALUES.find((value): value is AssetKind => value === reference.kind);
+      if (!kind) {
+        toast.error('无法恢复引用资产，请复制消息后重试。');
+        return null;
+      }
+      references.push({ id: reference.id, title: reference.title, kind });
+    }
+    return { text: parsed.text, references, id: message.id };
+  };
+
+  const handleEditFailedMessage = () => {
+    const draft = recoverFailedDraft();
+    if (!draft) return;
+    setInput(draft.text);
+    setReferencedAssets(draft.references);
+    setEditingMessageId(draft.id);
+    clearError();
+  };
+
+  const handleNewConversationWithDraft = () => {
+    const draft = recoverFailedDraft();
+    if (!draft) return;
+    setPendingNewConversationDraft(draft.text, draft.references);
+    router.push('/dashboard/agent');
+  };
+
+  const handleStop = async () => {
+    const conversationId = conversationIdRef.current;
+    if (!conversationId || !requestStreamId || stopRequestRef.current) return;
+    stopRequestRef.current = true;
+    setIsStopping(true);
+    try {
+      const snapshot = activeStreamId === requestStreamId ? assistantMessage : undefined;
+      const { body, snapshotIncluded } = buildStopRequestBody(requestStreamId, snapshot);
+      const result = await apiClient<{
+        success: boolean;
+        outcome: 'requested' | 'already_finished' | 'stale';
+      }>(`/agent/chat/${conversationId}/stop`, {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(10_000)
+      });
+      if (
+        !result.success ||
+        (result.outcome !== 'requested' && result.outcome !== 'already_finished')
+      ) {
+        throw new Error('The active stream changed before the stop request.');
+      }
+      if (snapshot && !snapshotIncluded) {
+        toast.warning('消息过大，未能提交本地快照；最终内容以服务端保存结果为准。');
+      }
+      setStoppedStreamId(requestStreamId);
+      await stop();
+      clearError();
+    } catch {
+      toast.error('无法确认是否已停止，生成可能仍在继续。请检查网络后重试。');
+    } finally {
+      stopRequestRef.current = false;
+      setIsStopping(false);
+    }
+  };
+
+  const applySettings = (current: Conversation) => {
+    settingsRef.current = { model: current.model, skillId: current.activeSkillId };
+    setModel(current.model);
+    setSkillId(current.activeSkillId);
+    setSettingsUnavailable(false);
+  };
+
+  const syncSettings = async (values?: { model?: string; activeSkillId?: string | null }) => {
+    const conversationId = conversationIdRef.current;
+    if (!conversationId || settingsRequestRef.current) return false;
+    settingsRequestRef.current = true;
+    setIsSyncingSettings(true);
+    try {
+      if (values) {
+        try {
+          const updated = await updateConversation.mutateAsync({
+            id: conversationId,
+            values,
+            signal: AbortSignal.timeout(10_000)
+          });
+          applySettings(updated);
+          return true;
+        } catch {
+          toast.error('设置保存失败，正在确认当前会话设置。');
+        }
+      }
+      const current = await apiClient<Conversation>(`/agent/conversations/${conversationId}`, {
+        signal: AbortSignal.timeout(10_000)
+      });
+      applySettings(current);
+      return true;
+    } catch {
+      setSettingsUnavailable(true);
+      toast.error('无法确认会话设置，请检查网络后重新同步。');
+      return false;
+    } finally {
+      settingsRequestRef.current = false;
+      setIsSyncingSettings(false);
+    }
   };
 
   const handleModelChange = (next: string) => {
-    setModel(next);
-    const conversationId = conversationIdRef.current;
-    if (conversationId) {
-      updateConversation.mutate({ id: conversationId, values: { model: next } });
+    if (conversationIdRef.current) {
+      void syncSettings({ model: next });
+    } else {
+      settingsRef.current.model = next;
+      setModel(next);
     }
   };
 
-  // 完全仿 handleModelChange：本地立即生效 + 有会话则持久化（null = 清除回通用）；
-  // 新建会话时只更新本地态，随首条消息创建会话时一并带上
   const handleSkillChange = (next: string | null) => {
-    setSkillId(next);
-    const conversationId = conversationIdRef.current;
-    if (conversationId) {
-      updateConversation.mutate({ id: conversationId, values: { activeSkillId: next } });
+    if (conversationIdRef.current) {
+      void syncSettings({ activeSkillId: next });
+    } else {
+      settingsRef.current.skillId = next;
+      setSkillId(next);
     }
   };
 
@@ -249,24 +393,76 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
                         // 仅最后一条 assistant 消息可能含进行中的 tool part；非流式期间视为已停止（AI SDK 中止语义下 part 不落终态）
                         isActive={isGenerating && isLastAssistant}
                         isLastAssistant={isLastAssistant}
-                        onRegenerate={handleRegenerate}
+                        onRegenerate={controlsDisabled ? undefined : handleRegenerate}
                       />
                     </MessageScrollerItem>
                   );
                 })
               )}
-              {error && (
+              {chatError && (
                 <MessageScrollerItem>
                   <div className='border-destructive/40 bg-destructive/5 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm'>
-                    <span className='text-destructive'>{resolveChatErrorMessage(error)}</span>
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      onClick={() => regenerate()}
-                      disabled={isGenerating}
-                    >
-                      重试
-                    </Button>
+                    <span className='text-destructive'>{chatError.message}</span>
+                    {chatError.isSizeLimit ? (
+                      <div className='flex shrink-0 flex-wrap gap-2'>
+                        <Button variant='outline' size='sm' onClick={handleEditFailedMessage}>
+                          编辑输入
+                        </Button>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={handleNewConversationWithDraft}
+                        >
+                          带输入新建会话
+                        </Button>
+                      </div>
+                    ) : chatError.requiresSettingsSync ? (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        disabled={isGenerating || controlsDisabled}
+                        onClick={() => {
+                          void syncSettings().then((synced) => {
+                            if (synced) handleRegenerate();
+                          });
+                        }}
+                        title='重试会再次消耗 Credits，可能再次生成资产'
+                      >
+                        同步并重试
+                      </Button>
+                    ) : chatError.requiresReconnect ? (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        disabled={isGenerating || controlsDisabled}
+                        onClick={() => void resumeStream()}
+                      >
+                        重新连接
+                      </Button>
+                    ) : (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={handleRegenerate}
+                        disabled={isGenerating || controlsDisabled}
+                        title='重试会再次消耗 Credits，可能再次生成资产'
+                      >
+                        重试
+                      </Button>
+                    )}
+                    {!isGenerating &&
+                      canStop &&
+                      !chatError.isSizeLimit &&
+                      !chatError.requiresSettingsSync && (
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          disabled={isStopping}
+                          onClick={() => void handleStop()}
+                        >
+                          停止生成
+                        </Button>
+                      )}
                   </div>
                 </MessageScrollerItem>
               )}
@@ -276,14 +472,31 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         </MessageScroller>
       </MessageScrollerProvider>
 
+      {(isSyncingSettings || settingsUnavailable) && (
+        <div className='text-muted-foreground flex items-center justify-center gap-2 px-4 py-2 text-xs'>
+          {isSyncingSettings ? (
+            <span role='status'>正在同步会话设置…</span>
+          ) : (
+            <>
+              <span role='alert'>无法确认会话设置，发送已暂停。</span>
+              <Button variant='outline' size='sm' onClick={() => void syncSettings()}>
+                重新同步
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       <ChatComposer
         value={input}
         onChange={setInput}
         onSubmit={() => {
           void handleSubmit();
         }}
-        onStop={handleStop}
+        onStop={() => void handleStop()}
         isGenerating={isGenerating}
+        isStopping={isStopping}
+        canStop={canStop}
+        controlsDisabled={controlsDisabled}
         model={model}
         onModelChange={handleModelChange}
         skillId={skillId}

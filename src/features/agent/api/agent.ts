@@ -69,6 +69,7 @@ const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，�
    - 命中多个候选时，列出候选请用户确认，或选最相关的一个并说明依据；findAssets 无命中时如实告知并请用户补充线索
    - 基于文本资产（markdown / html）改写或扩展 → 先 readAsset 取正文，再创作并用 createAsset 存为新资产（不要覆盖原资产）
    - 修改图片资产 → 用 editImageAsset（sourceAssetId 传该图 id），不要试图用 readAsset 的提示词去"重画"一张
+   - 引用图片不会把图片内容传给你；readAsset 返回的仅是可能为空的生成提示词，不代表图片实际内容。不要声称看到了图片或推测商品信息；需要了解图片内容时请用户描述
 6. 知识库（knowledgeSearch，按内容语义检索用户沉淀的资料）：
    - 用户说"我知识库里…""根据我的资料/笔记""基于我沉淀的文档写一版"，或问题必须引用用户自有资料才能作答时，先调 knowledgeSearch（可多次、用不同角度的 query）
    - 只依据返回的片段作答或创作，并说明引用了哪些文档（用 documentTitle 标注来源）

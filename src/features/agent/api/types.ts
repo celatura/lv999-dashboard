@@ -28,6 +28,7 @@ export interface ConversationsResponse {
   conversations: Conversation[];
   /** 会话产出资产数（conversationId → count），供侧边栏 badge 展示；无资产的会话不在表中 */
   assetCounts: Record<string, number>;
+  nextCursor: string | null;
 }
 
 /** 资产类型枚举值（单一来源：Agent 工具的 Zod enum 与展示元数据均以此为准） */

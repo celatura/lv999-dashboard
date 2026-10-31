@@ -106,7 +106,8 @@ export function AssetReferencePicker({
         <DialogHeader>
           <DialogTitle>引用资产</DialogTitle>
           <DialogDescription>
-            选择要让 Agent 复用的作品：图片可基于它继续修改，文案可基于它改写扩写。
+            选择要让 Agent 复用的作品：图片可继续修改，但 Agent 无法直接看到图片内容；
+            文案可用于改写扩写。
           </DialogDescription>
         </DialogHeader>
 
