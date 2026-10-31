@@ -9,7 +9,7 @@ import type {
   KnowledgeSearchResponse
 } from './types';
 
-/** 文档域失效：写操作成功后重查列表（摄取为同步，回来即是终态） */
+/** 文档域失效：写操作结束后重查列表（摄取为同步，回来即是终态；失败也重查以对齐服务端） */
 function invalidateDocuments(): void {
   void getQueryClient().invalidateQueries({ queryKey: knowledgeKeys.documentsRoot() });
 }
@@ -21,7 +21,7 @@ export const createKnowledgeDocumentMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify(data)
     }),
-  onSuccess: invalidateDocuments
+  onSettled: invalidateDocuments
 });
 
 /** 上传文件新增文档：multipart 提交，解析/摄取均在服务端完成（应答与 JSON 创建同构） */
@@ -36,20 +36,20 @@ export const uploadKnowledgeDocumentMutation = mutationOptions({
       body: form
     });
   },
-  onSuccess: invalidateDocuments
+  onSettled: invalidateDocuments
 });
 
 export const deleteKnowledgeDocumentMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<{ success: boolean }>(`/agent/knowledge/documents/${id}`, { method: 'DELETE' }),
-  onSuccess: invalidateDocuments
+  onSettled: invalidateDocuments
 });
 
 /** 重新摄取：failed 文档、或因函数中断卡在 processing 的文档都可重跑（幂等替换片段） */
 export const retryKnowledgeDocumentMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<DocumentIngestResult>(`/agent/knowledge/documents/${id}/retry`, { method: 'POST' }),
-  onSuccess: invalidateDocuments
+  onSettled: invalidateDocuments
 });
 
 /**

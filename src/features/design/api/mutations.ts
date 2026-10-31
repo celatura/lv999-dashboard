@@ -5,6 +5,8 @@ import { agentKeys } from '@/features/agent/api/queries';
 import type { GenerateImageRequest } from '@/features/agent/api/types';
 import type { CreateDesignRequest, UpdateDesignRequest, UploadImageResponse } from './types';
 
+/** 失效统一放 onSettled：失败时服务端也可能已部分生效；组件覆盖 onSuccess 也不会丢掉失效。 */
+
 /** 资产域失效：列表 + 详情（保存后刷新「我的资产」缩略/标题与预览） */
 function invalidateAssets(): void {
   void getQueryClient().invalidateQueries({ queryKey: agentKeys.assetsRoot() });
@@ -17,7 +19,7 @@ export const createDesignMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify(data)
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 export const updateDesignMutation = mutationOptions({
@@ -26,13 +28,13 @@ export const updateDesignMutation = mutationOptions({
       method: 'PATCH',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 /**
  * 本地图片上传（multipart）：服务端存 OSS + 建 source='upload' 资产，返回 { id, width?, height? }。
  * FormData 不设 Content-Type（apiClient 已适配，浏览器自动带 multipart boundary）；
- * 成功后失效资产域（「我的资产」列表出现新上传图）。
+ * 完成后失效资产域（「我的资产」列表出现新上传图）。
  */
 export const uploadImageMutation = mutationOptions({
   mutationFn: ({ file }: { file: File }) => {
@@ -43,12 +45,12 @@ export const uploadImageMutation = mutationOptions({
       body: form
     });
   },
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 /**
  * 画布内 AI 生图（直连 T2I）：POST /api/agent/assets/generate → { id }。
- * 生成耗时 10-60s（端点 maxDuration=300，不提供 abort）；成功后失效资产域，
+ * 生成耗时 10-60s（端点 maxDuration=300，不提供 abort）；完成后失效资产域，
  * 「我的资产」即出现新图（source='agent'、content=prompt）。
  *
  * 画布内 AI 改图（I2I）不在此重复定义：直接复用 agent 域的
@@ -60,5 +62,5 @@ export const aiGenerateImageMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });

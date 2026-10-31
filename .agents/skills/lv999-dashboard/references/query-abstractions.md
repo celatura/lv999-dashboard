@@ -105,7 +105,7 @@ import { getQueryClient } from '@/lib/query-client';
 
 export const createInvoiceMutation = mutationOptions({
   mutationFn: (data: CreateInvoiceInput) => createInvoice(data),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: ['invoices'] });
   }
 });
@@ -113,14 +113,18 @@ export const createInvoiceMutation = mutationOptions({
 export const updateInvoiceMutation = mutationOptions({
   mutationFn: ({ id, ...data }: UpdateInvoiceInput) => updateInvoice(id, data),
   onSuccess: (updated) => {
-    const qc = getQueryClient();
-    qc.setQueryData(invoiceOptions(updated.id).queryKey, updated);
-    qc.invalidateQueries({ queryKey: ['invoices'] });
+    // only a successful write has fresh data to seed
+    getQueryClient().setQueryData(invoiceOptions(updated.id).queryKey, updated);
+  },
+  onSettled: () => {
+    getQueryClient().invalidateQueries({ queryKey: ['invoices'] });
   }
 });
 ```
 
 > **Note on queryClient**: Import `getQueryClient()` directly — do NOT pass `queryClient` as a function argument. The `getQueryClient()` pattern handles both SSR (fresh per request) and client (singleton) correctly.
+
+> **Why invalidation in `onSettled`**: a component that spreads the options and overrides `onSuccess` (a plain object spread) replaces the shared callback; `onSettled` keeps invalidation alive and also re-syncs when a mutation fails after the server partially applied it.
 
 ### Usage
 
@@ -129,7 +133,7 @@ export const updateInvoiceMutation = mutationOptions({
 const mutation = useMutation(createInvoiceMutation);
 mutation.mutate(vars);
 
-// per-call — callbacks run AFTER the mutation-level onSuccess (cache invalidation still runs)
+// per-call — callbacks run in addition to hook-level ones (shared onSettled invalidation still runs)
 mutation.mutate(vars, {
   onError: (err) => toast.error(err.message),
   onSuccess: (data) => {
@@ -146,7 +150,8 @@ mutation.mutate(vars, {
 | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Use `queryOptions()` not custom hooks as the base abstraction | Works everywhere — loaders, server, imperative calls                   |
 | Keep options factories lean — no extra config params          | Best abstractions are not configurable                                 |
-| Add per-call callbacks via `mutate(vars, { ... })`            | Keeps the shared `onSuccess` (cache invalidation) intact               |
+| Add per-call callbacks via `mutate(vars, { ... })`            | Keeps shared callbacks, including the `onSettled` invalidation, intact |
+| Put shared invalidation in `onSettled`, not `onSuccess`       | A component's `onSuccess` spread into `useMutation` would replace it   |
 | Import `getQueryClient()` in mutation files                   | Handles SSR/client correctly without prop drilling                     |
 | Co-locate `queryKey` inside `queryOptions`                    | Typed key reuse in `invalidateQueries`, `setQueryData`, `getQueryData` |
 | Custom hooks are fine — but built ON TOP of `queryOptions`    | Hooks for component convenience, `queryOptions` for sharing config     |

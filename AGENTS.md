@@ -47,8 +47,8 @@ The project follows a feature-based folder structure designed for scalability in
 - TanStack React Query for data fetching, caching, and mutations
 - Server-side prefetching with `HydrationBoundary` + `dehydrate`
 - Client-side `useSuspenseQuery` + nuqs `shallow: true` for tables (no RSC round-trips on pagination/filter)
-- `useMutation` + `invalidateQueries` for form submissions
-- Query client singleton in `src/lib/query-client.ts`
+- `useMutation` for writes; shared `mutationOptions` invalidate in `onSettled`
+- Query client in `src/lib/query-client.ts` (mirrors TanStack's official Next.js example)
 
 ### Authentication & Authorization
 
@@ -451,7 +451,7 @@ const mutation = useMutation(createEntityMutation);
 mutation.mutate(data, { onSuccess: () => toast.success('Created') });
 ```
 
-Callbacks passed to `mutate` / `mutateAsync` run **in addition to** `mutationOptions.onSuccess`; a new `onSuccess` spread into `useMutation` would replace the shared one and skip cache invalidation.
+Callbacks passed to `mutate` / `mutateAsync` run **in addition to** the shared callbacks. Shared invalidation lives in `mutationOptions.onSettled` rather than `onSuccess`, so a component that spreads the options and overrides `onSuccess` / `onError` still refreshes the cache — and a failed mutation still re-syncs in case the server partially applied it. Never override `onSettled` in `useMutation`; pass UI callbacks through `mutate(vars, { ... })` instead.
 
 `mutationOptions` owns the request and cache invalidation:
 
@@ -459,7 +459,7 @@ Callbacks passed to `mutate` / `mutateAsync` run **in addition to** `mutationOpt
 export const createEntityMutation = mutationOptions({
   mutationFn: (data: EntityMutationPayload) =>
     apiClient<{ id: string }>('/entities', { method: 'POST', body: JSON.stringify(data) }),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: entityKeys.all });
   }
 });

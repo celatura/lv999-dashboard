@@ -175,7 +175,7 @@ import type { OrderMutationPayload } from './types';
 export const createOrderMutation = mutationOptions({
   mutationFn: (data: OrderMutationPayload) =>
     apiClient<{ id: string }>('/orders', { method: 'POST', body: JSON.stringify(data) }),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
@@ -183,20 +183,20 @@ export const createOrderMutation = mutationOptions({
 export const updateOrderMutation = mutationOptions({
   mutationFn: ({ id, values }: { id: string; values: OrderMutationPayload }) =>
     apiClient<{ id: string }>(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 
 export const deleteOrderMutation = mutationOptions({
   mutationFn: (id: string) => apiClient<{ ok: true }>(`/orders/${id}`, { method: 'DELETE' }),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 ```
 
-`mutationOptions` is the right abstraction because it works outside React (event handlers, tests, utilities), is passed directly to `useMutation(options)`, and uses `getQueryClient()` which handles both SSR (fresh per request) and client (singleton) correctly. Add UI callbacks per call via `mutate(vars, { onSuccess })` — do NOT spread a new `onSuccess` into `useMutation`, which would replace the shared cache-invalidation callback. See [references/query-abstractions.md](references/query-abstractions.md) for the full rationale.
+`mutationOptions` is the right abstraction because it works outside React (event handlers, tests, utilities), is passed directly to `useMutation(options)`, and uses `getQueryClient()` which handles both SSR (fresh per request) and client (singleton) correctly. Add UI callbacks per call via `mutate(vars, { onSuccess })`. Shared invalidation lives in `mutationOptions.onSettled`, so a component that spreads the options and overrides `onSuccess` / `onError` still refreshes the cache — never override `onSettled` in `useMutation`. See [references/query-abstractions.md](references/query-abstractions.md) for the full rationale.
 
 ### Step 3: Zod Schema (`src/features/<name>/schemas/<name>.ts`)
 
@@ -500,7 +500,7 @@ The full pattern is shown in Steps 1-4 above. The key structure:
 
 1. **Schema** — Zod schema + inferred type in `schemas/<name>.ts`
 2. **Form component** — `useAppForm({ defaultValues, validators: { onSubmit: schema }, onSubmit })` + `useFormFields<T>()` for typed fields
-3. **Mutations** — `useMutation(createOrderMutation)` from `api/mutations.ts`; add UI callbacks per call: `mutate(value, { onSuccess: () => { toast(); router.push() } })` — spreading a new `onSuccess` into `useMutation` would replace the shared cache invalidation
+3. **Mutations** — `useMutation(createOrderMutation)` from `api/mutations.ts`; shared invalidation lives in `mutationOptions.onSettled`, so add UI callbacks per call: `mutate(value, { onSuccess: () => { toast(); router.push() } })` — never override the shared `onSettled` in `useMutation`
 4. **View page** — client component that checks `id === 'new'` for create vs `useSuspenseQuery(byIdOptions)` for edit
 
 ### Sheet Form (Inline create/edit in a side panel)
@@ -594,12 +594,12 @@ The pattern is: server prefetch → HydrationBoundary → client useSuspenseQuer
 export const createOrderMutation = mutationOptions({
   mutationFn: (data: OrderMutationPayload) =>
     apiClient<{ id: string }>('/orders', { method: 'POST', body: JSON.stringify(data) }),
-  onSuccess: () => {
+  onSettled: () => {
     getQueryClient().invalidateQueries({ queryKey: orderKeys.all });
   }
 });
 
-// In component — callbacks on mutate() run in addition to mutationOptions.onSuccess
+// In component — callbacks on mutate() run in addition to the shared onSettled invalidation
 const mutation = useMutation(createOrderMutation);
 mutation.mutate(data, { onSuccess: () => toast.success('Created') });
 ```

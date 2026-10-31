@@ -8,6 +8,8 @@ import type { AdjustCreditsRequest, AdjustCreditsResult, DeleteUserResult } from
 /**
  * 调 Credits / 删用户（管理员写操作）。
  * 均在服务端 `/api/admin/*` 完成 isAdmin 校验与业务处理，客户端仅触发 + 失效缓存。
+ *
+ * 失效统一放 onSettled：失败时服务端也可能已部分生效；组件覆盖 onSuccess 也不会丢掉失效。
  */
 
 /** 调 Credits 影响：admin 用户列表余额列 + 当前登录者自身的 credits 缓存（若调的是自己）→ 两域都失效 */
@@ -22,14 +24,14 @@ export const adjustCreditsMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateAfterCreditsChange
+  onSettled: invalidateAfterCreditsChange
 });
 
-/** 删除用户：成功后失效列表（余额合并随之刷新） */
+/** 删除用户：结束后失效列表（余额合并随之刷新） */
 export const deleteUserMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<DeleteUserResult>(`/admin/users/${id}`, { method: 'DELETE' }),
-  onSuccess: () => {
+  onSettled: () => {
     void getQueryClient().invalidateQueries({ queryKey: adminKeys.usersRoot() });
   }
 });

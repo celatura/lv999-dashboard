@@ -10,6 +10,8 @@ import type {
   UpdateConversationPayload
 } from './types';
 
+/** 失效统一放 onSettled：失败时服务端也可能已部分生效；组件覆盖 onSuccess 也不会丢掉失效。 */
+
 /** 会话域失效：仅会话列表（标题/时间戳）变化，不连带资产查询 */
 function invalidateConversations(): void {
   void getQueryClient().invalidateQueries({ queryKey: agentKeys.conversations() });
@@ -32,7 +34,7 @@ export const createConversationMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify(data)
     }),
-  onSuccess: invalidateConversations
+  onSettled: invalidateConversations
 });
 
 export const updateConversationMutation = mutationOptions({
@@ -41,29 +43,29 @@ export const updateConversationMutation = mutationOptions({
       method: 'PATCH',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateConversations
+  onSettled: invalidateConversations
 });
 
 export const deleteConversationMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<{ success: boolean }>(`/agent/conversations/${id}`, { method: 'DELETE' }),
-  onSuccess: invalidateConversations
+  onSettled: invalidateConversations
 });
 
 export const deleteAssetMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<{ success: boolean }>(`/agent/assets/${id}`, { method: 'DELETE' }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
-/** 图片「继续修改」（直连 I2I）：生成可能耗时 10-60s，成功后失效资产列表/详情 */
+/** 图片「继续修改」（直连 I2I）：生成可能耗时 10-60s，完成后失效资产列表/详情 */
 export const editImageAssetMutation = mutationOptions({
   mutationFn: ({ id, values }: { id: string; values: EditImageRequest }) =>
     apiClient<{ id: string }>(`/agent/assets/${id}/edit`, {
       method: 'POST',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 /** 收藏/取消收藏（任意 kind） */
@@ -73,7 +75,7 @@ export const setAssetFavoriteMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify({ favorite })
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 /** 批量删除（单次上限 100 个；服务端逐个校验归属并清理 OSS 对象） */
@@ -83,14 +85,14 @@ export const batchDeleteAssetsMutation = mutationOptions({
       method: 'POST',
       body: JSON.stringify({ ids })
     }),
-  onSuccess: invalidateAssets
+  onSettled: invalidateAssets
 });
 
 /** 创建自定义技能 */
 export const createSkillMutation = mutationOptions({
   mutationFn: (data: SkillMutationPayload) =>
     apiClient<{ id: string }>('/agent/skills', { method: 'POST', body: JSON.stringify(data) }),
-  onSuccess: invalidateSkills
+  onSettled: invalidateSkills
 });
 
 /** 更新自定义技能（仅 uuid + 归属；预置只读） */
@@ -100,7 +102,7 @@ export const updateSkillMutation = mutationOptions({
       method: 'PATCH',
       body: JSON.stringify(values)
     }),
-  onSuccess: invalidateSkills
+  onSettled: invalidateSkills
 });
 
 /**
@@ -110,7 +112,7 @@ export const updateSkillMutation = mutationOptions({
 export const deleteSkillMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<{ success: boolean }>(`/agent/skills/${id}`, { method: 'DELETE' }),
-  onSuccess: () => {
+  onSettled: () => {
     invalidateSkills();
     invalidateConversations();
   }
