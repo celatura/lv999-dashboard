@@ -10,7 +10,7 @@ LV999 Dashboard 的可视化创作模块：一个 Canva/Figma 式的**设计画�
 
 - **入口**：`/dashboard/design`（新建空白画布）与 `/dashboard/design/[id]`（打开已存设计）；产出在 `/dashboard/assets`（我的资产）统一管理，行操作有「编辑」直达编辑器。
 - **技术形态**：react-konva 纯客户端组件，经 `next/dynamic({ ssr: false })` 挂载（canvas 无法 SSR），**不走**项目的 SSR+Suspense 数据范式。
-- **能力**：加文字 / 矩形 / 圆 / 图片（从资产选 **或本地上传**）、**画布内 AI 生图（工具栏）/ AI 改图（属性面板，替换当前对象或作为新对象插入）**、**对话内一句话生成整版（`composeDesign` 产出直接在本画布打开）**、选中/移动/缩放/旋转、**多选（Shift 点选）**、**复制粘贴（Ctrl+C/V/D）**、**拖拽吸附对齐 + 参考线**、删除、图层前后、批量对齐、**文字水平对齐（左/中/右，需换行宽度）**、撤销重做、缩放平移、文字 overlay 编辑（中文 IME 安全）、属性面板（单选编辑 / 多选批量）、保存 / 打开 / 导出 PNG / 回存资产。
+- **能力**：加文字 / 矩形 / 圆 / 图片（从资产选 **或本地上传**）、**画布内 AI 生图（工具栏）/ AI 改图（属性面板，替换当前对象或作为新对象插入）**、**对话内一句话生成整版（`composeDesign` 产出直接在本画布打开）**、选中/移动/缩放/旋转、**多选（Shift 点选）**、**复制粘贴（Ctrl+C/V/D）**、**拖拽吸附对齐 + 参考线**、删除、图层前后、批量对齐、**文字水平对齐（左/中/右，需换行宽度）**、**加粗/斜体、换行宽度、矩形圆角（属性面板）**、撤销重做、缩放平移、文字 overlay 编辑（中文 IME 安全）、属性面板（单选编辑 / 多选批量）、保存 / 打开 / 导出 PNG / 回存资产。
 
 **核心设计原则（Konva 官方铁律）**：Konva 节点只是交互层，文档是独立的可序列化纯数据；拖拽/变换只在**操作结束**（`onDragEnd`/`onTransformEnd`）提交回 React；图片对象只存**资产引用 `assetId`**，不存图片字节。
 
@@ -57,6 +57,7 @@ DesignObject（按 type 判别联合）：
 - `objects` 上限 `MAX_DOCUMENT_OBJECTS = 500`（防御性；请求体另有 4MB 上限）。
 - image 对象只存 `assetId`；渲染时经 `/raw` 同源代理解析为图片（见第 5 节）。
 - text 对象的 `align`（`'left'|'center'|'right'`，默认 `'left'`）对应 Konva Text 的 `align`，**仅在设了换行宽度 `width` 时可见生效**；overlay 编辑态同步为 `text-align`。为可选 + 带默认值，**旧文档无该字段仍合法（无 DB 迁移）**；AI 整版产出的标题/副标题均带 `width`，因此居中标题可直接生效。
+- **schema 只允许增量演进**：新增字段必须输入可选（`.default(x)` 或 `.optional()` 二者其一，无需叠加），旧文档零迁移仍合法；**禁止删字段/改类型/收紧校验**——`parseDesignDocument` 对解析失败**静默回退空白文档**，收紧校验等于无声清空用户已存设计（确需不兼容变更时升 `version: 2` 并同时提交 v1→v2 迁移函数，改后需用真实旧文档 JSON 回放验证）。
 
 ---
 
@@ -106,18 +107,18 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 - `lib/snap.ts`：`computeSnap`（移动框的 left/center-x/right × top/center-y/bottom 对齐到其他对象 + 画布，阈值内取最近，返回吸附坐标 + 参考线）/ `snapThreshold`（屏幕px / zoom）/ `sameGuides`（避免拖拽中频繁 setState）。纯函数无 Konva 依赖。
 - `lib/layouts.ts`：**版式模板（服务端纯函数，无 Konva / 无 IO，不进客户端 bundle）**——见 6.1。
 - `lib/export.ts`：`exportStageToDataURL` —— 导出前隐藏 Transformer、临时把相机归一并将 Stage 尺寸设为文档尺寸，`pixelRatio` 按最长边上限折算（默认 maxDimension 2560）。**`maxPixelRatio` 默认 1（只缩不放）**：上采样不增细节只增体积，且保存用预览 PNG 同时是「我的资产」的**下载产物**（`sizeBytes` 口径 = 下载体积），缩边会让下载图小于画布。`exportPreviewBase64` 按 `maxDimension 1920 × pixelRatio 1` 导出并校验是否落在 `PREVIEW_BASE64_BUDGET`（3MB base64 ≈ 2.25MB PNG，留出文档 JSON 与 4MB 请求体余量）内，**超预算则返回 undefined 丢预览保文档**（带超限载荷必撞 413、整次保存含文档都存不下；不传 previewPng 只是本次不刷新预览，下次保存再试）——**5 个预设画布均 1:1 原尺寸导出**（1920×1080 不再是 1280×720）；当前 UI 只提供预设尺寸（最长边 ≤1920），1920 上限是为未来自定义尺寸预留的缩边兜底（届时如需体积降级再恢复降档阶梯）。工具栏「导出」同口径（2560 上限、不上采样）。
-- `constants/canvas.ts`：画布尺寸预设 `CANVAS_PRESETS`、默认画布、填充色 `FILL_SWATCHES`、字号预设、缩放范围、`createEmptyDocument()`。
+- `constants/canvas.ts`：画布尺寸预设 `CANVAS_PRESETS`、默认画布、填充色 `FILL_SWATCHES`、字号预设、圆角预设 `CORNER_RADIUS_PRESETS`、换行宽度预设 `TEXT_WRAP_WIDTH_PRESETS`、缩放范围、`createEmptyDocument()`。
 - 组件：
   - `design-editor-island.tsx`（`next/dynamic(ssr:false)` 包装，客户端边界）、`design-editor.tsx`（根组件：Provider + 布局）
   - `editor-canvas.tsx`：**共享 Transformer 单例**（canvas 层）+ `shapeRegistry`(id→Konva.Shape) + `registerShape` 回调；`selectedIds`/`objects`/`editingTextId` 变化时 `transformer.nodes(选中节点)` + batchDraw（文字编辑态 nodes=[])；拖拽三段（Start 预计算 groupBox/otherBoxes/canvasBox → Move `computeSnap` 修正节点位置 + setGuides → End 提交吸附后坐标）；多选拖选中项整体移动；`onTransformEnd` 逐节点 `foldScale` 折算回尺寸一次 commit；参考线 `Line`（listening=false，strokeWidth/dash 随 zoom 归一，拖拽结束清空，不入导出）。
   - `editable-object.tsx`：按 type 渲染 + 主 shape 设 `id={object.id}` + ref 回调 `registerShape` 上报节点；**不再内置 Transformer**（移至 canvas 层共享）；onClick 带 `shiftKey` → toggleSelect；onDragStart/Move/End 委托 canvas；`memo` 化。
   - `editor-toolbar.tsx`：加图形/文字/图片、**AI 生成图片**（`Icons.sparkles` → `AiGenerateDialog`）、**复制/粘贴**（`Icons.copy`/`Icons.clipboard`，disabled 依选中/剪贴板）、撤销重做、缩放、保存、导出。
-  - `properties-panel.tsx`：单选 → 对象属性编辑（**单选 image 时额外给「AI 修改」按钮** → `AiEditDialog`，面板以对象 id 为 key，切换选中即重建并重置弹层状态；**单选带换行宽度的 text 时给「对齐」左/中/右**）；**多选 → 「已选 N 个」+ 批量删除/图层/对齐**（左中右·上中下，以选区 unionBox 为基准）；图层镜像列表支持 Shift 多选。
+  - `properties-panel.tsx`：单选 → 对象属性编辑（填充色 / 字号 / **加粗·斜体（fontStyle 标记切换）** / **换行宽度（360/540/720/不限——清除 width 的补丁为 `width: undefined`，JSON.stringify 天然丢键、schema 可选仍合法；对齐组随设宽出现）** / **矩形圆角预设（0/8/12/24/48，含新建默认值 12）**；**单选 image 时额外给「AI 修改」按钮** → `AiEditDialog`（换图只走这条 AI 路径，**不提供「从资产库替换」独立入口**——已决策不做：`imageReplacePatch` 仅服务 AI 改图，手动换图走删除重插）；面板以对象 id 为 key，切换选中即重建并重置弹层状态；**单选带换行宽度的 text 时给「对齐」左/中/右**）；**多选 → 「已选 N 个」+ 批量删除/图层/对齐**（左中右·上中下，以选区 unionBox 为基准）；图层镜像列表支持 Shift 多选。
   - `ai-generate-dialog.tsx`：**画布内 AI 生图**——prompt textarea（必填 1-2000 + 计数）+ 比例 Select（`ASPECT_KEYS`，默认自动）→ `aiGenerateImageMutation` → `loadNaturalSize` → `insertImage`（等比居中插入并选中）+ toast + 失效资产域。
   - `ai-edit-dialog.tsx`：**画布内 AI 改图**——instruction textarea（必填 1-2000）+ 可选比例 + **结果处置 RadioGroup**（「替换当前对象」默认 / 「作为新对象插入」）→ agent 域 `editImageAssetMutation`（以对象 `assetId` 为源，血缘由端点记录）→ `loadNaturalSize` → 替换走 `commitObject(id, imageReplacePatch(...))`、新增走 `insertImage`。
   - 两个 AI 对话框共同约束：生成中（10-60s）**锁定弹层**（spinner + 「请勿关闭」提示、禁重复提交、禁关闭、禁改输入，MVP 不提供 abort）；失败**保留输入**并就地（`role='alert'`）+ toast 展示中文错误（`resolveAiImageError`）；每次打开重置草稿。
   - `asset-image-picker.tsx`：从「我的资产」image 选图 **+ 顶部「上传本地图片」区**（FileUploader accept image/png·jpeg·webp、10MB → `uploadImageMutation` → 拿 `{id,width,height}` → `insertImage` 居中插入 + 关弹窗 + 失效资产列表）。网格缩略图走 `assetThumbUrl()`（本弹窗一次列 60 张，不拉原图）；`onLoad` 记的 `naturalWidth/Height` 仅用于取宽高比，因此缩放安全（详见第 5 节）。
-  - `text-overlay.tsx`（双击文字 → 覆盖原生 `<textarea>` 编辑、失焦提交；保证中文 IME）
+  - `text-overlay.tsx`（双击文字 → 覆盖原生 `<textarea>` 编辑、失焦提交；保证中文 IME。**Konva fontStyle 标记串必须拆成 CSS `fontStyle` + `fontWeight` 两个属性**：`font-style` 只接受 normal/italic/oblique，直接塞 `'bold'` / `'bold italic'` 会被浏览器整条丢弃，而编辑态 Konva Text 是 `visible=false`（只剩 textarea），粗体会当场“变细”；自由文字的单行宽度估算系数也按粗体上调（0.6 → 0.66）以贴近 Konva 折行点）
 
 ### 6.1 一句话生成整版设计（Agent 工具 `composeDesign`）
 
@@ -166,7 +167,7 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 ## 9. 手动验收清单
 
-新建 → 拖拽/缩放/旋转 → 加资产图片 → **上传本地图片（PNG/JPEG/WebP→插入画布 + 资产列表现「上传」来源）** → **工具栏「AI 生成图片」：填 prompt + 选比例 → 生成中 spinner/禁重复提交/禁关闭 → 图插入画布（等比居中选中）+「我的资产」新增 image（content=prompt）+ Credits 扣 image 档（流水 meta 记 assetId）；余额 0 → 402 文案且无上游调用；审核拒绝 → 中文错误 + 不扣费** → **选中 image → 属性面板「AI 修改」：填指令 →「替换」后对象 assetId 变为新资产（位置保持、不变形、**undo 一步回退替换**）；「新增」则多一个对象；新资产 `sourceAssetId` 指向源；Credits 扣 image 档（edit=true）** → **Shift 多选多个对象→整体拖动/删除/对齐** → **Ctrl+C/V 复制粘贴、Ctrl+D 快速复制（新 id + 偏移）** → **拖动吸附到其他对象边缘/中心与画布中线（蓝色参考线，松手即对齐）** → **旋转 45°/90° 的矩形/图片拖到另一对象左侧：参考线贴旋转后最左沿、松手后视觉边齐平；多选含旋转对象做左/右/顶/底对齐：视觉边齐平（非按旋转前原点）** → 改文字（中文输入法）→ **选中标题改对齐（左/中/右，仅带换行宽度的文字展示该组）** → 撤销重做（批量操作一步回退）→ 保存 → 在「我的资产」见 design 预览 → 点「编辑」重新打开 → 导出 PNG。
+新建 → 拖拽/缩放/旋转 → 加资产图片 → **上传本地图片（PNG/JPEG/WebP→插入画布 + 资产列表现「上传」来源）** → **工具栏「AI 生成图片」：填 prompt + 选比例 → 生成中 spinner/禁重复提交/禁关闭 → 图插入画布（等比居中选中）+「我的资产」新增 image（content=prompt）+ Credits 扣 image 档（流水 meta 记 assetId）；余额 0 → 402 文案且无上游调用；审核拒绝 → 中文错误 + 不扣费** → **选中 image → 属性面板「AI 修改」：填指令 →「替换」后对象 assetId 变为新资产（位置保持、不变形、**undo 一步回退替换**）；「新增」则多一个对象；新资产 `sourceAssetId` 指向源；Credits 扣 image 档（edit=true）** → **Shift 多选多个对象→整体拖动/删除/对齐** → **Ctrl+C/V 复制粘贴、Ctrl+D 快速复制（新 id + 偏移）** → **拖动吸附到其他对象边缘/中心与画布中线（蓝色参考线，松手即对齐）** → **旋转 45°/90° 的矩形/图片拖到另一对象左侧：参考线贴旋转后最左沿、松手后视觉边齐平；多选含旋转对象做左/右/顶/底对齐：视觉边齐平（非按旋转前原点）** → 改文字（中文输入法）→ **选中文字切「加粗/斜体」（可叠加为 bold italic，再点取消）；加粗后双击进入编辑态，textarea 里的文字仍应为粗体（不变细），失焦后与编辑态粗细一致；设「换行宽度」360/540/720 后长文案自动折行且「对齐」组出现，点「不限」回到自由文字且对齐组隐藏（保存重开后仍一致）** → **选中矩形切「圆角」0/8/12/24/48（新建矩形默认 12 应高亮）** → **选中标题改对齐（左/中/右，仅带换行宽度的文字展示该组）** → 撤销重做（批量操作一步回退）→ 保存 → 在「我的资产」见 design 预览 → 点「编辑」重新打开 → 导出 PNG。
 
 **AI 整版（对话入口）**：对话说「做一张 3:4 小红书封面，主题是秋日漫步，标题《杭州秋日漫步》，副标题『周末去哪儿』」→ 工具 loading（含文生图 20-70s）→ 对话现 design 卡片 → 点「打开编辑」进画布：主图不变形、标题居中且有字号层次、无越界/乱排；**3 种版式各试一次**（`top-image` / `full-image-bar` / `left-image`），横版 `aspect` 试 `left-image`、竖版试 `left-image` 应退化为上图下文；Credits 只扣 image 档（流水详情为「图片生成（整版设计主图）」）、design 不额外扣；余额 0 → 中文余额不足且无上游调用；该 design 在资产列表为虚线占位 + 「AI 整版 · 打开编辑生成预览」，画布保存后缩略图出现、`sizeBytes` 更正为 PNG 体积、**下载到的 PNG 尺寸 = 画布尺寸**（1920×1080 画布不得出现 1280×720 这种缩边）。
 

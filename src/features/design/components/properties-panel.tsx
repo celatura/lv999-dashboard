@@ -6,7 +6,13 @@ import { Separator } from '@/components/ui/separator';
 import { Icons, type Icon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { DesignObject, DesignObjectType, TextAlign } from '../api/types';
-import { CANVAS_PRESETS, FILL_SWATCHES, FONT_SIZE_PRESETS } from '../constants/canvas';
+import {
+  CANVAS_PRESETS,
+  CORNER_RADIUS_PRESETS,
+  FILL_SWATCHES,
+  FONT_SIZE_PRESETS,
+  TEXT_WRAP_WIDTH_PRESETS
+} from '../constants/canvas';
 import type { ObjectPatch, ObjectPatchEntry } from '../hooks/use-editor-reducer';
 import { objectBounds, unionBox } from '../lib/document';
 import { useEditor } from '../lib/editor-context';
@@ -37,6 +43,20 @@ const TEXT_ALIGN_OPTIONS: { value: TextAlign; label: string }[] = [
   { value: 'center', label: '中' },
   { value: 'right', label: '右' }
 ];
+
+/**
+ * 切换 Konva fontStyle 字符串中的粗体/斜体标记。
+ * fontStyle 取值：'normal' | 'bold' | 'italic' | 'bold italic'（schema 为 string + 默认 normal）。
+ */
+function toggleFontStyle(current: string, token: 'bold' | 'italic'): string {
+  const parts = current.split(/\s+/).filter(Boolean);
+  const has = parts.includes(token);
+  const next = new Set(parts);
+  if (has) next.delete(token);
+  else next.add(token);
+  const ordered = ['bold', 'italic'].filter((item) => next.has(item));
+  return ordered.length > 0 ? ordered.join(' ') : 'normal';
+}
 
 function Swatches({
   value,
@@ -119,6 +139,26 @@ function ObjectProperties({ object }: { object: DesignObject }) {
         </div>
       )}
 
+      {object.type === 'rect' && (
+        <div className='space-y-1.5'>
+          <span className='text-muted-foreground text-xs'>圆角</span>
+          <div className='flex flex-wrap gap-1.5' role='group' aria-label='矩形圆角'>
+            {CORNER_RADIUS_PRESETS.map((radius) => (
+              <Button
+                key={radius}
+                variant={object.cornerRadius === radius ? 'secondary' : 'outline'}
+                size='xs'
+                aria-label={`圆角 ${radius}`}
+                aria-pressed={object.cornerRadius === radius}
+                onClick={() => commitObject(object.id, { cornerRadius: radius })}
+              >
+                {radius}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {object.type === 'text' && (
         <div className='space-y-1.5'>
           <span className='text-muted-foreground text-xs'>字号</span>
@@ -133,6 +173,71 @@ function ObjectProperties({ object }: { object: DesignObject }) {
                 {size}
               </Button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {object.type === 'text' && (
+        <div className='space-y-1.5'>
+          <span className='text-muted-foreground text-xs'>样式</span>
+          <div className='flex gap-1.5' role='group' aria-label='字体样式'>
+            <Button
+              variant={object.fontStyle.includes('bold') ? 'secondary' : 'outline'}
+              size='sm'
+              className='font-bold'
+              aria-label='加粗'
+              aria-pressed={object.fontStyle.includes('bold')}
+              title='加粗'
+              onClick={() =>
+                commitObject(object.id, { fontStyle: toggleFontStyle(object.fontStyle, 'bold') })
+              }
+            >
+              B
+            </Button>
+            <Button
+              variant={object.fontStyle.includes('italic') ? 'secondary' : 'outline'}
+              size='sm'
+              className='italic'
+              aria-label='斜体'
+              aria-pressed={object.fontStyle.includes('italic')}
+              title='斜体'
+              onClick={() =>
+                commitObject(object.id, { fontStyle: toggleFontStyle(object.fontStyle, 'italic') })
+              }
+            >
+              I
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {object.type === 'text' && (
+        <div className='space-y-1.5'>
+          <span className='text-muted-foreground text-xs'>换行宽度</span>
+          <div className='flex flex-wrap gap-1.5' role='group' aria-label='换行宽度'>
+            {TEXT_WRAP_WIDTH_PRESETS.map((size) => (
+              <Button
+                key={size}
+                variant={object.width === size ? 'secondary' : 'outline'}
+                size='xs'
+                aria-label={`换行宽度 ${size}`}
+                aria-pressed={object.width === size}
+                title={`文字在 ${size}px 处自动换行，对齐随之生效`}
+                onClick={() => commitObject(object.id, { width: size })}
+              >
+                {size}
+              </Button>
+            ))}
+            <Button
+              variant={object.width === undefined ? 'secondary' : 'outline'}
+              size='xs'
+              aria-label='不限换行宽度'
+              aria-pressed={object.width === undefined}
+              title='不限：文字不换行（对齐不生效）'
+              onClick={() => commitObject(object.id, { width: undefined })}
+            >
+              不限
+            </Button>
           </div>
         </div>
       )}
@@ -383,7 +488,12 @@ export function PropertiesPanel() {
   }
   return (
     <div className='flex h-full min-h-0 flex-col'>
-      <div className='shrink-0 p-3'>{body}</div>
+      {/*
+        属性区限高 65% + 内部滚动：单选文字时有 7 组控件（填充/字号/样式/换行宽度/对齐/层级），
+        笔记本屏幕上会超出 aside 可用高度；若不限高（shrink-0 且无 overflow），
+        溢出部分会被裁切且无法滚动到，同时图层列表（flex-1）被挤压至 0。
+      */}
+      <div className='max-h-[65%] min-h-0 shrink-0 overflow-y-auto p-3'>{body}</div>
       <Separator />
       <LayersList />
     </div>

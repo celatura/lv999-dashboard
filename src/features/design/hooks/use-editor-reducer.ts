@@ -26,7 +26,11 @@ export type ObjectPatch = Partial<{
   /** 文字水平对齐（仅 text 对象有意义；配合换行宽度 width 生效） */
   align: TextAlign;
   cornerRadius: number;
-  width: number;
+  /**
+   * 文字换行宽度（仅 text 对象有意义）；显式传 undefined 表示「清除」——
+   * spread 后键值为 undefined，JSON.stringify 落库时天然丢键，schema 的 optional 仍合法
+   */
+  width?: number | undefined;
   height: number;
   radius: number;
   text: string;

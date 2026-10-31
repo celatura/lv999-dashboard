@@ -66,11 +66,17 @@ function TextOverlayInput({ object, zoom, position, onCommit }: TextOverlayInput
   const screenX = object.x * zoom + position.x;
   const screenY = object.y * zoom + position.y;
   const fontSize = object.fontSize * zoom;
-  // 无固定换行宽度时，按最长行粗略估算单行宽度，避免过早折行
+  // Konva fontStyle 是空格分隔的标记串（'bold' / 'italic' / 'bold italic'），
+  // 而 CSS font-style 只接受 normal/italic/oblique——必须拆成 fontStyle + fontWeight 两个属性，
+  // 否则粗体标记被浏览器整条丢弃，编辑态（Konva Text 此时 visible=false）会“变细”，破坏 WYSIWYG
+  const styleTokens = object.fontStyle.split(/\s+/);
+  const isBold = styleTokens.includes('bold');
+  const isItalic = styleTokens.includes('italic');
+  // 无固定换行宽度时，按最长行粗略估算单行宽度，避免过早折行（粗体字形更宽，系数上调）
   const longestLine = draft.split('\n').reduce((max, line) => Math.max(max, line.length), 1);
   const width = object.width
     ? object.width * zoom
-    : Math.max(120, longestLine * fontSize * 0.6 + fontSize);
+    : Math.max(120, longestLine * fontSize * (isBold ? 0.66 : 0.6) + fontSize);
 
   return (
     <textarea
@@ -101,7 +107,8 @@ function TextOverlayInput({ object, zoom, position, onCommit }: TextOverlayInput
         fontSize,
         lineHeight: 1,
         fontFamily: TEXT_FONT_FAMILY,
-        fontStyle: object.fontStyle,
+        fontStyle: isItalic ? 'italic' : 'normal',
+        fontWeight: isBold ? 'bold' : 'normal',
         // 与 Konva Text 的 align 同步（枚举值与 CSS text-align 同名），保证编辑态所见即所得
         textAlign: object.align,
         color: object.fill,

@@ -39,6 +39,16 @@ export const FILL_SWATCHES = [
 /** 字号预设（属性面板快捷选择） */
 export const FONT_SIZE_PRESETS = [16, 24, 32, 48, 64, 96];
 
+/** 矩形圆角预设（属性面板快捷选择）；含新建矩形的默认值 12，保证预设组总有高亮态 */
+export const CORNER_RADIUS_PRESETS = [0, 8, 12, 24, 48];
+
+/**
+ * 文字换行宽度预设（文档坐标 px）：设了 width 文字才自动换行，
+ * 对齐（align）也仅在带 width 时可见生效；「不限」清除 width 回到自由文字。
+ * 档位按最小预设画布（1024 宽）也能容下的口径取，不随当前画布自适应。
+ */
+export const TEXT_WRAP_WIDTH_PRESETS = [360, 540, 720];
+
 /**
  * 画布文字字体：Konva Text 与 overlay <textarea> 必须使用同一字体，
  * 否则编辑态与渲染态度量不一致（WYSIWYG 失败）。Konva 默认即 Arial。
