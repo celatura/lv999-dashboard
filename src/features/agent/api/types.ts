@@ -26,8 +26,6 @@ export interface ChatMessage {
 
 export interface ConversationsResponse {
   conversations: Conversation[];
-  /** 会话产出资产数（conversationId → count），供侧边栏 badge 展示；无资产的会话不在表中 */
-  assetCounts: Record<string, number>;
   nextCursor: string | null;
 }
 

@@ -367,13 +367,17 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         </div>
       </div>
 
-      <MessageScrollerProvider autoScroll defaultScrollPosition='last-anchor'>
+      <MessageScrollerProvider
+        key={messages.length === 0 ? 'empty' : 'messages'}
+        autoScroll={messages.length > 0}
+        defaultScrollPosition={messages.length === 0 ? 'start' : 'last-anchor'}
+      >
         <MessageScroller className='min-h-0 flex-1'>
           <MessageScrollerViewport aria-label='对话消息'>
             {/* min-h-full：消息不足一屏时容器仍撑满滚动区高度，空态得以真正垂直居中 */}
             <MessageScrollerContent
               aria-busy={isGenerating}
-              className='mx-auto w-full max-w-3xl px-4 py-6'
+              className='mx-auto w-full max-w-3xl px-4 py-4 sm:py-6'
             >
               {messages.length === 0 ? (
                 <ChatEmptyState onPick={setInput} />
@@ -468,7 +472,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
               )}
             </MessageScrollerContent>
           </MessageScrollerViewport>
-          <MessageScrollerButton aria-label='回到底部' />
+          {messages.length > 0 && <MessageScrollerButton aria-label='回到底部' />}
         </MessageScroller>
       </MessageScrollerProvider>
 

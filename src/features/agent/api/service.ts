@@ -154,24 +154,10 @@ export async function listConversations(
     .orderBy(desc(conversations.createdAt), desc(conversations.id))
     .limit(CONVERSATIONS_PAGE_SIZE + 1);
   const items = rows.slice(0, CONVERSATIONS_PAGE_SIZE);
-  const ids = items.map((item) => item.id);
-  const countRows =
-    ids.length === 0
-      ? []
-      : await db
-          .select({ conversationId: assets.conversationId, total: count() })
-          .from(assets)
-          .where(and(eq(assets.userId, userId), inArray(assets.conversationId, ids)))
-          .groupBy(assets.conversationId);
-
-  const assetCounts: Record<string, number> = {};
-  for (const row of countRows) {
-    if (row.conversationId) assetCounts[row.conversationId] = Number(row.total);
-  }
   const last = items.at(-1);
   const nextCursor =
     rows.length > CONVERSATIONS_PAGE_SIZE && last ? `${last.cursorCreatedAt}~${last.id}` : null;
-  return { conversations: items.map(toConversation), assetCounts, nextCursor };
+  return { conversations: items.map(toConversation), nextCursor };
 }
 
 /**

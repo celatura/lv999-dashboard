@@ -175,8 +175,9 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 4.7 会话设置、列表与限制
 
+- 新会话空态提供写内容、做图片、生成视频、设计封面四种示例；点击只填入输入框，不自动发送。资产库非空时另提供复用作品示例；空态从顶部显示，已有消息则保持末条消息锚点与自动滚动。
 - 模型和技能切换等待服务端保存后才更新显示，期间暂停发送；保存和读取各有 10 秒超时。保存失败时重新读取权威设置，无法读取时须手动重试同步。对话请求携带当前显示的模型和技能，若与服务端不一致返回 `settings_changed`，客户端可同步后重试。
-- 侧边栏每次加载 50 个会话，按不可变的创建时间和 id 倒序游标分页，避免活跃会话更新时间改变时遗漏记录；界面注明排序方式。每页只统计该页会话资产；会话更新或生成结束仅刷新包含该会话的已加载页，新建和删除则刷新整个列表。
+- 侧边栏每次加载 50 个会话，按不可变的创建时间和 id 倒序游标分页，避免活跃会话更新时间改变时遗漏记录；界面注明排序方式。会话更新或生成结束仅刷新包含该会话的已加载页，新建和删除则刷新整个列表。
 - 对话请求最多 200 条消息、单条 500 个 part、请求体 4 MB。触及大小限制时可编辑失败消息，或将输入与资产引用带到新会话；后者通过客户端内存一次性交接，页面刷新会丢弃未交接草稿。
 
 ---
@@ -298,7 +299,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | POST | `/api/agent/chat` | 发起生成，返回可恢复 SSE 流（`runtime=nodejs`，`maxDuration=300`）|
 | GET | `/api/agent/chat/[id]/stream` | 重连进行中的流（`resume`）|
 | POST | `/api/agent/chat/[id]/stop` | 停止生成（保存快照 + 写停止信号）|
-| GET | `/api/agent/conversations?cursor=...` | 会话列表（按创建时间倒序游标分页，每页 50 条；返回 `conversations` / 当前页 `assetCounts` / `nextCursor`，首次省略 cursor，无下一页时为 null）|
+| GET | `/api/agent/conversations?cursor=...` | 会话列表（按创建时间倒序游标分页，每页 50 条；返回 `conversations` / `nextCursor`，首次省略 cursor，无下一页时为 null）|
 | POST | `/api/agent/conversations` | 创建会话（可带 `activeSkillId` 激活技能）|
 | PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型 / `activeSkillId`）/ 删除会话 |
 | GET | `/api/agent/assets` | 资产列表（分页 / 搜索 / kind 筛选 / `favorite` 筛选 / 排序）|

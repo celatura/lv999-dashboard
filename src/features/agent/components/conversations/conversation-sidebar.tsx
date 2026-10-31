@@ -39,11 +39,14 @@ export function ConversationSidebar() {
       <div className='shrink-0 p-3'>
         <Link
           href='/dashboard/agent'
-          className={cn(buttonVariants({ variant: 'default' }), 'w-full')}
+          className={cn(buttonVariants({ variant: 'outline' }), 'w-full')}
         >
           <Icons.add /> 新建会话
         </Link>
-        <p className='text-muted-foreground mt-2 text-center text-xs'>按创建时间排序</p>
+        <div className='text-muted-foreground mt-3 flex items-center justify-between px-1 text-xs'>
+          <span className='text-foreground font-medium'>会话</span>
+          <span>按创建时间</span>
+        </div>
       </div>
       {/* 让列表中的绝对定位元素受滚动容器约束，避免撑开页面。 */}
       <div className='relative min-h-0 flex-1 overflow-y-auto px-2 pb-3'>
@@ -120,8 +123,6 @@ function ConversationList() {
       return true;
     })
   );
-  const assetCounts = Object.assign({}, ...data.pages.map((page) => page.assetCounts));
-
   const submitRename = () => {
     if (!renaming) return;
     const title = renameValue.trim();
@@ -163,7 +164,6 @@ function ConversationList() {
         )}
         {conversations.map((conversation) => {
           const active = pathname === `/dashboard/agent/${conversation.id}`;
-          const assetCount = assetCounts[conversation.id] ?? 0;
           return (
             <div
               key={conversation.id}
@@ -178,14 +178,6 @@ function ConversationList() {
               >
                 {conversation.title}
               </Link>
-              {assetCount > 0 && (
-                <span
-                  className='text-muted-foreground shrink-0 pr-1 text-xs tabular-nums'
-                  title={`产出 ${assetCount} 个资产`}
-                >
-                  {assetCount}
-                </span>
-              )}
               <DropdownMenu modal={false}>
                 <DropdownMenuTrigger
                   render={

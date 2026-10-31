@@ -88,48 +88,49 @@ export function ChatComposer({
         : '描述你的创作需求…（Enter 发送，Shift+Enter 换行）';
 
   return (
-    <div className='shrink-0 border-t'>
-      <div className='mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3'>
-        {referencedAssets.length > 0 && (
-          <ul className='flex flex-wrap gap-1.5' aria-label='已引用资产'>
-            {referencedAssets.map((asset) => {
-              const { label, icon: KindIcon } = getAssetKindMeta(asset.kind);
-              return (
-                <li
-                  key={asset.id}
-                  className='bg-muted flex max-w-full items-center gap-1.5 rounded-md py-1 pr-1 pl-2 text-xs'
-                >
-                  <KindIcon className='text-muted-foreground size-3.5 shrink-0' />
-                  <span className='truncate font-medium'>{asset.title}</span>
-                  <span className='text-muted-foreground shrink-0'>{label}</span>
-                  <button
-                    type='button'
-                    onClick={() => onRemoveReference(asset.id)}
-                    aria-label={`移除引用：${asset.title}`}
-                    className='text-muted-foreground hover:text-foreground focus-visible:ring-ring shrink-0 rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none'
+    <div className='bg-background shrink-0 pt-2 pb-4'>
+      <div className='mx-auto w-full max-w-3xl px-4'>
+        <div className='border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/15 relative flex w-full flex-col rounded-xl border shadow-sm transition-[border-color,box-shadow] focus-within:ring-2'>
+          {referencedAssets.length > 0 && (
+            <ul className='flex flex-wrap gap-1.5 px-3 pt-3' aria-label='已引用资产'>
+              {referencedAssets.map((asset) => {
+                const { label, icon: KindIcon } = getAssetKindMeta(asset.kind);
+                return (
+                  <li
+                    key={asset.id}
+                    className='bg-muted flex max-w-full items-center gap-1.5 rounded-md py-1 pr-1 pl-2 text-xs'
                   >
-                    <Icons.close className='size-3.5' />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {referencedAssets.some((asset) => asset.kind === 'image') && (
-          <p className='text-muted-foreground text-xs'>
-            图片可用于修改或生成视频，但 Agent 不能直接看到图片内容；请用文字描述关键信息。
-          </p>
-        )}
-        <Textarea
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          rows={2}
-          className='max-h-40 min-h-[3.25rem] resize-none'
-        />
-        <div className='flex items-center justify-between gap-2'>
-          <div className='flex min-w-0 items-center gap-2'>
+                    <KindIcon className='text-muted-foreground size-3.5 shrink-0' />
+                    <span className='truncate font-medium'>{asset.title}</span>
+                    <span className='text-muted-foreground shrink-0'>{label}</span>
+                    <button
+                      type='button'
+                      onClick={() => onRemoveReference(asset.id)}
+                      aria-label={`移除引用：${asset.title}`}
+                      className='text-muted-foreground hover:text-foreground focus-visible:ring-ring shrink-0 rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none'
+                    >
+                      <Icons.close className='size-3.5' />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {referencedAssets.some((asset) => asset.kind === 'image') && (
+            <p className='text-muted-foreground px-3 pt-2 text-xs'>
+              图片可用于修改或生成视频，但 Agent 不能直接看到图片内容；请用文字描述关键信息。
+            </p>
+          )}
+          <Textarea
+            aria-label='创作需求'
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            rows={2}
+            className='max-h-[min(10rem,25dvh)] min-h-[3.25rem] resize-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent'
+          />
+          <div className='flex flex-wrap items-center gap-2 px-3 pb-3'>
             <ModelSelector
               value={model}
               onChange={onModelChange}
@@ -151,24 +152,30 @@ export function ChatComposer({
               {/* 窄屏只留图标，避免与模型选择器、发送按钮挤在一行 */}
               <span className='hidden sm:inline'>引用资产</span>
             </Button>
+            {isGenerating ? (
+              <LoadingButton
+                variant='outline'
+                size='sm'
+                className='ml-auto'
+                onClick={onStop}
+                disabled={!canStop}
+                loading={isStopping}
+                loadingLabel='正在停止生成'
+                title={canStop ? '停止已发起的生成仍可能产生费用' : '正在建立生成，请稍候'}
+              >
+                <Icons.stop /> 停止
+              </LoadingButton>
+            ) : (
+              <Button
+                size='sm'
+                className='ml-auto'
+                onClick={onSubmit}
+                disabled={!value.trim() || controlsDisabled}
+              >
+                <Icons.send /> 发送
+              </Button>
+            )}
           </div>
-          {isGenerating ? (
-            <LoadingButton
-              variant='outline'
-              size='sm'
-              onClick={onStop}
-              disabled={!canStop}
-              loading={isStopping}
-              loadingLabel='正在停止生成'
-              title={canStop ? '停止已发起的生成仍可能产生费用' : '正在建立生成，请稍候'}
-            >
-              <Icons.stop /> 停止
-            </LoadingButton>
-          ) : (
-            <Button size='sm' onClick={onSubmit} disabled={!value.trim() || controlsDisabled}>
-              <Icons.send /> 发送
-            </Button>
-          )}
         </div>
       </div>
       {pickerMounted && (

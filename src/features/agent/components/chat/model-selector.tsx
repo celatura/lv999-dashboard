@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { MODEL_KEYS, MODEL_REGISTRY } from '../../constants/models';
+import { getModelLabel, MODEL_KEYS, MODEL_REGISTRY } from '../../constants/models';
 
 interface ModelSelectorProps {
   value: string;
@@ -31,7 +31,12 @@ export function ModelSelector({ value, onChange, disabled }: ModelSelectorProps)
       }}
       disabled={disabled}
     >
-      <SelectTrigger size='sm' className='max-w-56'>
+      <SelectTrigger
+        size='sm'
+        className='max-w-28 sm:max-w-56'
+        aria-label='选择对话模型'
+        title={getModelLabel(value)}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
