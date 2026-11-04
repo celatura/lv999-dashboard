@@ -112,7 +112,9 @@ bun run dev
 | `bunx drizzle-kit generate` | 由 `schema.ts` 生成迁移 SQL（无需连库） |
 | `bun scripts/db-apply-sql.ts` | 应用迁移 SQL 到 `DATABASE_URL`（RDS 下替代静默失败的 `db:push`） |
 | `bun run typecheck` | TypeScript 类型检查 |
-| `bun run lint` / `bun run lint:strict` | Oxlint 检查 |
+| `bun run lint` | Oxlint 检查 + 弃用 API 守卫 |
+| `bun run lint:strict` | Oxlint 零警告 |
+| `bun run lint:deprecated` | 类型感知检查 `@deprecated` API 使用 |
 | `bun run lint:fix` | 自动修复并格式化 |
 | `bun run format` / `bun run format:check` | Oxfmt 格式化 / 校验 |
 
@@ -154,7 +156,7 @@ src/
 
 ## 核心设计
 
-- **数据获取（TanStack Query SSR）**：服务端 `prefetchQuery` 复用 queryKey 并直连 server-only `service.ts`（`void` 触发不阻塞）→ `HydrationBoundary` + `dehydrate` 注水 → 客户端 `useSuspenseQuery` 经 `apiClient` 消费，配合 `<Suspense>` 展示骨架屏。
+- **数据获取（TanStack Query SSR）**：服务端 `query().catch(noop)` 复用 queryKey 并直连 server-only `service.ts`（`void` 触发不阻塞）→ `HydrationBoundary` + `dehydrate` 注水 → 客户端 `useSuspenseQuery` 经 `apiClient` 消费，配合 `<Suspense>` 展示骨架屏。
 - **Service 层**：每个 feature 的 `api/` = `types.ts`（类型契约）/ `service.ts`（server-only 数据访问：Drizzle / 外部 API，由 Route Handler 与 Server Component 预取调用）/ `queries.ts` / `mutations.ts`（客户端经 `apiClient` → Route Handler）；支持 Server Actions、Route Handlers、BFF 代理、直连外部 API 多种接入。
 - **AI Agent 创作**：自然语言 → AI SDK v7 `ToolLoopAgent` → 文本 / 图片 / 视频作品统一沉淀为资产；后端为 PostgreSQL + Drizzle（`conversations` / `messages` / `assets` 三表）、OSS、Redis、百炼大模型。详见 [docs/agent.md](./docs/agent.md)。
 - **设计画布**：Konva 纯客户端孤岛，文档为可序列化 JSON、作为 `kind='design'` 资产落库（不新增表）；画布内直连 T2I / I2I 与 `composeDesign`，产出即时插入 / 替换并走 Credits 计费。详见 [docs/design-editor.md](./docs/design-editor.md)。

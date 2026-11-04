@@ -83,7 +83,7 @@ export function PieGraph({ kindCounts }: PieGraphProps) {
                 cornerRadius={8}
                 paddingAngle={4}
               />
-              <ChartLegend content={<ChartLegendContent nameKey='kind' />} verticalAlign='bottom' />
+              <ChartLegend content={<ChartLegendContent nameKey='kind' />} position='bottom' />
             </PieChart>
           </ChartContainer>
         )}

@@ -25,9 +25,13 @@ export async function requestAgentStop(
   active = false
 ): Promise<void> {
   const redis = await getConnectedRedis();
-  await redis.set(stopSignalKey(conversationId, streamId), '1', { EX: STOP_SIGNAL_TTL_SECONDS });
+  await redis.set(stopSignalKey(conversationId, streamId), '1', {
+    expiration: { type: 'EX', value: STOP_SIGNAL_TTL_SECONDS }
+  });
   if (active && !isUuid(streamId)) {
-    await redis.set(`agent:stop:${streamId}`, '1', { EX: STOP_SIGNAL_TTL_SECONDS });
+    await redis.set(`agent:stop:${streamId}`, '1', {
+      expiration: { type: 'EX', value: STOP_SIGNAL_TTL_SECONDS }
+    });
   }
 }
 

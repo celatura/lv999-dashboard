@@ -173,9 +173,10 @@ bun run build
 bun run start
 
 # Linting
-bun run lint         # Run Oxlint
-bun run lint:fix     # Auto-fix and format
-bun run lint:strict  # Zero warnings tolerance
+bun run lint            # oxlint + lint:deprecated
+bun run lint:deprecated # Fails on any use of a @deprecated API (type-aware oxlint)
+bun run lint:fix        # Auto-fix and format
+bun run lint:strict     # Zero warnings tolerance
 
 bun run typecheck    # tsc --noEmit
 
@@ -186,6 +187,8 @@ bun run format:check # Check formatting
 # Git hooks
 bun run prepare      # Install Husky hooks
 ```
+
+`lint:deprecated` skips `src/components/ui/**` and `src/hooks/use-data-table.ts`: those are kept identical to upstream shadcn/DiceUI and pick up fixes when re-pulled from their registries (today `ui/chart.tsx` still uses Recharts' deprecated `verticalAlign` and `use-data-table.ts` uses nuqs' deprecated `throttleMs`).
 
 ---
 
@@ -398,7 +401,7 @@ queryClient.invalidateQueries({ queryKey: entityKeys.all });
 The project uses TanStack React Query with server-side prefetching and client-side cache management:
 
 1. **Query keys** defined in `queries.ts` — shared between server prefetch and client hooks; the client `queryFn` uses `apiClient`
-2. **Server prefetch** using `void queryClient.prefetchQuery()` + `HydrationBoundary` + `dehydrate` — `void` (fire-and-forget) is the standard TanStack pattern for Next.js App Router
+2. **Server prefetch** using `void queryClient.query(...).catch(noop)` + `HydrationBoundary` + `dehydrate` — `void` (fire-and-forget) is the standard TanStack pattern for Next.js App Router. `query()` replaces the deprecated `prefetchQuery()`; unlike it, `query()` rejects on a failed fetch, so `.catch(noop)` (`noop` from `@tanstack/react-query`) is required to avoid an unhandled rejection on the server
 3. **Client fetch** using `useSuspenseQuery()` — integrates with React Suspense; if the `void` prefetch has not resolved by hydration, the client suspends and the fallback shows while data streams in
 4. **Suspense boundary** wraps the client component — the fallback can appear on the first load while the pending prefetch resolves, and on subsequent client-side navigations when cache is empty; cached visits within `staleTime` show no skeleton
 
@@ -407,10 +410,12 @@ The project uses TanStack React Query with server-side prefetching and client-si
 // Reuse the client queryKey, but call the server-side service directly —
 // apiClient uses a relative /api URL and cannot run inside a Server Component.
 const queryClient = getQueryClient();
-void queryClient.prefetchQuery({
-  queryKey: entitiesQueryOptions(filters).queryKey,
-  queryFn: () => listEntities(userId, filters) // service.ts
-});
+void queryClient
+  .query({
+    queryKey: entitiesQueryOptions(filters).queryKey,
+    queryFn: () => listEntities(userId, filters) // service.ts
+  })
+  .catch(noop);
 
 return (
   <HydrationBoundary state={dehydrate(queryClient)}>

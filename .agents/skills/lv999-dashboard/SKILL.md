@@ -157,10 +157,12 @@ export const orderByIdOptions = (id: string) =>
 Server prefetch reuses the same key and calls the service directly:
 
 ```tsx
-void queryClient.prefetchQuery({
-  queryKey: ordersQueryOptions(filters).queryKey,
-  queryFn: () => getOrders(userId, filters) // server-only service
-});
+void queryClient
+  .query({
+    queryKey: ordersQueryOptions(filters).queryKey,
+    queryFn: () => getOrders(userId, filters) // server-only service
+  })
+  .catch(noop);
 ```
 
 **Mutations** (`api/mutations.ts`) — use `mutationOptions` + `getQueryClient()` (not custom hooks with `useQueryClient()`), calling the Route Handler via `apiClient`:
@@ -220,7 +222,7 @@ Create `src/features/<name>/components/` with:
 
 ```tsx
 import { Suspense } from 'react';
-import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { HydrationBoundary, dehydrate, noop } from '@tanstack/react-query';
 import { getUserId } from '@/lib/auth-session';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
@@ -246,10 +248,12 @@ export default async function OrderListingPage() {
 
   const queryClient = getQueryClient();
   // Reuse the client queryKey, but call the server-only service directly.
-  void queryClient.prefetchQuery({
-    queryKey: ordersQueryOptions(filters).queryKey,
-    queryFn: () => getOrders(userId, filters)
-  });
+  void queryClient
+    .query({
+      queryKey: ordersQueryOptions(filters).queryKey,
+      queryFn: () => getOrders(userId, filters)
+    })
+    .catch(noop);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
@@ -580,7 +584,7 @@ For cell actions, add `const [editOpen, setEditOpen] = useState(false)` and rend
 
 The pattern is: server prefetch → HydrationBoundary → client useSuspenseQuery.
 
-1. **Server**: `void queryClient.prefetchQuery(options)` — fire-and-forget during SSR streaming
+1. **Server**: `void queryClient.query(options).catch(noop)` — fire-and-forget during SSR streaming (`prefetchQuery` is deprecated; `query()` rejects on error, hence the `.catch(noop)`)
 2. **Client**: `useSuspenseQuery(options)` — picks up dehydrated data, suspends until resolved
 3. **HydrationBoundary + dehydrate**: bridges server cache → client cache
 4. **Suspense fallback**: skeleton shown while data streams
@@ -639,7 +643,7 @@ See [references/theming-guide.md](references/theming-guide.md) for the complete 
 
 - **`cn()`** for class merging — never concatenate className strings
 - **Server components by default** — only add `'use client'` when needed
-- **React Query** — `void prefetchQuery()` on server + `useSuspenseQuery` on client
+- **React Query** — `void queryClient.query(...).catch(noop)` on server + `useSuspenseQuery` on client
 - **API layer** — `types.ts` → `service.ts` (server-only) → `queries.ts` / `mutations.ts` (`apiClient`) → Route Handler; `queryOptions`/`mutationOptions` as base abstractions (not custom hooks); `getQueryClient()` in mutations (not `useQueryClient()`); key factories (`entityKeys.all/list/detail`); **client** components never import `service.ts` — Server Components / Route Handlers call it directly
 - **nuqs** — `searchParamsCache` on server, `useQueryStates` on client with `shallow: true`
 - **Icons** — only from `@/components/icons`, never from `@tabler/icons-react` directly

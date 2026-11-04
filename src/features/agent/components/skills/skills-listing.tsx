@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { getUserId } from '@/lib/auth-session';
-import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { HydrationBoundary, dehydrate, noop } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { skillsQueryOptions } from '../../api/queries';
 import { listSkillsForUser } from '../../api/skill-service';
@@ -16,10 +16,12 @@ export default async function SkillsListing() {
   if (!userId) return null;
 
   const queryClient = getQueryClient();
-  void queryClient.prefetchQuery({
-    queryKey: skillsQueryOptions().queryKey,
-    queryFn: async () => ({ skills: await listSkillsForUser(userId) })
-  });
+  void queryClient
+    .query({
+      queryKey: skillsQueryOptions().queryKey,
+      queryFn: async () => ({ skills: await listSkillsForUser(userId) })
+    })
+    .catch(noop);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

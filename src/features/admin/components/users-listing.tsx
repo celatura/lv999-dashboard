@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { HydrationBoundary, dehydrate, noop } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
 import { adminUsersQueryOptions } from '../api/queries';
@@ -24,10 +24,12 @@ export default function UsersListing() {
   };
 
   const queryClient = getQueryClient();
-  void queryClient.prefetchQuery({
-    queryKey: adminUsersQueryOptions(filters).queryKey,
-    queryFn: () => listUsers(filters)
-  });
+  void queryClient
+    .query({
+      queryKey: adminUsersQueryOptions(filters).queryKey,
+      queryFn: () => listUsers(filters)
+    })
+    .catch(noop);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

@@ -1,5 +1,5 @@
 import { getUserId } from '@/lib/auth-session';
-import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { HydrationBoundary, dehydrate, noop } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
 import { assetsQueryOptions } from '../../api/queries';
@@ -28,10 +28,12 @@ export default async function AssetListingPage() {
   };
 
   const queryClient = getQueryClient();
-  void queryClient.prefetchQuery({
-    queryKey: assetsQueryOptions(filters).queryKey,
-    queryFn: () => listAssets(userId, filters)
-  });
+  void queryClient
+    .query({
+      queryKey: assetsQueryOptions(filters).queryKey,
+      queryFn: () => listAssets(userId, filters)
+    })
+    .catch(noop);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

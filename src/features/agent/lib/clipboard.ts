@@ -31,6 +31,8 @@ export async function copyText(text: string): Promise<boolean> {
 
   let copied = false;
   try {
+    // 非安全上下文没有替代 API，保留为最后兜底
+    // oxlint-disable-next-line typescript/no-deprecated
     copied = document.execCommand('copy');
   } catch {
     copied = false;

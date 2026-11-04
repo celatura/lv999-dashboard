@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { getUserId } from '@/lib/auth-session';
-import { HydrationBoundary, dehydrate } from '@tanstack/react-query';
+import { HydrationBoundary, dehydrate, noop } from '@tanstack/react-query';
 import { getQueryClient } from '@/lib/query-client';
 import { searchParamsCache } from '@/lib/searchparams';
 import { ledgerQueryOptions } from '../api/queries';
@@ -26,10 +26,12 @@ export default async function CreditsListing() {
   const queryClient = getQueryClient();
   // 预取 queryFn 直连 service（服务端），返回结构必须与客户端 apiClient 完全一致，
   // 否则水合数据形状错乱（历史事故）
-  void queryClient.prefetchQuery({
-    queryKey: ledgerQueryOptions(filters).queryKey,
-    queryFn: () => listLedger(userId, filters)
-  });
+  void queryClient
+    .query({
+      queryKey: ledgerQueryOptions(filters).queryKey,
+      queryFn: () => listLedger(userId, filters)
+    })
+    .catch(noop);
 
   return (
     <div className='flex flex-col gap-4'>

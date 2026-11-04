@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
@@ -75,7 +75,7 @@ function SearchPanelBody() {
   const [query, setQuery] = useState('');
   const [topK, setTopK] = useState(DEFAULT_SEARCH_TOP_K);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = query.trim();
     if (!trimmed || searchMutation.isPending) return;
