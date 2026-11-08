@@ -1,5 +1,5 @@
 import { getAsset } from '@/features/agent/api/service';
-import { chargeCredits } from '@/features/credits/api/service';
+import { reserveCredits, settleCredits } from '@/features/credits/api/service';
 import { priceEmbedding } from '@/features/credits/lib/pricing';
 import type { ApiErrorCode } from '@/lib/api-error';
 import { markDocumentFailed, replaceChunks } from '../api/service';
@@ -9,7 +9,7 @@ import {
   MAX_SOURCE_BYTES
 } from '../constants/knowledge';
 import { chunkText, htmlToText } from './chunk';
-import { embedTexts } from './embeddings';
+import { EmbeddingBatchError, embedTexts } from './embeddings';
 
 /**
  * 摄取管线（server-only）：文本 → 切分 → 批量 embedding → 片段落库。
@@ -127,6 +127,20 @@ export function prepareChunks(text: string): string[] {
   return chunks;
 }
 
+export async function reserveKnowledgeCredits(
+  userId: string,
+  chunks: string[]
+): Promise<{ id: string; amount: number } | null> {
+  const bytes = chunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, 'utf8'), 0);
+  return reserveCredits({
+    userId,
+    amount: priceEmbedding(bytes),
+    allowPartial: true,
+    kind: 'knowledge',
+    meta: { inputBytes: bytes }
+  });
+}
+
 /**
  * 向量化 + 片段落库（replaceChunks 内部为事务：整体成功才置 ready）。
  * 异常不外抛：置 failed 后返回状态，端点据此应答（用户可在列表中重试）。
@@ -135,9 +149,18 @@ export async function ingestChunks(params: {
   userId: string;
   documentId: string;
   chunks: string[];
+  reservationId: string;
 }): Promise<IngestResult> {
+  let cost = 0;
+  let tokens: number | undefined;
+  let completed = false;
+  let usageIncomplete = false;
   try {
-    const { embeddings, tokens } = await embedTexts(params.chunks);
+    const result = await embedTexts(params.chunks);
+    const { embeddings } = result;
+    tokens = result.tokens;
+    usageIncomplete = result.usageIncomplete;
+    cost = priceEmbedding(tokens);
     if (embeddings.length !== params.chunks.length) {
       throw new Error(
         `Embedding count mismatch: expected ${params.chunks.length}, got ${embeddings.length}`
@@ -148,27 +171,42 @@ export async function ingestChunks(params: {
       documentId: params.documentId,
       chunks: params.chunks.map((content, index) => ({ content, embedding: embeddings[index] }))
     });
-    // 摄取成功后按 embedding tokens 计费（失败不扣，见 docs/credits.md §6.3）；
-    // 计费失败不阻断已完成的摄取（否则会把已 ready 的文档误置 failed），仅记录供排查
-    try {
-      await chargeCredits({
-        userId: params.userId,
-        cost: priceEmbedding(tokens),
-        kind: 'knowledge',
-        meta: { documentId: params.documentId, tokens }
-      });
-    } catch (chargeError) {
-      console.error('[knowledge] credit settlement failed', {
-        documentId: params.documentId,
-        error: chargeError
-      });
-    }
+    completed = true;
     return { status: 'ready', chunkCount: params.chunks.length };
   } catch (error) {
+    if (error instanceof EmbeddingBatchError) {
+      tokens = error.knownTokens;
+      cost = tokens > 0 ? priceEmbedding(tokens) : 0;
+      usageIncomplete = true;
+    }
     console.error('[knowledge] ingest failed:', { documentId: params.documentId, error });
     await markDocumentFailed(params.documentId).catch((markError) => {
       console.error('[knowledge] failed to mark document as failed:', markError);
     });
     return { status: 'failed', chunkCount: 0 };
+  } finally {
+    try {
+      await settleCredits({
+        reservationId: params.reservationId,
+        cost,
+        waive: !completed,
+        meta: {
+          documentId: params.documentId,
+          tokens,
+          outcome: completed ? 'ready' : 'failed',
+          usageIncomplete: usageIncomplete || tokens === undefined
+        }
+      });
+    } catch (error) {
+      console.error('[knowledge] credit settlement failed; reservation remains pending', {
+        documentId: params.documentId,
+        reservationId: params.reservationId,
+        cost,
+        tokens,
+        completed,
+        usageIncomplete,
+        error
+      });
+    }
   }
 }

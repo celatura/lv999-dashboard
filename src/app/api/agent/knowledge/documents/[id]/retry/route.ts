@@ -9,7 +9,8 @@ import {
   KnowledgeIngestError,
   ingestChunks,
   ingestErrorStatus,
-  prepareChunks
+  prepareChunks,
+  reserveKnowledgeCredits
 } from '@/features/knowledge/lib/ingest';
 
 export const runtime = 'nodejs';
@@ -69,6 +70,15 @@ export async function POST(_request: Request, context: RouteContext) {
     throw error;
   }
 
-  const result = await ingestChunks({ userId, documentId: id, chunks });
+  const reservation = await reserveKnowledgeCredits(userId, chunks);
+  if (!reservation) {
+    return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
+  }
+  const result = await ingestChunks({
+    userId,
+    documentId: id,
+    chunks,
+    reservationId: reservation.id
+  });
   return Response.json({ id, status: result.status, chunkCount: result.chunkCount });
 }

@@ -14,7 +14,7 @@ LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然�
 - **工具**：`createAsset`（Markdown / HTML）、`createImageAsset`（文生图 T2I）、`editImageAsset`（图生图 I2I）、`createVideoAsset`（文生视频 T2V）、`createVideoFromImageAsset`（图生视频 I2V）、`composeDesign`（一句话生成整版设计）、`findAssets` / `readAsset`（资产复用）、`knowledgeSearch`（知识库语义检索）。
 - **流式**：`resumable-stream` 可恢复 SSE，刷新 / 切回自动重连；停止走专用端点（跨实例真取消）。
 - **持久化**：Drizzle ORM + PostgreSQL，三张表 `conversations` / `messages` / `assets`；图片 / 视频二进制存 OSS，库里只存 `storageKey`。
-- **计费**：对话 / 生图 / 生视频 / 知识库摄取均经 Credits `checkBalance` 入口拦截（对话/知识库余额 >0，图片/视频余额 ≥ 单次固定价，否则 402）、按真实 usage「发起后按结果扣」，杜绝陌生人刷爆作者 API Key；额度由管理员经**用户管理后台** `/dashboard/admin/users` 发放 / 设定（仅 `ADMIN_USER_IDS` 白名单）；详见 [docs/credits.md](./credits.md)。
+- **计费**：对话 / 生图 / 生视频 / 知识库摄取均在上游调用前原子预留 Credits，按实际结果结算；管理员可经 `/dashboard/admin/users` 发放 / 设定可用额度（仅 `ADMIN_USER_IDS` 白名单）；详见 [docs/credits.md](./credits.md)。
 
 ---
 
@@ -286,7 +286,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **红线**：返回的图片链接 24h 有效，必须立即下载转存 OSS，任何持久化字段不得存临时 URL。
 - 校验：图片 magic bytes（png/jpeg/webp，mime 与 OSS 扩展名均按真实类型落库）、下载体积 ≤15MB；`enable_thinking` 显式关闭（否则耗时 3-4 倍）。
 - 用户停止时 `abortSignal` 透传，同步取消进行中的请求与轮询。
-- 计费分类：生成调用不自动重试（按张计费，重试有双计费风险）；`create-task` 阶段的网络/非 JSON 失败不扣；`query-task` / `sync` 阶段已送达后的网络中断、超时、下载失败照扣，DNS 解析失败 / 连接被拒 / 证书错误等未建连失败不扣（见 [docs/credits.md §7](./credits.md)）。
+- 计费分类：生成调用不自动重试（按张计费，重试有双计费风险）；`create-task` 阶段的网络/非 JSON 失败不扣；`query-task` / `sync` 阶段已送达后的网络中断、超时、下载失败照扣，DNS 解析失败 / 连接被拒 / 证书错误等未建连失败不扣（见 [docs/credits.md](./credits.md)）。
 
 ---
 
@@ -351,7 +351,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### Credits 计费（402 余额不足）
 
-所有付费 API 入口（对话 / 图片工具 / 整版设计工具（内含一次文生图）/ 直连图片生成与编辑 / 视频工具 / 知识库摄取）在发起上游调用前经 `checkBalance` 拦截（对话/知识库 `balance > 0`；图片/视频 `balance ≥ 单次固定价`），余额不足返回 **402 `insufficient_credits`**（工具入口抛中文错误由卡片展示）。扣费按真实 usage「发起后按结果扣」：对话在流 `onEnd` 按累计 token 结算（`usageSink` 经 `onStepEnd` 桥接）；图片/视频经 `chargeOnGenerationResult`（成功/abort/超时/下载失败照扣，鉴权/参数/限流/**内容审核拒绝**不扣）；知识库摄取按 embedding tokens。完整计费规则、定价与数据模型见 [docs/credits.md](./credits.md)。
+所有付费 API 入口（对话 / 图片工具 / 整版设计主图 / 直连图片生成与编辑 / 视频工具 / 知识库摄取）在发起上游调用前原子预留可用 Credits；余额不足返回 **402 `insufficient_credits`**（工具入口抛中文错误由卡片展示）。对话在流 `onEnd` 按已完成步骤的 token usage 结算，图片/视频经 `chargeOnGenerationResult` 按结果结算，知识库摄取成功后按 embedding tokens 结算。结算最多扣除预留额度，超额由平台承担并记录；异常中断后的冻结需人工对账。完整规则、限制和部署步骤见 [docs/credits.md](./credits.md)。
 
 ---
 
@@ -374,14 +374,14 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 # 由 schema.ts 生成迁移 SQL（无需连库）
 bunx drizzle-kit generate
 
-# 应用最新一个 .sql 到数据库（也可传入指定文件名）
+# 应用 journal 中最新迁移的 SQL 到数据库（也可传入指定文件名）
 bun scripts/db-apply-sql.ts
 ```
 
-> 当前阿里云 RDS 实例下 `bun run db:push`（`drizzle-kit push`）会在连接阶段静默失败，因此采用确定性工作流：`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
+> 当前阿里云 RDS 实例下 `bun run db:push`（`drizzle-kit push`）会在连接阶段静默失败，因此采用确定性工作流：`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用。当前数据库是唯一基准，部分已应用的历史 SQL 未保留，不能依赖完整迁移链从空库重建；未生成新迁移时脚本会报最新 SQL 不存在，且不会自动判断 SQL 是否已经应用。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 扣费 / 流水）、`credit-admin.ts`（Credits 发放 / 设定 CLI，见 [docs/credits.md](./credits.md) §9）、`db-apply-sql.ts`（应用迁移 SQL）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-apply-sql.ts`（应用迁移 SQL）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。

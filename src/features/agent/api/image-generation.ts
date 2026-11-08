@@ -87,7 +87,7 @@ async function readJson(
 
 /**
  * 百炼错误（顶层 code/message 或 output.code/message）映射为用户可读中文（详情走日志）。
- * 全部为「上游明确返回失败」→ billable=false（百炼失败不计费，见 docs/credits.md §7）。
+ * 全部为「上游明确返回失败」→ billable=false（百炼失败不计费，见 docs/credits.md）。
  */
 function toUserFacingError(
   body: Record<string, unknown>,

@@ -62,5 +62,8 @@ export interface LedgerFilters {
 
 /** 当前余额（GET /api/agent/credits） */
 export interface BalanceResponse {
+  /** 可用额度 */
   balance: number;
+  reserved: number;
+  total: number;
 }

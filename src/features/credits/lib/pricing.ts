@@ -9,7 +9,7 @@
 import type { VideoResolutionTier } from '@/features/agent/constants/video-models';
 import { CREDIT_PRICING, type ChatModelPricing } from '../constants/pricing';
 
-/** 统一取整：至少 1 credit（cost 恒 ≥1，扣费不设「余额不足则跳过」） */
+/** 统一取整：至少 1 credit。 */
 function toCredits(value: number): number {
   return Math.max(1, Math.ceil(value));
 }

@@ -96,7 +96,7 @@ async function readBodyWithSizeLimit(body: ReadableStream<Uint8Array>): Promise<
  * 模块同姿态）+ 网络抖动重试 1 次 + 下载超时 + 用户停止语义。
  *
  * billable：视频此时已上游成功生成（已拿到临时 video_url）→ 所有失败均为「已生成后下载失败」
- * → billable=true（保守照扣，见 docs/credits.md §7）。
+ * → billable=true（保守照扣，见 docs/credits.md）。
  */
 async function downloadVideo(options: {
   url: URL;
@@ -148,7 +148,7 @@ async function downloadVideo(options: {
 
 /**
  * 视频生成错误映射为用户可读中文（仿图片模块 toUserFacingError；详情走日志）。
- * billable 判据（见 docs/credits.md §7，百炼「失败不计费、仅对成功生成计费」）：
+ * billable 判据（见 docs/credits.md，百炼「失败不计费、仅对成功生成计费」）：
  * - abort / 轮询超时 / 下载失败（上游状态未知或已生成）→ billable=true（保守照扣）
  * - 审核拒绝 / 限流 / 鉴权 / 参数 / 其余上游明确失败 → billable=false（不扣）
  */

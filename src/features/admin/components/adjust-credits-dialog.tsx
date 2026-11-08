@@ -43,8 +43,8 @@ const adjustFormSchema = z
 type AdjustFormValues = z.infer<typeof adjustFormSchema>;
 
 const MODE_OPTIONS = [
-  { value: 'grant', label: '增加（在现有余额上加）' },
-  { value: 'set', label: '设定（直接设为该余额）' }
+  { value: 'grant', label: '增加（在可用额度上加）' },
+  { value: 'set', label: '设定（直接设为可用额度）' }
 ];
 
 function resolveAdjustError(error: unknown): string {
@@ -79,8 +79,8 @@ export function AdjustCreditsDialog({ user, open, onOpenChange }: AdjustCreditsD
         });
         toast.success(
           value.mode === 'grant'
-            ? `已为 ${user.name} 增加 ${amount} Credits，当前余额 ${result.balance}`
-            : `已将 ${user.name} 余额设为 ${result.balance}`
+            ? `已为 ${user.name} 增加 ${amount} Credits，可用额度 ${result.balance}`
+            : `已将 ${user.name} 可用额度设为 ${result.balance}`
         );
         onOpenChange(false);
       } catch (error) {
@@ -107,7 +107,7 @@ export function AdjustCreditsDialog({ user, open, onOpenChange }: AdjustCreditsD
         <DialogHeader>
           <DialogTitle>调整 Credits</DialogTitle>
           <DialogDescription className='truncate'>
-            {user.name}（{user.email}）· 当前余额 {user.balance}
+            {user.name}（{user.email}）· 可用额度 {user.balance}（不影响冻结额度）
           </DialogDescription>
         </DialogHeader>
 

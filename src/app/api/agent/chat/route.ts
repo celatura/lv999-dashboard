@@ -15,6 +15,8 @@ import { createResumableStreamContext } from 'resumable-stream';
 import {
   agentValidationTools,
   buildAgent,
+  MAX_CHAT_OUTPUT_TOKENS,
+  MAX_CHAT_STEPS,
   type AgentValidationUIMessage,
   type UsageSink
 } from '@/features/agent/api/agent';
@@ -39,7 +41,7 @@ import { detectModelUnavailable } from '@/features/agent/api/model-availability'
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
 import { MAX_REQUEST_BYTES } from '@/features/agent/constants/limits';
 import { matchesConversationSettings } from '@/features/agent/lib/conversation-settings';
-import { chargeCredits, checkBalance } from '@/features/credits/api/service';
+import { checkBalance, reserveCredits, settleCredits } from '@/features/credits/api/service';
 import { priceChat } from '@/features/credits/lib/pricing';
 import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/credits';
 import { apiError } from '@/lib/api-error';
@@ -158,17 +160,12 @@ export async function POST(request: Request) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
 
+  const modelMessages = await convertToModelMessages(validatedMessages, {
+    ignoreIncompleteToolCalls: true
+  });
+
   // usage 累加器：onStepEnd 累加每步 token，onEnd 据此结算扣费（每请求新建，serverless 无跨请求污染）
   const usageSink: UsageSink = { inputTokens: 0, outputTokens: 0 };
-
-  const agent = buildAgent({
-    userId,
-    conversationId,
-    modelKey: conversation.model,
-    skill,
-    usageSink
-  });
-  type AgentUIMessage = InferAgentUIMessage<typeof agent>;
 
   // 开新流前先登记活跃流（官方要求开始新流时立即更新，防止窗口期刷新重连到旧流或拿 204）；
   // 停止信号消费端：stop 端点写 Redis 标志 → 这里轮询命中后 abort 底层生成（真取消）。
@@ -181,12 +178,63 @@ export async function POST(request: Request) {
     }
     return cancelledStreamResponse();
   }
-  const claimed = await setConversationActiveStream(
-    conversationId,
-    streamId,
-    conversation.activeStreamId
+  // 按请求大小和每步输出上限估算预算；工具结果和多模态 token 仍可能使实际费用超出。
+  const budget = priceChat(
+    conversation.model,
+    (Buffer.byteLength(rawBody, 'utf8') + 4096) * MAX_CHAT_STEPS,
+    MAX_CHAT_OUTPUT_TOKENS * MAX_CHAT_STEPS
   );
+  const reservation = await reserveCredits({
+    userId,
+    amount: budget,
+    allowPartial: true,
+    kind: 'chat',
+    meta: { conversationId, streamId, model: conversation.model }
+  });
+  if (!reservation) {
+    return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
+  }
+
+  const releaseReservation = async () => {
+    await settleCredits({ reservationId: reservation.id, cost: 0 }).catch((error) => {
+      console.error('[agent] chat reservation release failed', {
+        reservationId: reservation.id,
+        error
+      });
+    });
+  };
+  let agent: ReturnType<typeof buildAgent>;
+  try {
+    agent = buildAgent({
+      userId,
+      conversationId,
+      modelKey: conversation.model,
+      skill,
+      usageSink,
+      reservationId: reservation.id
+    });
+  } catch (error) {
+    await releaseReservation();
+    throw error;
+  }
+  type AgentUIMessage = InferAgentUIMessage<typeof agent>;
+
+  let claimed: boolean;
+  try {
+    claimed = await setConversationActiveStream(
+      conversationId,
+      streamId,
+      conversation.activeStreamId
+    );
+  } catch (error) {
+    await clearConversationActiveStream(conversationId, streamId).catch((cleanupError) => {
+      console.error('[agent] chat stream cleanup failed', { conversationId, error: cleanupError });
+    });
+    await releaseReservation();
+    throw error;
+  }
   if (!claimed) {
+    await releaseReservation();
     return apiError(409, 'stream_changed', 'Conversation stream changed');
   }
 
@@ -207,10 +255,14 @@ export async function POST(request: Request) {
     }
     if (await consumeAgentStop(conversationId, streamId)) {
       await clearConversationActiveStream(conversationId, streamId);
+      await releaseReservation();
       return cancelledStreamResponse();
     }
   } catch (error) {
-    await clearConversationActiveStream(conversationId, streamId);
+    await clearConversationActiveStream(conversationId, streamId).catch((cleanupError) => {
+      console.error('[agent] chat stream cleanup failed', { conversationId, error: cleanupError });
+    });
+    await releaseReservation();
     throw error;
   }
 
@@ -221,15 +273,19 @@ export async function POST(request: Request) {
 
   const result = await agent
     .stream({
-      messages: await convertToModelMessages(validatedMessages, {
-        ignoreIncompleteToolCalls: true
-      }),
+      messages: modelMessages,
       abortSignal: abortController.signal
     })
     .catch(async (error: unknown) => {
       // 建流失败：停止轮询并清理活跃流登记，避免轮询泄漏与幽灵引用
       stopWatching();
-      await clearConversationActiveStream(conversationId, streamId);
+      await clearConversationActiveStream(conversationId, streamId).catch((cleanupError) => {
+        console.error('[agent] chat stream cleanup failed', {
+          conversationId,
+          error: cleanupError
+        });
+      });
+      await releaseReservation();
       throw error;
     });
 
@@ -262,25 +318,20 @@ export async function POST(request: Request) {
       },
       onEnd: async ({ messages: finalMessages, isAborted, outcome }) => {
         stopWatching();
-        // 按所有权更新：仅本轮新消息允许冲突更新，旧消息（客户端视图）不覆盖（见 service.ts）
-        await syncConversationMessages(conversationId, messages, finalMessages);
-        await clearConversationActiveStream(conversationId, streamId);
-        await touchConversation(conversationId);
-        // 结算扣费（仅 POST 生产者 onEnd 一次；GET 重连只读 Redis 流不触发，无双扣）：
-        // 按 onStepEnd 累计 usage 结算，abort 也扣已完成步；completed/aborted 即使 usage 缺失也至少扣 1（兜底）；
-        // failed 且无任何已完成步（0 token）→ 不扣（未产生生成）。结算失败不阻断已完成的流（消息已持久化）。
-        const hasUsage = usageSink.inputTokens > 0 || usageSink.outputTokens > 0;
-        if (hasUsage || outcome.status !== 'failed') {
+        try {
+          await syncConversationMessages(conversationId, messages, finalMessages);
+          await clearConversationActiveStream(conversationId, streamId);
+          await touchConversation(conversationId);
+        } finally {
           try {
-            const cost = priceChat(
-              conversation.model,
-              usageSink.inputTokens,
-              usageSink.outputTokens
-            );
-            await chargeCredits({
-              userId,
+            const hasUsage = usageSink.inputTokens > 0 || usageSink.outputTokens > 0;
+            const cost =
+              hasUsage || outcome.status !== 'failed'
+                ? priceChat(conversation.model, usageSink.inputTokens, usageSink.outputTokens)
+                : 0;
+            await settleCredits({
+              reservationId: reservation.id,
               cost,
-              kind: 'chat',
               meta: {
                 model: conversation.model,
                 inputTokens: usageSink.inputTokens,
@@ -290,7 +341,15 @@ export async function POST(request: Request) {
               }
             });
           } catch (error) {
-            console.error('[agent] chat credit settlement failed', { conversationId, error });
+            console.error('[agent] chat credit settlement failed; reservation remains pending', {
+              conversationId,
+              reservationId: reservation.id,
+              model: conversation.model,
+              usage: usageSink,
+              outcome: outcome.status,
+              aborted: isAborted,
+              error
+            });
           }
         }
       }

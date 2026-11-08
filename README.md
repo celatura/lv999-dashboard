@@ -74,10 +74,8 @@ bun install
 cp env.example.txt .env.local
 # 然后至少填入 BETTER_AUTH_SECRET / BETTER_AUTH_URL 与 DATABASE_URL（总览 / 资产等页直连数据库，缺一不可，见下方说明）
 
-# 3. 初始化数据库 schema（首次 / 空库必做，否则数据页因缺表报错）
-#    pgvector 前置：先在目标库执行 CREATE EXTENSION IF NOT EXISTS vector;
-bunx drizzle-kit generate      # 由 schema.ts 生成迁移 SQL（无需连库）
-bun scripts/db-apply-sql.ts    # 应用迁移 SQL 到 DATABASE_URL
+# 3. 使用已完成迁移的现有数据库作为基准
+#    如后续修改 schema：bunx drizzle-kit generate，再运行 bun scripts/db-apply-sql.ts
 
 # 4. 启动开发服务器
 bun run dev
@@ -85,7 +83,7 @@ bun run dev
 
 访问 http://localhost:3000。
 
-> **关于建表**：`bun run db:push`（`drizzle-kit push`）在部分托管实例（如阿里云 RDS）会在连接阶段静默失败，故采用「`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用」的确定性工作流；知识库的 HNSW 向量索引需手动补进迁移 SQL。详见 [docs/agent.md](./docs/agent.md) 与 [docs/knowledge-base.md](./docs/knowledge-base.md)。
+> **关于数据库**：当前部署以现有数据库为唯一基准，部分已应用的历史迁移 SQL 未保留，不能从空库完整重建或直接使用依赖完整历史的 Drizzle migrator。后续变更采用「`drizzle-kit generate` 生成增量 SQL → `scripts/db-apply-sql.ts` 应用」；脚本不会记录已应用状态，勿重复执行。知识库的 HNSW 向量索引需手动补进迁移 SQL。详见 [docs/agent.md](./docs/agent.md) 与 [docs/knowledge-base.md](./docs/knowledge-base.md)。
 
 ### 关键环境变量
 

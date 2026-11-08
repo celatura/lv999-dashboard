@@ -1,7 +1,7 @@
 import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
-import { checkBalance } from '@/features/credits/api/service';
+import { checkBalance, settleCredits } from '@/features/credits/api/service';
 import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/credits';
 import { createDocument } from '@/features/knowledge/api/service';
 import {
@@ -16,7 +16,8 @@ import {
   deriveTitle,
   ingestChunks,
   ingestErrorStatus,
-  prepareChunks
+  prepareChunks,
+  reserveKnowledgeCredits
 } from '@/features/knowledge/lib/ingest';
 import { MAX_UPLOAD_FILE_BYTES } from '@/features/knowledge/constants/knowledge';
 
@@ -104,16 +105,36 @@ export async function POST(request: Request) {
     fileBaseName(file.name) ||
     deriveTitle(text);
 
-  const document = await createDocument({
-    userId,
-    title,
-    source: 'file',
-    content: text,
-    sourceAssetId: null
-  });
+  const reservation = await reserveKnowledgeCredits(userId, chunks);
+  if (!reservation) {
+    return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
+  }
+  let document: Awaited<ReturnType<typeof createDocument>>;
+  try {
+    document = await createDocument({
+      userId,
+      title,
+      source: 'file',
+      content: text,
+      sourceAssetId: null
+    });
+  } catch (error) {
+    await settleCredits({ reservationId: reservation.id, cost: 0 }).catch((settlementError) => {
+      console.error('[knowledge] reservation release failed', {
+        reservationId: reservation.id,
+        error: settlementError
+      });
+    });
+    throw error;
+  }
 
   // MVP：请求内同步摄取；embedding/写库异常置 failed 而非抛给用户（列表可重试）
-  const result = await ingestChunks({ userId, documentId: document.id, chunks });
+  const result = await ingestChunks({
+    userId,
+    documentId: document.id,
+    chunks,
+    reservationId: reservation.id
+  });
   return Response.json({
     id: document.id,
     status: result.status,

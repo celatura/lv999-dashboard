@@ -13,6 +13,17 @@ import { EMBED_BATCH_SIZE, EMBEDDING_DIM } from '@/features/agent/constants/embe
 
 /** 同时进行的批次数（个人规模下 3 路并发足够，且不易触发限流） */
 const EMBED_MAX_CONCURRENCY = 3;
+const EMBED_INGEST_TIMEOUT_MS = 45_000;
+
+export class EmbeddingBatchError extends Error {
+  constructor(
+    readonly knownTokens: number,
+    cause: unknown
+  ) {
+    super('Embedding batch failed; partial usage may be incomplete', { cause });
+    this.name = 'EmbeddingBatchError';
+  }
+}
 
 /**
  * providerOptions key 为 `alibaba`（provider 规范名）；维度字段是单数 `dimension`。
@@ -49,9 +60,25 @@ export async function embedQuery(value: string): Promise<number[]> {
  */
 export async function embedTexts(
   values: string[]
-): Promise<{ embeddings: number[][]; tokens: number }> {
-  if (values.length === 0) return { embeddings: [], tokens: 0 };
+): Promise<{ embeddings: number[][]; tokens: number; usageIncomplete: boolean }> {
+  if (values.length === 0) return { embeddings: [], tokens: 0, usageIncomplete: false };
   const model = resolveEmbeddingModel();
+  return embedInBatches(values, (batch, abortSignal) =>
+    embedMany({ model, values: batch, providerOptions: embeddingProviderOptions, abortSignal })
+  );
+}
+
+async function embedInBatches(
+  values: string[],
+  runBatch: (
+    batch: string[],
+    abortSignal: AbortSignal
+  ) => Promise<{
+    embeddings: number[][];
+    usage?: { tokens: number };
+  }>
+): Promise<{ embeddings: number[][]; tokens: number; usageIncomplete: boolean }> {
+  if (values.length === 0) return { embeddings: [], tokens: 0, usageIncomplete: false };
   const batches: string[][] = [];
   for (let start = 0; start < values.length; start += EMBED_BATCH_SIZE) {
     batches.push(values.slice(start, start + EMBED_BATCH_SIZE));
@@ -59,18 +86,57 @@ export async function embedTexts(
 
   const embeddings: number[][] = [];
   let tokens = 0;
-  for (let start = 0; start < batches.length; start += EMBED_MAX_CONCURRENCY) {
-    const group = batches.slice(start, start + EMBED_MAX_CONCURRENCY);
-    const results = await Promise.all(
-      group.map((batch) =>
-        embedMany({ model, values: batch, providerOptions: embeddingProviderOptions })
-      )
-    );
-    for (const result of results) {
-      embeddings.push(...result.embeddings.map(assertDim));
-      // 累计 embedding tokens（供摄取成功后按 priceEmbedding 计费）
-      tokens += result.usage?.tokens ?? 0;
+  let usageIncomplete = false;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error('Embedding ingestion timed out')),
+    EMBED_INGEST_TIMEOUT_MS
+  );
+  try {
+    for (let start = 0; start < batches.length; start += EMBED_MAX_CONCURRENCY) {
+      const group = batches.slice(start, start + EMBED_MAX_CONCURRENCY);
+      const results = await Promise.allSettled(
+        group.map(async (batch) => {
+          const signal = controller.signal;
+          if (signal.aborted) throw signal.reason;
+          let rejectAbort!: (reason: unknown) => void;
+          const aborted = new Promise<never>((_, reject) => {
+            rejectAbort = reject;
+          });
+          const onAbort = () => rejectAbort(signal.reason);
+          signal.addEventListener('abort', onAbort, { once: true });
+          try {
+            return await Promise.race([
+              Promise.resolve().then(() => runBatch(batch, signal)),
+              aborted
+            ]);
+          } finally {
+            signal.removeEventListener('abort', onAbort);
+          }
+        })
+      );
+      let batchError: unknown;
+      let failed = false;
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          if (!failed) batchError = result.reason;
+          failed = true;
+          continue;
+        }
+        const usage = result.value.usage?.tokens;
+        if (usage === undefined) usageIncomplete = true;
+        tokens += usage ?? 0;
+        try {
+          embeddings.push(...result.value.embeddings.map(assertDim));
+        } catch (error) {
+          if (!failed) batchError = error;
+          failed = true;
+        }
+      }
+      if (failed) throw new EmbeddingBatchError(tokens, batchError);
     }
+  } finally {
+    clearTimeout(timer);
   }
-  return { embeddings, tokens };
+  return { embeddings, tokens, usageIncomplete };
 }

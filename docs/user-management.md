@@ -61,7 +61,7 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 ```
 
 - 支持分页（`limit`/`offset`）、搜索（`query` → `ilike` email/name/id）、排序（前端 `sort` JSON 解析 → `createdAt` / `lastSignInAt`，默认 `createdAt` 倒序）。
-- **余额合并**：复用 credits 的 [`getBalancesByIds`](../src/features/credits/api/service.ts)（一次 `select … where userId in (…)` 返回 `Map`），无账户行的用户按 0（与懒创建约定一致）。
+- **余额合并**：复用 credits 的 [`getBalancesByIds`](../src/features/credits/api/service.ts) 批量读取可用额度（账户总额减冻结额度），无账户行的用户按 0。管理员设定的也是可用额度，不影响进行中的冻结；见 [credits.md](./credits.md)。
 - `AdminUser` = `{ id, name, email, imageUrl, createdAt, lastSignInAt, balance }`；`imageUrl` 取 `user.image`（邮箱注册通常为 null）；`name` 缺省回退邮箱前缀 → userId；`lastSignInAt` 未命中（从未登录）为 null。
 
 ---

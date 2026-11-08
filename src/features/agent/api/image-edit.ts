@@ -43,6 +43,7 @@ export async function editImageAssetCore(params: {
   conversationId?: string | null;
   /** 中止信号（聊天「停止」联动；直连端点不传） */
   signal?: AbortSignal;
+  onGenerated?: () => void;
 }): Promise<{ id: string; title: string; sizeBytes: number }> {
   // 归属校验：源资产必须属于当前用户、为图片且已转入 OSS（文本资产不可编辑）
   const source = await getAsset(params.userId, params.sourceAssetId);
@@ -62,6 +63,7 @@ export async function editImageAssetCore(params: {
     size,
     signal: params.signal
   });
+  params.onGenerated?.();
 
   const title = params.title?.trim() || buildDerivedTitle(source.title);
   const asset = await createImageAsset({

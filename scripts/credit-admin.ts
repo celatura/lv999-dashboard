@@ -9,13 +9,23 @@
  *
  * 复用 features/credits/api/service（经 getDb()）；无参数/非法参数打印用法并 exit(1)。
  */
-import { getBalance, grantCredits, setBalance } from '../src/features/credits/api/service';
+import { and, eq } from 'drizzle-orm';
+import { getDb } from '../src/lib/db';
+import { creditReservations } from '../src/lib/db/schema';
+import {
+  getCreditAccount,
+  grantCredits,
+  setBalance,
+  settleCredits
+} from '../src/features/credits/api/service';
 
 function usage(): never {
   console.error(`用法：
   bun scripts/credit-admin.ts grant <userId> <amount> [--note "..."]
   bun scripts/credit-admin.ts balance <userId>
-  bun scripts/credit-admin.ts set <userId> <amount> [--note "..."]`);
+  bun scripts/credit-admin.ts set <userId> <amount> [--note "..."]
+  bun scripts/credit-admin.ts pending <userId>
+  bun scripts/credit-admin.ts resolve <reservationId> <actualCost> --confirm-stopped [--waive]`);
   process.exit(1);
 }
 
@@ -29,20 +39,45 @@ const [command, userId, amountArg, ...rest] = process.argv.slice(2);
 if (!command || !userId) usage();
 
 if (command === 'balance') {
-  const balance = await getBalance(userId);
-  console.log(`${userId}: ${balance} credits`);
+  const account = await getCreditAccount(userId);
+  console.log(
+    `${userId}: available=${account.balance}, reserved=${account.reserved}, total=${account.total}`
+  );
+  process.exit(0);
+}
+
+if (command === 'pending') {
+  const reservations = await getDb()
+    .select()
+    .from(creditReservations)
+    .where(and(eq(creditReservations.userId, userId), eq(creditReservations.status, 'pending')));
+  console.log(JSON.stringify(reservations, null, 2));
+  process.exit(0);
+}
+
+if (command === 'resolve') {
+  if (!amountArg || !/^\d+$/.test(amountArg) || !rest.includes('--confirm-stopped')) usage();
+  await settleCredits({
+    reservationId: userId,
+    cost: Number(amountArg),
+    waive: rest.includes('--waive'),
+    meta: { resolvedManually: true }
+  });
+  console.log(
+    `已结算预留 ${userId}；实际费用 ${amountArg}${rest.includes('--waive') ? '；用户费用已免除' : ''}`
+  );
   process.exit(0);
 }
 
 if (command === 'grant' || command === 'set') {
-  const amount = Number.parseInt(amountArg ?? '', 10);
-  if (!Number.isFinite(amount)) {
+  if (!amountArg || !/^\d+$/.test(amountArg)) {
     console.error('amount 必须是整数');
     usage();
   }
+  const amount = Number(amountArg);
   const note = parseNote(rest);
   if (command === 'grant') {
-    if (amount === 0) {
+    if (amount <= 0) {
       console.error('grant 的 amount 不能为 0');
       usage();
     }

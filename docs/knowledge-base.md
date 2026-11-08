@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 
 - [`search.ts`](../src/features/knowledge/lib/search.ts) `searchKnowledgeByText`：`embedQuery` → `searchKnowledge`（[`service.ts`](../src/features/knowledge/api/service.ts)）用 `embedding <=> queryVec::vector` cosine 距离升序取 topK，**仅检索 `status='ready'` 的片段**，`score = 1 - 距离`；再按 `SEARCH_MIN_SCORE=0.45` 过滤低相关片段（避免噪声污染上下文、诱导"强行引用"；阈值经真实语料标定，见 `constants/knowledge.ts`）。
 - Agent 工具 [`agent.ts`](../src/features/agent/api/agent.ts) `knowledgeSearch`（与 `findAssets`/`readAsset` 并列，同时登记进 `agentValidationTools` 与 `buildAgent.tools`）：输入 `{ query, topK?(1..8 默认 5) }`，返回 `results: [{ documentId, documentTitle, chunkIndex, content, score }]`；空结果提示"知识库中未找到相关资料，不要编造"。
-- **检索测试（调试台面板）**：知识库页「检索测试」→ `POST /api/agent/knowledge/search` → 复用同一 `searchKnowledgeByText`（同一 `embedQuery` + 同 `SEARCH_MIN_SCORE` 过滤 + 同 topK 上限），保证「测试所见 = 对话所得」；零计费（`embedQuery` 已豁免，见 [docs/credits.md](./credits.md) §6.3）。
+- **检索测试（调试台面板）**：知识库页「检索测试」→ `POST /api/agent/knowledge/search` → 复用同一 `searchKnowledgeByText`（同一 `embedQuery` + 同 `SEARCH_MIN_SCORE` 过滤 + 同 topK 上限），保证「测试所见 = 对话所得」；零计费（`embedQuery` 已豁免，见 [docs/credits.md](./credits.md)）。
 - 指令区分：`findAssets` 按**标题**找「作品」（复用/改写）；`knowledgeSearch` 按**语义**找「资料」（问答/综述）。
 
 ---

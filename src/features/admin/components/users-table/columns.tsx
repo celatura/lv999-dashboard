@@ -87,7 +87,7 @@ export const columns: ColumnDef<DataTableFeatures, AdminUser>[] = [
     accessorKey: 'balance',
     enableSorting: false,
     header: ({ column }: { column: Column<DataTableFeatures, AdminUser, unknown> }) => (
-      <DataTableColumnHeader column={column} title='Credits 余额' />
+      <DataTableColumnHeader column={column} title='可用 Credits' />
     ),
     cell: ({ row }) => (
       <span
@@ -99,7 +99,7 @@ export const columns: ColumnDef<DataTableFeatures, AdminUser>[] = [
         {row.original.balance}
       </span>
     ),
-    meta: { label: 'Credits 余额' }
+    meta: { label: '可用 Credits' }
   },
   {
     id: 'actions',

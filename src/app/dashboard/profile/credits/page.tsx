@@ -13,7 +13,7 @@ type PageProps = {
 
 /**
  * Credits 流水页。
- * 具体路由段 profile/credits 优先于 profile/[[...profile]] catch-all（见 docs/credits.md §8），
+ * 具体路由段 profile/credits 优先于 profile/[[...profile]] catch-all，
  * 故 /dashboard/profile/credits 命中本页而非个人资料页。
  */
 export default async function CreditsPage(props: PageProps) {

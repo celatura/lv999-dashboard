@@ -11,7 +11,7 @@ import {
 } from '@/features/agent/constants/limits';
 import { editImageRequestSchema } from '@/features/agent/api/types';
 import { checkBalance } from '@/features/credits/api/service';
-import { chargeOnGenerationResult } from '@/features/credits/lib/billing';
+import { chargeOnGenerationResult, InsufficientCreditsError } from '@/features/credits/lib/billing';
 import { priceImage } from '@/features/credits/lib/pricing';
 import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/credits';
 
@@ -82,12 +82,13 @@ export async function POST(request: Request, context: RouteContext) {
       userId,
       kind: 'image',
       fallbackCharge: { cost: priceImage(true), meta: { edit: true, sourceAssetId: id } },
-      run: () =>
+      run: (markGenerated) =>
         editImageAssetCore({
           userId,
           sourceAssetId: id,
           instruction: trimmedInstruction,
-          aspect
+          aspect,
+          onGenerated: () => markGenerated({ cost: priceImage(true) })
         }),
       buildCharge: (created) => ({
         cost: priceImage(true),
@@ -96,6 +97,9 @@ export async function POST(request: Request, context: RouteContext) {
     });
     return Response.json({ id: asset.id });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
+    }
     if (error instanceof ImageEditError) {
       if (error.code === 'source_too_large') {
         return apiError(413, 'payload_too_large', 'Source image exceeds 10MB edit limit');

@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   type AnyPgColumn,
   index,
   integer,
@@ -9,6 +10,7 @@ import {
   timestamp,
   uuid
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { vector1024 } from './vector';
 // type-only：仅为 jsonb 列标注类型（运行时被擦除，drizzle-kit 无需解析该路径，无循环 import）
 import type { AgentToolName, SkillExample } from '../../features/agent/constants/skills';
@@ -31,7 +33,7 @@ import type { AgentToolName, SkillExample } from '../../features/agent/constants
  * - knowledge_chunks: 文档切分片段 + 向量（pgvector）；文档删除时级联删除（CASCADE）
  *
  * Credits 消耗系统（成本管控底座）
- * - credits_accounts: 每用户一行余额（懒创建，无记录视为 0；balance 可为负 = 单次透支）
+ * - credits_accounts: 每用户一行余额及冻结额度（懒创建，无记录视为 0）
  * - credit_ledger: 流水（只增不改，审计 + 前端展示）；delta 正=grant 负=消耗，balanceAfter 为本笔后余额快照
  */
 
@@ -166,14 +168,53 @@ export const knowledgeChunks = pgTable(
 /**
  * Credits 账户（每用户一行，懒创建）。
  * 无该 user 行时视为 balance=0；首次 grant 或首次扣费时 upsert 建行。
- * balance 允许为负：checkBalance 判据为 balance>0，已 grant 账号单次调用可透支（见 docs/credits.md §10）。
+ * 可用额度为 balance - reserved；冻结额度不能超过余额。
  */
-export const creditsAccounts = pgTable('credits_accounts', {
-  userId: text('user_id').primaryKey(),
-  balance: integer('balance').notNull().default(0),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
-});
+export const creditsAccounts = pgTable(
+  'credits_accounts',
+  {
+    userId: text('user_id').primaryKey(),
+    balance: integer('balance').notNull().default(0),
+    reserved: integer('reserved').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check(
+      'credits_accounts_available_nonnegative',
+      sql`${table.balance} >= ${table.reserved} AND ${table.reserved} >= 0`
+    )
+  ]
+);
+
+export const creditReservations = pgTable(
+  'credit_reservations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => creditsAccounts.userId, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    amount: integer('amount').notNull(),
+    parentReservationId: uuid('parent_reservation_id'),
+    borrowed: integer('borrowed').notNull().default(0),
+    status: text('status').notNull().default('pending'),
+    actualCost: integer('actual_cost'),
+    charged: integer('charged'),
+    meta: jsonb('meta').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    settledAt: timestamp('settled_at', { withTimezone: true })
+  },
+  (table) => [
+    index('credit_reservations_user_status_idx').on(table.userId, table.status),
+    check('credit_reservations_amount_positive', sql`${table.amount} > 0`),
+    check(
+      'credit_reservations_borrowed_valid',
+      sql`${table.borrowed} >= 0 AND ${table.borrowed} <= ${table.amount} AND (${table.borrowed} = 0 OR ${table.parentReservationId} IS NOT NULL)`
+    ),
+    check('credit_reservations_status_valid', sql`${table.status} IN ('pending', 'settled')`)
+  ]
+);
 
 /**
  * Credits 流水（只增不改）：审计 + 前端展示。

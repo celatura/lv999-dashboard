@@ -12,7 +12,7 @@ import {
 } from '@/features/agent/constants/limits';
 import { ASPECT_PRESETS } from '@/features/agent/constants/image-models';
 import { checkBalance } from '@/features/credits/api/service';
-import { chargeOnGenerationResult } from '@/features/credits/lib/billing';
+import { chargeOnGenerationResult, InsufficientCreditsError } from '@/features/credits/lib/billing';
 import { priceImage } from '@/features/credits/lib/pricing';
 import { INSUFFICIENT_CREDITS_API_MESSAGE } from '@/features/credits/constants/credits';
 
@@ -91,11 +91,12 @@ export async function POST(request: Request) {
       userId,
       kind: 'image',
       fallbackCharge: { cost: priceImage(false), meta: { edit: false } },
-      run: async () => {
+      run: async (markGenerated) => {
         const { imageBuffer, mime } = await generateImage({
           prompt: trimmedPrompt,
           size: aspect ? ASPECT_PRESETS[aspect] : undefined
         });
+        markGenerated({ cost: priceImage(false) });
         return createImageAsset({
           userId,
           conversationId: null,
@@ -112,6 +113,9 @@ export async function POST(request: Request) {
     });
     return Response.json({ id: asset.id });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
+    }
     if (error instanceof GenerationError) {
       // 生成失败原因（审核拒绝/限流/鉴权/超时）已由 image-generation.ts 映射为用户可读中文，
       // 以 generation_failed 透传（见 lib/api-error.ts 约定），前端原样展示

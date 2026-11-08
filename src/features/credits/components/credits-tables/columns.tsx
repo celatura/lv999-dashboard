@@ -77,7 +77,7 @@ export const columns: ColumnDef<DataTableFeatures, LedgerEntry>[] = [
     id: 'balanceAfter',
     accessorKey: 'balanceAfter',
     header: ({ column }: { column: Column<DataTableFeatures, LedgerEntry, unknown> }) => (
-      <DataTableColumnHeader column={column} title='变动后余额' />
+      <DataTableColumnHeader column={column} title='变动后总额' />
     ),
     cell: ({ row }) => (
       <span
@@ -86,7 +86,7 @@ export const columns: ColumnDef<DataTableFeatures, LedgerEntry>[] = [
         {row.original.balanceAfter}
       </span>
     ),
-    meta: { label: '变动后余额' }
+    meta: { label: '变动后总额' }
   },
   {
     id: 'detail',

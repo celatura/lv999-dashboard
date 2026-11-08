@@ -64,6 +64,20 @@
       "when": 1790974390262,
       "tag": "0008_purple_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794141860937,
+      "tag": "0009_thankful_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794143425053,
+      "tag": "0010_needy_killraven",
+      "breakpoints": true
     }
   ]
 }

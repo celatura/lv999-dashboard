@@ -14,7 +14,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
  * 检索测试：与 Agent 的 `knowledgeSearch` 工具完全同链路 ——
  * 复用 searchKnowledgeByText（同一 embedQuery + SEARCH_MIN_SCORE 阈值过滤 + topK 上限），
  * 不得在此自写检索逻辑，保证「测试所见 = 对话所得」。
- * 纯读语义、零计费（embedQuery 已豁免，见 docs/credits.md §6.3）。
+ * 纯读语义、零计费（embedQuery 已豁免，见 docs/credits.md）。
  */
 export async function POST(request: Request) {
   const userId = await getUserId();

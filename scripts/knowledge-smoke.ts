@@ -17,11 +17,19 @@ import {
   listDocuments,
   searchKnowledge
 } from '../src/features/knowledge/api/service';
-import { ingestChunks, prepareChunks } from '../src/features/knowledge/lib/ingest';
+import {
+  ingestChunks,
+  prepareChunks,
+  reserveKnowledgeCredits
+} from '../src/features/knowledge/lib/ingest';
+import { grantCredits } from '../src/features/credits/api/service';
+import { getDb } from '../src/lib/db';
+import { creditLedger, creditsAccounts } from '../src/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { embedQuery } from '../src/features/knowledge/lib/embeddings';
 import { EMBED_BATCH_SIZE } from '../src/features/agent/constants/embedding';
 
-const SMOKE_USER = 'knowledge-smoke-user';
+const SMOKE_USER = `knowledge-smoke-${Date.now()}`;
 
 const shortText = [
   '# 可恢复流实现笔记',
@@ -62,8 +70,15 @@ function buildLongText(sections: number): string {
 
 async function ingest(userId: string, title: string, content: string) {
   const chunks = prepareChunks(content);
+  const reservation = await reserveKnowledgeCredits(userId, chunks);
+  if (!reservation) throw new Error('Insufficient smoke test credits');
   const doc = await createDocument({ userId, title, source: 'manual', content });
-  const result = await ingestChunks({ userId, documentId: doc.id, chunks });
+  const result = await ingestChunks({
+    userId,
+    documentId: doc.id,
+    chunks,
+    reservationId: reservation.id
+  });
   return { doc, chunks, result };
 }
 
@@ -74,6 +89,7 @@ function check(name: string, ok: boolean) {
 }
 
 // --- 1. 短文档：单片段 + 相关/无关对照 + 删除级联 -------------------------
+await grantCredits({ userId: SMOKE_USER, amount: 1000, note: 'knowledge smoke' });
 const short = await ingest(SMOKE_USER, '冒烟：可恢复流笔记', shortText);
 console.log('short chunks:', short.chunks.length, 'ingest:', short.result);
 check('短文档摄取成功', short.result.status === 'ready' && short.result.chunkCount > 0);
@@ -141,6 +157,8 @@ const deletedShort = await deleteDocument(SMOKE_USER, short.doc.id);
 const deletedLong = await deleteDocument(SMOKE_USER, long.doc.id);
 const afterDelete = await searchKnowledge(SMOKE_USER, relatedVector, 5);
 check('删除成功且片段级联清理', deletedShort && deletedLong && afterDelete.length === 0);
+await getDb().delete(creditLedger).where(eq(creditLedger.userId, SMOKE_USER));
+await getDb().delete(creditsAccounts).where(eq(creditsAccounts.userId, SMOKE_USER));
 
 const failed = checks.filter((line) => line.startsWith('FAIL'));
 console.log(failed.length === 0 ? 'SMOKE OK' : `SMOKE FAILED: ${failed.length} 项未通过`);
