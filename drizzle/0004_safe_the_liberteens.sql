@@ -1,1 +1,0 @@
-ALTER TABLE "conversations" ADD COLUMN "active_skill_id" text;

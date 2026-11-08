@@ -1,1 +1,0 @@
-ALTER TABLE "assets" ADD COLUMN "favorite" boolean DEFAULT false NOT NULL;

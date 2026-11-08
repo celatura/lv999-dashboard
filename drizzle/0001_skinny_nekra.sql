@@ -1,2 +1,0 @@
-ALTER TABLE "assets" ADD COLUMN "source_asset_id" uuid;--> statement-breakpoint
-ALTER TABLE "assets" ADD CONSTRAINT "assets_source_asset_id_assets_id_fk" FOREIGN KEY ("source_asset_id") REFERENCES "public"."assets"("id") ON DELETE set null ON UPDATE no action;

@@ -14,7 +14,7 @@
  * 原子性：整个文件的语句在单个事务中执行，任一语句失败即整体回滚，不会留下半套 schema。
  * 注意：若迁移需要 `CREATE INDEX CONCURRENTLY` 这类不能进事务的语句，必须拆出去单独执行，
  * 否则会报 `CREATE INDEX CONCURRENTLY cannot run inside a transaction block`。
- *       （截至 0008，drizzle/ 下的迁移均无此类语句。）
+ *       （历史迁移均无此类语句。）
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

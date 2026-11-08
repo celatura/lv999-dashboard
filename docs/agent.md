@@ -378,7 +378,7 @@ bunx drizzle-kit generate
 bun scripts/db-apply-sql.ts
 ```
 
-> 当前阿里云 RDS 实例下 `bun run db:push`（`drizzle-kit push`）会在连接阶段静默失败，因此采用确定性工作流：`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用。当前数据库是唯一基准，部分已应用的历史 SQL 未保留，不能依赖完整迁移链从空库重建；未生成新迁移时脚本会报最新 SQL 不存在，且不会自动判断 SQL 是否已经应用。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
+> 当前阿里云 RDS 实例下 `bun run db:push`（`drizzle-kit push`）会在连接阶段静默失败，因此采用确定性工作流：`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用。当前数据库是唯一基准，部分已应用的历史 SQL 未保留，不能依赖完整迁移链从空库重建；`drizzle/` 仅保留最新快照与 `meta/_journal.json`（历史 SQL 与旧快照已移除），`generate` 以最新快照为基线做增量 diff；未生成新迁移时脚本会报最新 SQL 不存在，且不会自动判断 SQL 是否已经应用。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
 
 ### 冒烟脚本
 
