@@ -109,7 +109,7 @@ bun run dev
 | `bun run build` / `bun run start` | 生产构建 / 启动 |
 | `bun run db:generate` | 由 schema 生成增量迁移 SQL（无需连库） |
 | `bun run db:migrate` | 应用未执行的迁移到 `DATABASE_URL`（空库初始化也用它） |
-| `bun run db:check` | 校验迁移链完整性（pre-push 自动执行） |
+| `bun run db:check` | 校验迁移链快照（手动排查用，仅能发现快照损坏 / 冲突） |
 | `bun run db:stamp` | 为已有库补写已应用记录（默认 dry-run，`--apply` 写入） |
 | `bun run typecheck` | TypeScript 类型检查 |
 | `bun run lint` | Oxlint 检查 + 弃用 API 守卫 |

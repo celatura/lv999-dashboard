@@ -377,7 +377,7 @@ bun run db:generate
 # 应用到 DATABASE_URL（已应用状态记录在 drizzle.__drizzle_migrations，重复执行安全）
 bun run db:migrate
 
-# 校验迁移链完整性
+# 校验迁移链快照（手动排查用：只发现快照损坏 / 冲突，版本不匹配与缺文件仍会放过）
 bun run db:check
 ```
 
