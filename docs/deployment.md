@@ -80,6 +80,16 @@ docker run -d -p 3000:3000 \
 - **流恢复**：对话进行中刷新页面能重连恢复（`after`/`waitUntil` 在常驻 Node 进程下的行为）；
 - **构建内存**：Next 构建 + anydoc 在 2C2G 机器上可能吃紧（不足则升 4G，或把镜像构建放到 CI 再推送）。
 
+### 8. 数据库迁移（发版必查）
+
+迁移不随容器启动自动执行，需在能访问数据库的环境先跑：
+
+```bash
+bun run db:migrate   # 只执行未应用的迁移，已应用状态记录在 drizzle.__drizzle_migrations
+```
+
+已有数据但尚无迁移记录的旧库，先 `bun run db:stamp`（默认 dry-run，确认后加 `--apply`）接入。迁移前停止旧版本写入与在途生成任务，迁移成功后再滚动新版本。
+
 ---
 
 ## Vercel

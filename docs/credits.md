@@ -48,9 +48,9 @@ bun scripts/credit-admin.ts resolve <reservationId> <actualCost> --confirm-stopp
 
 ## 迁移与部署
 
-当前数据库已完成 Credits 结构升级，并作为唯一基准；历史迁移 `0009` 和 `0010` 的 SQL 不再保留。`drizzle/` 仅保留最新 schema 快照与 `meta/_journal.json`（历史 SQL 与旧快照已移除），供后续生成增量迁移使用。由于历史 SQL 不完整，不能用完整迁移链从空库重建数据库，也不能直接使用依赖完整迁移链的 Drizzle migrator。
+`drizzle/` 的迁移链可完整重放：`0000_baseline.sql` 建全部表（含 Credits 结构与约束），`0001_knowledge_hnsw.sql` 补 pgvector HNSW 索引。空库执行 `bun run db:migrate` 即可建好；已应用状态记录在 `drizzle.__drizzle_migrations`，不会重复执行。
 
-今后修改 schema 时，先备份并确认目标数据库，再运行 `bunx drizzle-kit generate` 和 `bun scripts/db-apply-sql.ts`。脚本默认查找 journal 中最新迁移的 SQL；若该文件不存在会报错，不会回退执行更早的迁移。脚本不记录已应用状态，不要重复执行已应用的 SQL。迁移前停止旧版写入和在途任务，迁移成功后再启动对应版本。
+今后修改 schema 时，先备份并确认目标数据库，再运行 `bun run db:generate` 生成增量 SQL、`bun run db:migrate` 应用。迁移前停止旧版写入和在途任务，迁移成功后再启动对应版本。已有数据但尚无迁移记录的旧库，先执行 `bun run db:stamp`（默认 dry-run，确认后加 `--apply`）接入。
 
 ## 验证
 

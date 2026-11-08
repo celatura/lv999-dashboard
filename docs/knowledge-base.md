@@ -104,4 +104,4 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 - **维度一致性**：向量列 `VECTOR_DIM`、`EMBEDDING_DIM`、embed 的 `providerOptions.alibaba.dimension` 三者必须一致；改维度需重建列+HNSW 索引并对历史数据重嵌。
 - **HTML 入库先抽正文**：html 资产经 `htmlToText` 去标签，不把 markup/CSS/JS 向量化。
 - **失败即清理**：摄取失败清空半截片段并置 `failed`，避免残留片段被检索。
-- **迁移**：`bunx drizzle-kit generate` + 手动补 HNSW 索引 SQL + `bun scripts/db-apply-sql.ts`（RDS 下 `db:push` 静默失败）。
+- **迁移**：`bun run db:generate` + `bun run db:migrate`；HNSW 索引已作为 `drizzle/0001_knowledge_hnsw.sql` 置于迁移链上，空库可直接重放。

@@ -74,8 +74,8 @@ bun install
 cp env.example.txt .env.local
 # 然后至少填入 BETTER_AUTH_SECRET / BETTER_AUTH_URL 与 DATABASE_URL（总览 / 资产等页直连数据库，缺一不可，见下方说明）
 
-# 3. 使用已完成迁移的现有数据库作为基准
-#    如后续修改 schema：bunx drizzle-kit generate，再运行 bun scripts/db-apply-sql.ts
+# 3. 初始化数据库（空库一条命令建全部表与索引；已有库见下方说明）
+bun run db:migrate
 
 # 4. 启动开发服务器
 bun run dev
@@ -83,7 +83,7 @@ bun run dev
 
 访问 http://localhost:3000。
 
-> **关于数据库**：当前部署以现有数据库为唯一基准，部分已应用的历史迁移 SQL 未保留，不能从空库完整重建或直接使用依赖完整历史的 Drizzle migrator。后续变更采用「`drizzle-kit generate` 生成增量 SQL → `scripts/db-apply-sql.ts` 应用」；脚本不会记录已应用状态，勿重复执行。知识库的 HNSW 向量索引需手动补进迁移 SQL。详见 [docs/agent.md](./docs/agent.md) 与 [docs/knowledge-base.md](./docs/knowledge-base.md)。
+> **关于数据库**：`drizzle/` 提供一条可完整重放的迁移链——`0000_baseline.sql` 建全部表（业务表 + Better Auth 表，开头已包含 `CREATE EXTENSION IF NOT EXISTS vector`），`0001_knowledge_hnsw.sql` 补 pgvector 的 HNSW 索引。空库直接 `bun run db:migrate` 即可建好。后续改 schema：`bun run db:generate` 生成增量 SQL → `bun run db:migrate` 应用；已应用状态记录在 `drizzle.__drizzle_migrations`，重复执行只跑未应用的部分。已有数据但尚无迁移记录的库，先 `bun run db:stamp`（默认 dry-run，确认后加 `--apply`）接入。RDS 下 `drizzle-kit push` 会静默失败，项目不提供 `db:push`。详见 [docs/agent.md](./docs/agent.md)。
 
 ### 关键环境变量
 
@@ -107,8 +107,10 @@ bun run dev
 | --- | --- |
 | `bun run dev` | 启动开发服务器 |
 | `bun run build` / `bun run start` | 生产构建 / 启动 |
-| `bunx drizzle-kit generate` | 由 `schema.ts` 生成迁移 SQL（无需连库） |
-| `bun scripts/db-apply-sql.ts` | 应用迁移 SQL 到 `DATABASE_URL`（RDS 下替代静默失败的 `db:push`） |
+| `bun run db:generate` | 由 schema 生成增量迁移 SQL（无需连库） |
+| `bun run db:migrate` | 应用未执行的迁移到 `DATABASE_URL`（空库初始化也用它） |
+| `bun run db:check` | 校验迁移链完整性（pre-push 自动执行） |
+| `bun run db:stamp` | 为已有库补写已应用记录（默认 dry-run，`--apply` 写入） |
 | `bun run typecheck` | TypeScript 类型检查 |
 | `bun run lint` | Oxlint 检查 + 弃用 API 守卫 |
 | `bun run lint:strict` | Oxlint 零警告 |

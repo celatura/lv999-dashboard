@@ -1,1 +1,2 @@
+bun run db:check
 bun run build

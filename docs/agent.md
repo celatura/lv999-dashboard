@@ -371,17 +371,20 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 ## 12. 本地开发与数据库迁移
 
 ```bash
-# 由 schema.ts 生成迁移 SQL（无需连库）
-bunx drizzle-kit generate
+# 由 schema 生成增量迁移 SQL（无需连库）
+bun run db:generate
 
-# 应用 journal 中最新迁移的 SQL 到数据库（也可传入指定文件名）
-bun scripts/db-apply-sql.ts
+# 应用到 DATABASE_URL（已应用状态记录在 drizzle.__drizzle_migrations，重复执行安全）
+bun run db:migrate
+
+# 校验迁移链完整性
+bun run db:check
 ```
 
-> 当前阿里云 RDS 实例下 `bun run db:push`（`drizzle-kit push`）会在连接阶段静默失败，因此采用确定性工作流：`drizzle-kit generate` 生成 SQL → `scripts/db-apply-sql.ts` 应用。当前数据库是唯一基准，部分已应用的历史 SQL 未保留，不能依赖完整迁移链从空库重建；`drizzle/` 仅保留最新快照与 `meta/_journal.json`（历史 SQL 与旧快照已移除），`generate` 以最新快照为基线做增量 diff；未生成新迁移时脚本会报最新 SQL 不存在，且不会自动判断 SQL 是否已经应用。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
+> 迁移链是「单基线 + 增量」：`0000_baseline.sql` 由 `schema.ts` + `auth-schema.ts` 生成（文件头手动补了 `CREATE EXTENSION IF NOT EXISTS vector`，因为 drizzle-kit 不生成扩展语句），`0001_knowledge_hnsw.sql` 是 `--custom` 手写迁移，用于补 pgvector 的 HNSW 索引（drizzle-kit 不生成）。因此**空库可直接 `bun run db:migrate` 建好**，不依赖任何外部 dump；已应用状态由 drizzle-kit 记录，重复执行只跑未应用的迁移，不再需要人工记忆。阿里云 RDS 实例下 `drizzle-kit push` 会在连接阶段静默失败，项目不提供 `db:push`，统一走迁移链。已有数据但尚无记录的旧库用 `bun run db:stamp`（默认 dry-run）接入。`drizzle.config.ts` 已用 `process.loadEnvFile('.env.local')` 显式加载环境变量（drizzle-kit 不自动读取 `.env.local`）。数据库访问统一经 `getDb()` 懒加载，避免构建期缺 `DATABASE_URL` 失败。
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-apply-sql.ts`（应用迁移 SQL）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-stamp.ts`（为已有库补写迁移记录）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。

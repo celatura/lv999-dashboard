@@ -16,6 +16,7 @@
     "build/**",
     "node_modules/**",
     ".agents/**",
+    "drizzle/**",
     "pnpm-lock.yaml",
     "**/*.md",
     "**/*.mdc",

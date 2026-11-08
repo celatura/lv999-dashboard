@@ -156,14 +156,14 @@ ADMIN_USER_IDS=
 # 加插件或改认证字段后，重新生成 auth-schema（会覆盖，需先临时移除 auth.ts / mailer.ts 的 `import 'server-only'`）
 npx auth@latest generate --output src/lib/db/auth-schema.ts
 
-# 生成迁移 SQL（不连库）→ 应用到 RDS（沿用项目确定性工作流，见 scripts/db-apply-sql.ts）
-bunx drizzle-kit generate
-bun scripts/db-apply-sql.ts
+# 生成迁移 SQL（不连库）→ 应用（沿用项目迁移链，见 docs/agent.md §12）
+bun run db:generate
+bun run db:migrate
 ```
 
 > ⚠️ 加插件（2FA / organization 等）须重跑 `auth generate` 并重新迁移；本 MVP 无插件。
 >
-> ⚠️ **手动时区调整**：`auth-schema.ts` 所有 `timestamp` 列已改为 `{ withTimezone: true }`（timestamptz，与业务表一致，消除跨时区过期漂移，如重置令牌恒失效）。重跑 `auth generate` 会把它覆盖回无时区版——覆盖后须重新补 `withTimezone: true` 并再跑 `drizzle-kit generate` + `db-apply-sql` 迁移列类型。
+> ⚠️ **手动时区调整**：`auth-schema.ts` 所有 `timestamp` 列已改为 `{ withTimezone: true }`（timestamptz，与业务表一致，消除跨时区过期漂移，如重置令牌恒失效）。重跑 `auth generate` 会把它覆盖回无时区版——覆盖后须重新补 `withTimezone: true` 并再跑 `bun run db:generate` + `bun run db:migrate` 迁移列类型。
 
 ---
 
