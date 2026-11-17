@@ -24,26 +24,27 @@
 
 | 类别 | 选型 |
 | --- | --- |
-| 框架 | Next.js 16（App Router） |
-| 运行时 | Node.js 24（见 `.nvmrc`）或 Bun |
-| 语言 | TypeScript 7（strict） |
-| UI 组件 | shadcn/ui（Base UI primitives） |
-| 样式 | Tailwind CSS v4 |
-| 认证 | Better Auth（自托管 · 邮箱密码 · 自定义头像） |
-| AI / Agent | AI SDK v7（`ai` + `@ai-sdk/alibaba`），百炼（阿里云 Model Studio） |
-| 设计画布 | Konva + react-konva（2D canvas） |
-| 向量检索 / RAG | pgvector（阿里云 RDS） + 百炼 `text-embedding-v4` embedding |
-| 数据库 / ORM | PostgreSQL（阿里云 RDS） + Drizzle ORM |
+| 框架 | [Next.js 16](https://nextjs.org)（App Router）· React 19 |
+| 语言 | [TypeScript 7](https://www.typescriptlang.org)（strict） |
+| UI 组件 | [shadcn/ui](https://ui.shadcn.com)（[Base UI](https://base-ui.com) primitives） |
+| 样式 | [Tailwind CSS v4](https://tailwindcss.com) + [next-themes](https://github.com/pacocoursey/next-themes)（CSS 变量多主题） |
+| 认证 | [Better Auth](https://www.better-auth.com)（自托管 · 邮箱密码 · SMTP 密码重置） |
+| AI / Agent | [AI SDK v7](https://ai-sdk.dev)（`ai` + `@ai-sdk/alibaba`），百炼（阿里云 Model Studio） |
+| 流式渲染 | [Streamdown](https://streamdown.ai)（代码高亮 / CJK 插件） |
+| 设计画布 | [Konva](https://konvajs.org) + [react-konva](https://konvajs.org/docs/react/)（2D canvas） |
+| 向量检索 / RAG | [pgvector](https://github.com/pgvector/pgvector)（阿里云 RDS） + 百炼 `text-embedding-v4` embedding |
+| 文档解析 | [@firecrawl/anydoc](https://www.npmjs.com/package/@firecrawl/anydoc)（PDF / Office / EPUB → Markdown） |
+| 数据库 / ORM | PostgreSQL（阿里云 RDS） + [Drizzle ORM](https://orm.drizzle.team) |
 | 对象存储 | 阿里云 OSS（图片 / 视频等二进制资产；视频封面用 OSS 原生截帧） |
-| 缓存 / 流恢复 | Redis（resumable-stream 与停止信号 / 限流） |
-| 数据请求 | TanStack Query v5（SSR + Suspense） |
-| 数据表格 | TanStack Table v9 |
-| 表单 | TanStack Form + Zod v4 |
-| URL 状态 | nuqs |
-| 图表 | Recharts |
-| 命令面板 | kbar |
-| 代码检查 / 格式化 | Oxlint / Oxfmt + Husky（pre-commit） |
-| 包管理器 | Bun（推荐）或 npm |
+| 缓存 / 流恢复 | [Redis](https://redis.io)（[resumable-stream](https://www.npmjs.com/package/resumable-stream) 与停止信号 / 限流） |
+| 数据请求 | [TanStack Query v5](https://tanstack.com/query)（SSR + Suspense） |
+| 数据表格 | [TanStack Table v9](https://tanstack.com/table) |
+| 表单 | [TanStack Form](https://tanstack.com/form) + [Zod v4](https://zod.dev) |
+| URL 状态 | [nuqs](https://nuqs.dev) |
+| 图表 | [Recharts](https://recharts.org) |
+| 命令面板 | [kbar](https://kbar.vercel.app) |
+| 代码检查 / 格式化 | [Oxlint](https://oxc.rs/docs/guide/usage/linter) / [Oxfmt](https://oxc.rs/docs/guide/usage/formatter) + [Husky](https://typicode.github.io/husky/)（pre-commit） |
+| 包管理器 | [Bun](https://bun.sh)（推荐）或 npm |
 
 ## 页面一览
 
@@ -64,7 +65,7 @@
 
 ## 快速开始
 
-**前置要求**：Node.js 24（见 `.nvmrc`）或 Bun，推荐使用 Bun。
+**前置要求**：Node.js 26（见 `.nvmrc`）或 Bun，推荐使用 Bun。
 
 ```bash
 # 1. 安装依赖

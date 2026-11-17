@@ -2,7 +2,7 @@
 # Stage 1: Install dependencies
 # ============================================
 
-ARG NODE_VERSION=24-slim
+ARG NODE_VERSION=26-slim
 
 FROM node:${NODE_VERSION} AS dependencies
 

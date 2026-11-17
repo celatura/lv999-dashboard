@@ -27,7 +27,7 @@ The project follows a feature-based folder structure designed for scalability in
 
 - Next.js 16.4 with App Router
 - React 19.3
-- Node.js 24 (Node/Docker deployment) / Bun (local dev, recommended; Bun Dockerfile available)
+- Node.js 26 (Node/Docker deployment) / Bun (local dev, recommended; Bun Dockerfile available)
 - TypeScript 7 (native compiler) with strict mode enabled
 
 ### Styling & UI
