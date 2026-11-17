@@ -22,7 +22,8 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarRail
+  SidebarRail,
+  useSidebar
 } from '@/components/ui/sidebar';
 import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navGroups } from '@/config/nav-config';
@@ -41,10 +42,18 @@ interface AppSidebarProps {
   user?: { name: string; email: string; image?: string | null } | null;
 }
 
+/** 前缀匹配：/dashboard/agent/[conversationId] 等子路由也要点亮父级导航项 */
+function isActivePath(pathname: string, url: string) {
+  return pathname === url || (url !== '/' && url !== '#' && pathname.startsWith(`${url}/`));
+}
+
 export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { setOpenMobile } = useSidebar();
   const filteredGroups = useFilteredNavGroups(navGroups);
+  // 移动端抽屉点击导航后需要主动关闭（桌面图标轨不受影响）
+  const closeMobile = () => setOpenMobile(false);
   // 账号下拉受控 open：打开时才查 Credits 余额（不常驻轮询）
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
 
@@ -71,21 +80,27 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
-            {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+            {group.label && (
+              // 图标轨模式下分组标题被 -mt-8 上移隐藏，不加 pointer-events-none 会挡住上方导航项的点击
+              <SidebarGroupLabel className='group-data-[collapsible=icon]:pointer-events-none'>
+                {group.label}
+              </SidebarGroupLabel>
+            )}
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon ? Icons[item.icon] : Icons.logo;
+                const active = isActivePath(pathname, item.url);
                 return item?.items && item?.items?.length > 0 ? (
                   <Collapsible
                     key={item.title}
-                    defaultOpen={item.isActive}
+                    defaultOpen={item.isActive || active}
                     render={<SidebarMenuItem />}
                   >
                     <CollapsibleTrigger
                       render={
                         <SidebarMenuButton
                           tooltip={item.title}
-                          isActive={pathname === item.url}
+                          isActive={active}
                           className='group/collapsible'
                         />
                       }
@@ -96,25 +111,42 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>
-                        {item.items?.map((subItem) => (
-                          <SidebarMenuSubItem key={subItem.title}>
-                            <SidebarMenuSubButton
-                              render={<Link href={subItem.url} aria-label={subItem.title} />}
-                              isActive={pathname === subItem.url}
-                            >
-                              <span>{subItem.title}</span>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
+                        {item.items?.map((subItem) => {
+                          const subActive = isActivePath(pathname, subItem.url);
+                          return (
+                            <SidebarMenuSubItem key={subItem.title}>
+                              <SidebarMenuSubButton
+                                render={
+                                  <Link
+                                    href={subItem.url}
+                                    aria-label={subItem.title}
+                                    aria-current={subActive ? 'page' : undefined}
+                                  />
+                                }
+                                isActive={subActive}
+                                onClick={closeMobile}
+                              >
+                                <span>{subItem.title}</span>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          );
+                        })}
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </Collapsible>
                 ) : (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
-                      render={<Link href={item.url} aria-label={item.title} />}
+                      render={
+                        <Link
+                          href={item.url}
+                          aria-label={item.title}
+                          aria-current={active ? 'page' : undefined}
+                        />
+                      }
                       tooltip={item.title}
-                      isActive={pathname === item.url}
+                      isActive={active}
+                      onClick={closeMobile}
                     >
                       <Icon />
                       <span>{item.title}</span>
