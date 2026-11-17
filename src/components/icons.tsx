@@ -56,6 +56,8 @@ import {
   IconLayoutDashboard,
   IconLayoutKanban,
   IconLayoutSidebar,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconLoader2,
   IconLock,
   IconLogin,
@@ -140,6 +142,8 @@ export const Icons = {
   dashboard: IconLayoutDashboard,
   kanban: IconLayoutKanban,
   panelLeft: IconLayoutSidebar,
+  panelLeftClose: IconLayoutSidebarLeftCollapse,
+  panelLeftOpen: IconLayoutSidebarLeftExpand,
 
   // User
   user: IconUser,

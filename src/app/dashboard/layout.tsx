@@ -7,6 +7,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { isAdmin } from '@/lib/admin';
 import { verifySession } from '@/lib/auth-session';
 import type { Metadata } from 'next';
+import type { CSSProperties } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -30,7 +31,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const defaultOpen = cookieStore.get('sidebar_state')?.value === 'true';
   return (
     <KBar>
-      <SidebarProvider defaultOpen={defaultOpen}>
+      {/* 固定高度外壳：sidebar 是 --sidebar 画布，页面是内嵌面板且唯一滚动容器，
+          不再需要任何 calc(100vh - header) 的高度计算；2.375rem 图标轨两侧各留 12px */}
+      <SidebarProvider
+        defaultOpen={defaultOpen}
+        className='h-dvh'
+        style={{ '--sidebar-width-icon': '2.375rem' } as CSSProperties}
+      >
         <a
           href='#main-content'
           className='bg-background ring-ring sr-only rounded-md px-3 py-2 text-sm font-medium shadow focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:ring-2'
@@ -45,10 +52,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
             image: verified.user.image
           }}
         />
-        <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
+        <SidebarInset
+          id='main-content'
+          tabIndex={-1}
+          className='md:ring-foreground/10 min-h-0 min-w-0 overflow-hidden outline-none md:ring-1'
+        >
           <Header />
-          <InfobarProvider defaultOpen={false}>
-            {children}
+          <InfobarProvider defaultOpen={false} className='min-h-0'>
+            <div
+              data-slot='page-scroller'
+              className='flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto'
+            >
+              {children}
+            </div>
             <InfoSidebar side='right' />
           </InfobarProvider>
         </SidebarInset>

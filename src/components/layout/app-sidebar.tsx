@@ -29,6 +29,7 @@ import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navGroups } from '@/config/nav-config';
 import { signOut } from '@/lib/auth-client';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
+import { cn } from '@/lib/utils';
 import { SidebarCreditsItem } from '@/features/credits/components/sidebar-credits-item';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -47,19 +48,24 @@ function isActivePath(pathname: string, url: string) {
   return pathname === url || (url !== '/' && url !== '#' && pathname.startsWith(`${url}/`));
 }
 
+// 2.375rem 图标轨配 4px 左右内边距，32px 按钮两侧各留 12px
+const railPadding = 'group-data-[collapsible=icon]:px-1';
+
 export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, isMobile, state } = useSidebar();
   const filteredGroups = useFilteredNavGroups(navGroups);
   // 移动端抽屉点击导航后需要主动关闭（桌面图标轨不受影响）
   const closeMobile = () => setOpenMobile(false);
+  // 折叠成图标轨后账号菜单改为向右弹出，避免盖住导轨
+  const railMenu = state === 'collapsed' && !isMobile;
   // 账号下拉受控 open：打开时才查 Credits 余额（不常驻轮询）
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
 
   return (
-    <Sidebar collapsible='icon'>
-      <SidebarHeader className='group-data-[collapsible=icon]:pt-4'>
+    <Sidebar collapsible='icon' variant='inset'>
+      <SidebarHeader className={railPadding}>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -79,14 +85,14 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
       </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
-          <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
+          <SidebarGroup key={group.label || 'ungrouped'} className={cn('py-0', railPadding)}>
             {group.label && (
               // 图标轨模式下分组标题被 -mt-8 上移隐藏，不加 pointer-events-none 会挡住上方导航项的点击
               <SidebarGroupLabel className='group-data-[collapsible=icon]:pointer-events-none'>
                 {group.label}
               </SidebarGroupLabel>
             )}
-            <SidebarMenu>
+            <SidebarMenu className='gap-0.5'>
               {group.items.map((item) => {
                 const Icon = item.icon ? Icons[item.icon] : Icons.logo;
                 const active = isActivePath(pathname, item.url);
@@ -158,7 +164,7 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
           </SidebarGroup>
         ))}
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className={railPadding}>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu open={userMenuOpen} onOpenChange={setUserMenuOpen}>
@@ -170,14 +176,16 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
                   />
                 }
               >
-                {user && <UserAvatarProfile className='h-8 w-8 rounded-lg' showInfo user={user} />}
-                <Icons.chevronsDown className='ml-auto size-4' />
+                {user && <UserAvatarProfile className='size-8 rounded-lg' showInfo user={user} />}
+                <Icons.chevronsUpDown className='text-muted-foreground ml-auto size-4' />
               </DropdownMenuTrigger>
+              {/* 桌面端向右弹出：展开时距侧栏 8px，图标轨时 16px；移动端在抽屉内向上弹出 */}
               <DropdownMenuContent
-                className='w-(--anchor-width) min-w-56 rounded-lg'
-                side='bottom'
-                align='end'
-                sideOffset={4}
+                className={isMobile ? 'w-(--anchor-width) min-w-60' : 'w-64'}
+                side={isMobile ? 'top' : 'right'}
+                align={isMobile ? 'start' : 'end'}
+                sideOffset={isMobile ? 4 : railMenu ? 16 : 8}
+                alignOffset={isMobile ? 0 : -8}
               >
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className='p-0 font-normal'>
@@ -221,7 +229,7 @@ export default function AppSidebar({ isAdmin = false, user = null }: AppSidebarP
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
-      <SidebarRail />
+      <SidebarRail className='hover:after:bg-transparent' />
     </Sidebar>
   );
 }

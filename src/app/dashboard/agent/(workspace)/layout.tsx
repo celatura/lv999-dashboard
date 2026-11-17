@@ -7,7 +7,7 @@ import { ConversationSidebar } from '@/features/agent/components/conversations/c
 
 /**
  * Agent 创作工作台布局：左侧会话列表 + 右侧对话区。
- * 高度按 dashboard Header 的尺寸（移动端 h-16，桌面 h-14）扣减，保证区域内部滚动。
+ * 外壳是固定高度列且由 page-scroller 承担滚动，这里只需撑满剩余高度、内部各自滚动。
  */
 export default async function AgentWorkspaceLayout({ children }: { children: React.ReactNode }) {
   const userId = await getUserId();
@@ -26,7 +26,7 @@ export default async function AgentWorkspaceLayout({ children }: { children: Rea
   // 根节点必须带 flex-1：dashboard 外壳的 InfobarProvider 用 flex 行包裹页面内容，
   // 缺省会按内容收缩（shrink-to-fit）导致工作区靠左停靠、右侧留大块空白（历史 bug）。
   return (
-    <div className='flex h-[calc(100svh-4rem)] min-w-0 flex-1 md:h-[calc(100svh-3.5rem)]'>
+    <div className='flex min-h-0 min-w-0 flex-1'>
       <aside className='hidden w-64 shrink-0 border-r lg:block'>
         <HydrationBoundary state={dehydrate(queryClient)}>
           <ConversationSidebar />
