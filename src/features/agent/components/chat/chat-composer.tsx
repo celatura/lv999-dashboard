@@ -2,9 +2,19 @@
 
 import dynamic from 'next/dynamic';
 import { useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle
+} from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group';
 import { LoadingButton } from '@/components/ui/loading-button';
-import { Textarea } from '@/components/ui/textarea';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
 import { ACCEPTED_ATTACHMENT_MIMES } from '../../constants/limits';
@@ -49,7 +59,7 @@ interface ChatComposerProps {
   onRemoveAttachment: (assetId: string) => void;
 }
 
-/** 输入区：模型选择 + 技能选择 + 引用资产 + 图片附件 + 文本输入 + 发送/停止 */
+/** 输入区：引用资产 + 图片附件 + 模型选择 + 技能选择 + 文本输入 + 发送/停止 */
 export function ChatComposer({
   value,
   onChange,
@@ -107,69 +117,81 @@ export function ChatComposer({
   return (
     <div className='bg-background shrink-0 pt-2 pb-4'>
       <div className='mx-auto w-full max-w-3xl px-4'>
-        <div className='border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/15 relative flex w-full flex-col rounded-xl border shadow-sm transition-[border-color,box-shadow] focus-within:ring-2'>
+        {/* has-disabled:* 覆盖：InputGroup 基础样式按「内部有禁用控件」给整组置灰，
+            但这里被禁用常驻的是发送/模型等按钮而非输入框，空输入时整组会被误置灰并降透明度 */}
+        <InputGroup className='bg-card dark:bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-card rounded-xl shadow-sm'>
           {(attachments.length > 0 || uploadingCount > 0) && (
-            <ul className='flex flex-wrap gap-2 px-3 pt-3' aria-label='图片附件'>
-              {attachments.map((attachment) => (
-                <li key={attachment.assetId} className='relative'>
-                  {/* oxlint-disable-next-line nextjs/no-img-element -- 同源 /raw 代理缩略图（OSS 等比缩放），不经图片优化器 */}
-                  <img
-                    src={imageThumbnailUrl(attachment.assetId)}
-                    alt={attachment.filename}
-                    className='size-14 rounded-md border object-cover'
-                  />
-                  <button
-                    type='button'
-                    onClick={() => onRemoveAttachment(attachment.assetId)}
-                    aria-label={`移除附件：${attachment.filename}`}
-                    className='bg-background/90 text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute -top-1.5 -right-1.5 rounded-full border p-0.5 shadow-sm focus-visible:ring-2 focus-visible:outline-none'
-                  >
-                    <Icons.close className='size-3' />
-                  </button>
-                </li>
-              ))}
-              {Array.from({ length: uploadingCount }).map((_, index) => (
-                <li
-                  key={`uploading-${index}`}
-                  className='bg-muted flex size-14 items-center justify-center rounded-md border border-dashed'
-                  aria-label='附件上传中'
-                >
-                  <Icons.spinner className='text-muted-foreground size-4 animate-spin' />
-                </li>
-              ))}
-            </ul>
+            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+              <AttachmentGroup aria-label='图片附件'>
+                {attachments.map((attachment) => (
+                  <Attachment key={attachment.assetId} size='sm' state='done'>
+                    <AttachmentMedia variant='image'>
+                      {/* oxlint-disable-next-line nextjs/no-img-element -- 同源 /raw 代理缩略图（OSS 等比缩放），不经图片优化器 */}
+                      <img src={imageThumbnailUrl(attachment.assetId)} alt={attachment.filename} />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>{attachment.filename}</AttachmentTitle>
+                      <AttachmentDescription>图片附件</AttachmentDescription>
+                    </AttachmentContent>
+                    <AttachmentActions>
+                      <AttachmentAction
+                        aria-label={`移除附件：${attachment.filename}`}
+                        onClick={() => onRemoveAttachment(attachment.assetId)}
+                      >
+                        <Icons.close />
+                      </AttachmentAction>
+                    </AttachmentActions>
+                  </Attachment>
+                ))}
+                {Array.from({ length: uploadingCount }).map((_, index) => (
+                  <Attachment key={`uploading-${index}`} size='sm' state='uploading'>
+                    <AttachmentMedia>
+                      <Icons.spinner className='animate-spin' />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>上传中…</AttachmentTitle>
+                      <AttachmentDescription>图片附件</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                ))}
+              </AttachmentGroup>
+            </InputGroupAddon>
           )}
           {referencedAssets.length > 0 && (
-            <ul className='flex flex-wrap gap-1.5 px-3 pt-3' aria-label='已引用资产'>
-              {referencedAssets.map((asset) => {
-                const { label, icon: KindIcon } = getAssetKindMeta(asset.kind);
-                return (
-                  <li
-                    key={asset.id}
-                    className='bg-muted flex max-w-full items-center gap-1.5 rounded-md py-1 pr-1 pl-2 text-xs'
-                  >
-                    <KindIcon className='text-muted-foreground size-3.5 shrink-0' />
-                    <span className='truncate font-medium'>{asset.title}</span>
-                    <span className='text-muted-foreground shrink-0'>{label}</span>
-                    <button
-                      type='button'
-                      onClick={() => onRemoveReference(asset.id)}
-                      aria-label={`移除引用：${asset.title}`}
-                      className='text-muted-foreground hover:text-foreground focus-visible:ring-ring shrink-0 rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none'
-                    >
-                      <Icons.close className='size-3.5' />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+              <div className='flex w-full flex-col gap-1.5'>
+                <ul className='flex flex-wrap gap-1.5' aria-label='已引用资产'>
+                  {referencedAssets.map((asset) => {
+                    const { label, icon: KindIcon } = getAssetKindMeta(asset.kind);
+                    return (
+                      <li
+                        key={asset.id}
+                        className='bg-muted flex max-w-full items-center gap-1.5 rounded-md py-1 pr-1 pl-2 text-xs'
+                      >
+                        <KindIcon className='text-muted-foreground size-3.5 shrink-0' />
+                        <span className='truncate font-medium'>{asset.title}</span>
+                        <span className='text-muted-foreground shrink-0'>{label}</span>
+                        <button
+                          type='button'
+                          onClick={() => onRemoveReference(asset.id)}
+                          aria-label={`移除引用：${asset.title}`}
+                          className='text-muted-foreground hover:text-foreground focus-visible:ring-ring shrink-0 rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none'
+                        >
+                          <Icons.close className='size-3.5' />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {referencedAssets.some((asset) => asset.kind === 'image') && (
+                  <p className='text-muted-foreground text-xs'>
+                    图片可用于修改或生成视频，但 Agent 不能直接看到图片内容；请用文字描述关键信息。
+                  </p>
+                )}
+              </div>
+            </InputGroupAddon>
           )}
-          {referencedAssets.some((asset) => asset.kind === 'image') && (
-            <p className='text-muted-foreground px-3 pt-2 text-xs'>
-              图片可用于修改或生成视频，但 Agent 不能直接看到图片内容；请用文字描述关键信息。
-            </p>
-          )}
-          <Textarea
+          <InputGroupTextarea
             aria-label='创作需求'
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -186,9 +208,9 @@ export function ChatComposer({
             }}
             placeholder={placeholder}
             rows={2}
-            className='max-h-[min(10rem,25dvh)] min-h-[3.25rem] resize-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent'
+            className='max-h-[min(10rem,25dvh)] min-h-[3.25rem] resize-none px-3 py-3'
           />
-          <div className='flex flex-wrap items-center gap-2 px-3 pb-3'>
+          <InputGroupAddon align='block-end' className='flex-wrap px-2.5 pt-0 pb-2.5'>
             <ModelSelector
               value={model}
               onChange={onModelChange}
@@ -268,8 +290,8 @@ export function ChatComposer({
                 <Icons.send /> 发送
               </Button>
             )}
-          </div>
-        </div>
+          </InputGroupAddon>
+        </InputGroup>
       </div>
       {pickerMounted && (
         <AssetReferencePicker

@@ -8,6 +8,7 @@ import { assetQueryOptions } from '../../api/queries';
 import { downloadAsset } from '../../lib/asset-download';
 import { formatBytes } from '../../lib/format';
 import type { AssetKind } from '../../api/types';
+import { ToolStep } from './tool-step';
 
 /** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
 export interface VideoAssetToolPart {
@@ -99,18 +100,17 @@ export function ToolVideoPart({ part, active }: { part: VideoAssetToolPart; acti
     const title = part.input?.title;
     if (!active) {
       return (
-        <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-          <Icons.clock className='size-4' />
-          已停止：{title ? `${title} 未生成视频` : '视频未生成'}
-        </div>
+        <ToolStep
+          state='stopped'
+          title={title ? `已停止：${title} 未生成视频` : '已停止：视频未生成'}
+        />
       );
     }
     return (
-      <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-        <Icons.spinner className='size-4 animate-spin' />
-        {/* 离开安全（可恢复流）的承诺：视频是最长的长任务，明确告知预计耗时与「离开也继续」 */}
-        <span>正在生成视频{title ? `：${title}` : '…'}（预计 1-5 分钟；离开页面也会继续）</span>
-      </div>
+      <ToolStep
+        state='running'
+        title={`正在生成视频${title ? `：${title}` : '…'}（预计 1-5 分钟；离开页面也会继续）`}
+      />
     );
   }
 
@@ -121,11 +121,13 @@ export function ToolVideoPart({ part, active }: { part: VideoAssetToolPart; acti
 
   if (state === 'output-error') {
     // errorText 为服务端映射好的完整中文（route.ts onError 对 GenerationError 原样透传，
-    // 如「视频下载失败，请稍后重试。」），直接展示；不再套「视频生成失败：」前缀与重试后缀
+    // 如「视频下载失败，请稍后重试。」），直接作为折叠详情展示
     return (
-      <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        {part.errorText ?? '视频生成失败，请稍后重试。'}
-      </div>
+      <ToolStep
+        state='error'
+        title='视频生成失败'
+        errorText={part.errorText ?? '视频生成失败，请稍后重试。'}
+      />
     );
   }
 

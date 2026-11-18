@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
 import {
@@ -17,6 +18,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport
 } from '@/components/ui/message-scroller';
+import { Trace, TraceIcon, TraceLine, TraceTitle } from '@/components/ui/trace';
 import {
   createConversationMutation,
   updateConversationMutation,
@@ -527,80 +529,91 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
               )}
               {isGenerating && !assistantStarted && (
                 <MessageScrollerItem>
-                  <div
-                    role='status'
-                    className='text-muted-foreground flex items-center gap-2 py-1 text-sm'
-                  >
-                    <Icons.spinner className='size-4 animate-spin' />
-                    正在思考…
-                  </div>
+                  <Trace>
+                    <TraceLine status='running' role='status'>
+                      <TraceIcon>
+                        <Icons.spinner className='animate-spin' />
+                      </TraceIcon>
+                      <TraceTitle>正在思考…</TraceTitle>
+                    </TraceLine>
+                  </Trace>
                 </MessageScrollerItem>
               )}
               {chatError && (
                 <MessageScrollerItem>
-                  <div className='border-destructive/40 bg-destructive/5 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm'>
-                    <span className='text-destructive'>{chatError.message}</span>
-                    {chatError.isSizeLimit ? (
-                      <div className='flex shrink-0 flex-wrap gap-2'>
-                        <Button variant='outline' size='sm' onClick={handleEditFailedMessage}>
-                          编辑输入
-                        </Button>
+                  <Alert
+                    variant='destructive'
+                    className='flex flex-wrap items-center justify-between gap-3'
+                  >
+                    <div className='min-w-0'>
+                      <AlertTitle>请求失败</AlertTitle>
+                      <AlertDescription className='whitespace-pre-wrap'>
+                        {chatError.message}
+                      </AlertDescription>
+                    </div>
+                    <div className='flex shrink-0 flex-wrap gap-2'>
+                      {chatError.isSizeLimit ? (
+                        <>
+                          <Button variant='outline' size='sm' onClick={handleEditFailedMessage}>
+                            编辑输入
+                          </Button>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            onClick={handleNewConversationWithDraft}
+                          >
+                            带输入新建会话
+                          </Button>
+                        </>
+                      ) : chatError.requiresSettingsSync ? (
                         <Button
                           variant='outline'
                           size='sm'
-                          onClick={handleNewConversationWithDraft}
+                          disabled={isGenerating || controlsDisabled}
+                          onClick={() => {
+                            void syncSettings().then((synced) => {
+                              if (synced) handleRegenerate();
+                            });
+                          }}
+                          title='重试会再次消耗 Credits，可能再次生成资产'
                         >
-                          带输入新建会话
+                          同步并重试
                         </Button>
-                      </div>
-                    ) : chatError.requiresSettingsSync ? (
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        disabled={isGenerating || controlsDisabled}
-                        onClick={() => {
-                          void syncSettings().then((synced) => {
-                            if (synced) handleRegenerate();
-                          });
-                        }}
-                        title='重试会再次消耗 Credits，可能再次生成资产'
-                      >
-                        同步并重试
-                      </Button>
-                    ) : chatError.requiresReconnect ? (
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        disabled={isGenerating || controlsDisabled}
-                        onClick={() => void resumeStream()}
-                      >
-                        重新连接
-                      </Button>
-                    ) : (
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={handleRegenerate}
-                        disabled={isGenerating || controlsDisabled}
-                        title='重试会再次消耗 Credits，可能再次生成资产'
-                      >
-                        重试
-                      </Button>
-                    )}
-                    {!isGenerating &&
-                      canStop &&
-                      !chatError.isSizeLimit &&
-                      !chatError.requiresSettingsSync && (
+                      ) : chatError.requiresReconnect ? (
                         <Button
                           variant='outline'
                           size='sm'
-                          disabled={isStopping}
-                          onClick={() => void handleStop()}
+                          disabled={isGenerating || controlsDisabled}
+                          onClick={() => void resumeStream()}
                         >
-                          停止生成
+                          重新连接
+                        </Button>
+                      ) : (
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={handleRegenerate}
+                          disabled={isGenerating || controlsDisabled}
+                          title='重试会再次消耗 Credits，可能再次生成资产'
+                        >
+                          重试
                         </Button>
                       )}
-                  </div>
+                      {!isGenerating &&
+                        canStop &&
+                        !chatError.isSizeLimit &&
+                        !chatError.requiresSettingsSync && (
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            disabled={isStopping}
+                            onClick={() => void handleStop()}
+                          >
+                            停止生成
+                          </Button>
+                        )}
+                    </div>
+                  </Alert>
                 </MessageScrollerItem>
               )}
             </MessageScrollerContent>

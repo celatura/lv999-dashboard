@@ -1,8 +1,8 @@
 'use client';
 
-import { Icons } from '@/components/icons';
 import { AssetCard } from '../assets/asset-card';
 import type { AssetKind } from '../../api/types';
+import { ToolStep } from './tool-step';
 
 /** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
 export interface CreateAssetToolPart {
@@ -36,18 +36,17 @@ export function ToolAssetPart({
     const title = part.input?.title;
     if (!active) {
       return (
-        <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-          <Icons.clock className='size-4' />
-          已停止：{title ? `${title} 未${action}` : `资产未${action}`}
-        </div>
+        <ToolStep
+          state='stopped'
+          title={title ? `已停止：${title} 未${action}` : `已停止：资产未${action}`}
+        />
       );
     }
     return (
-      <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-        <Icons.spinner className='size-4 animate-spin' />
-        {mode === 'edit' ? '正在编辑资产' : '正在生成资产'}
-        {title ? `：${title}` : '…'}
-      </div>
+      <ToolStep
+        state='running'
+        title={`${mode === 'edit' ? '正在编辑资产' : '正在生成资产'}${title ? `：${title}` : '…'}`}
+      />
     );
   }
 
@@ -58,9 +57,11 @@ export function ToolAssetPart({
 
   if (state === 'output-error') {
     return (
-      <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        资产{action}失败：{part.errorText ?? '未知错误'}
-      </div>
+      <ToolStep
+        state='error'
+        title={`资产${action}失败`}
+        errorText={part.errorText ?? '未知错误'}
+      />
     );
   }
 

@@ -1,8 +1,8 @@
 'use client';
 
-import { Icons } from '@/components/icons';
 import { AssetCard } from '../assets/asset-card';
 import type { AssetKind } from '../../api/types';
+import { ToolStep } from './tool-step';
 
 /** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
 export interface ImageAssetToolPart {
@@ -37,20 +37,17 @@ export function ToolImagePart({
     const title = part.input?.title;
     if (!active) {
       return (
-        <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-          <Icons.clock className='size-4' />
-          已停止：{title ? `${title} 未${verb}图片` : `图片未${verb}`}
-        </div>
+        <ToolStep
+          state='stopped'
+          title={title ? `已停止：${title} 未${verb}图片` : `已停止：图片未${verb}`}
+        />
       );
     }
     return (
-      <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-        <Icons.spinner className='size-4 animate-spin' />
-        {/* 离开安全（可恢复流）的承诺只在这里给出：图片任务是唯一值得为此等待的长任务 */}
-        <span>
-          正在{verb}图片{title ? `：${title}` : '…'}（约 15–60 秒；离开页面也会继续）
-        </span>
-      </div>
+      <ToolStep
+        state='running'
+        title={`正在${verb}图片${title ? `：${title}` : '…'}（约 15–60 秒；离开页面也会继续）`}
+      />
     );
   }
 
@@ -61,10 +58,11 @@ export function ToolImagePart({
 
   if (state === 'output-error') {
     return (
-      <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        图片{verb}失败：{part.errorText ?? '未知错误'}
-        {mode === 'edit' ? '（可换一种修改要求后重试）' : '（可换个画面描述后重试）'}
-      </div>
+      <ToolStep
+        state='error'
+        title={`图片${verb}失败${mode === 'edit' ? '（可换一种修改要求后重试）' : '（可换个画面描述后重试）'}`}
+        errorText={part.errorText ?? '未知错误'}
+      />
     );
   }
 

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import { ToolStep } from './tool-step';
 
 /** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
 export interface DesignAssetToolPart {
@@ -39,20 +40,17 @@ export function ToolDesignPart({ part, active }: { part: DesignAssetToolPart; ac
     const layout = part.input?.layout ? LAYOUT_LABELS[part.input.layout] : undefined;
     if (!active) {
       return (
-        <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-          <Icons.clock className='size-4' />
-          已停止：{title ? `${title} 未生成整版设计` : '整版设计未生成'}
-        </div>
+        <ToolStep
+          state='stopped'
+          title={title ? `已停止：${title} 未生成整版设计` : '已停止：整版设计未生成'}
+        />
       );
     }
     return (
-      <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
-        <Icons.spinner className='size-4 animate-spin' />
-        <span>
-          正在生成整版设计{title ? `：${title}` : '…'}
-          {layout ? `（${layout}）` : ''}（含文生图，约 20–70 秒；离开页面也会继续）
-        </span>
-      </div>
+      <ToolStep
+        state='running'
+        title={`正在生成整版设计${title ? `：${title}` : '…'}${layout ? `（${layout}）` : ''}（含文生图，约 20–70 秒；离开页面也会继续）`}
+      />
     );
   }
 
@@ -82,9 +80,11 @@ export function ToolDesignPart({ part, active }: { part: DesignAssetToolPart; ac
 
   if (state === 'output-error') {
     return (
-      <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        整版设计生成失败：{part.errorText ?? '未知错误'}（可换个画面描述或版式后重试）
-      </div>
+      <ToolStep
+        state='error'
+        title='整版设计生成失败（可换个画面描述或版式后重试）'
+        errorText={part.errorText ?? '未知错误'}
+      />
     );
   }
 

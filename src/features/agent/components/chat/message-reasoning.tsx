@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Icons } from '@/components/icons';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceIcon,
+  TraceLine,
+  TraceTitle
+} from '@/components/ui/trace';
 
 interface MessageReasoningProps {
   /** 合并后的思考正文（多个 reasoning part 按顺序拼接） */
@@ -12,7 +20,7 @@ interface MessageReasoningProps {
 }
 
 /**
- * 思考过程（reasoning）折叠块：思考中自动展开并跟随滚动，结束后 1s 自动收起。
+ * 思考过程（reasoning）步骤行：思考中自动展开并跟随滚动，结束后 1s 自动收起。
  * 时长在客户端按思考段落累计（历史消息拿不到时长时显示「思考过程」）。
  *
  * 状态全部自持——MessageItem 是 memo 化的，新增 props 只传稳定原语（string / boolean），
@@ -48,31 +56,35 @@ export function MessageReasoning({ text, isThinking }: MessageReasoningProps) {
     }
   }, [text, isThinking, open]);
 
+  const line = (
+    <TraceLine status={isThinking ? 'running' : undefined}>
+      <TraceIcon>
+        {isThinking ? <Icons.spinner className='animate-spin' /> : <Icons.sparkles />}
+      </TraceIcon>
+      <TraceTitle>
+        {isThinking
+          ? '思考中…'
+          : durationSeconds !== null
+            ? `思考了 ${durationSeconds} 秒`
+            : '思考过程'}
+      </TraceTitle>
+    </TraceLine>
+  );
+
+  if (!text.trim()) {
+    return <Trace>{line}</Trace>;
+  }
+
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className='group text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 text-xs transition-colors'>
-        {isThinking ? (
-          <Icons.spinner className='size-3.5 shrink-0 animate-spin' />
-        ) : (
-          <Icons.sparkles className='size-3.5 shrink-0' />
-        )}
-        <span>
-          {isThinking
-            ? '思考中…'
-            : durationSeconds !== null
-              ? `思考了 ${durationSeconds} 秒`
-              : '思考过程'}
-        </span>
-        <Icons.chevronDown className='size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-180' />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div
-          ref={contentRef}
-          className='bg-muted/30 text-muted-foreground mt-1.5 max-h-[200px] overflow-y-auto rounded-lg border border-dashed px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap'
-        >
-          {text}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <Trace>
+      <TraceCollapsible open={open} onOpenChange={setOpen}>
+        <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <div ref={contentRef} className='max-h-[200px] overflow-y-auto whitespace-pre-wrap'>
+            {text}
+          </div>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   );
 }
