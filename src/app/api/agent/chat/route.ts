@@ -4,6 +4,7 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
+  isToolUIPart,
   toUIMessageStream,
   TypeValidationError,
   validateUIMessages,
@@ -112,7 +113,9 @@ export async function POST(request: Request) {
   }
 
   // 增量协议：客户端每次只发最后一条消息（prepareSendMessagesRequest），
-  // 历史以服务端 DB 为权威，claim 后读取合并——消除全量历史带来的请求体膨胀
+  // 历史以服务端 DB 为权威，claim 后读取合并——消除全量历史带来的请求体膨胀。
+  // role=user：新发送 / 编辑 / 重新生成；role=assistant：回答 askUser 澄清提问
+  // （唯一允许的客户端续答形态，读到历史后再校验必须是最后一条待回答的 askUser 调用）。
   const incomingMessages = body.messages as UIMessage[] | undefined;
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : undefined;
   if (!Array.isArray(incomingMessages) || incomingMessages.length !== 1 || !conversationId) {
@@ -123,7 +126,10 @@ export async function POST(request: Request) {
     );
   }
   const incomingMessage = incomingMessages[0];
-  if (incomingMessage?.role !== 'user' || !Array.isArray(incomingMessage.parts)) {
+  if (
+    (incomingMessage?.role !== 'user' && incomingMessage?.role !== 'assistant') ||
+    !Array.isArray(incomingMessage.parts)
+  ) {
     return apiError(400, 'invalid_request', 'Invalid message');
   }
   if (
@@ -258,6 +264,39 @@ export async function POST(request: Request) {
       parts: message.parts,
       metadata: message.metadata ?? undefined
     }));
+    // assistant 续答守卫：只接受「回答最新一条待回答的 askUser 调用」。
+    // 其余内容仍以 DB 为权威（客户端消息仅用于补 tool output），
+    // 防止伪造任意 assistant 历史或对历史中间消息翻旧账。
+    if (incomingMessage.role === 'assistant') {
+      const latest = historyMessages.at(-1);
+      let pendingCallId: string | undefined;
+      if (latest?.id === incomingMessage.id && latest.role === 'assistant') {
+        for (const part of latest.parts) {
+          if (
+            isToolUIPart(part) &&
+            part.type === 'tool-askUser' &&
+            part.state === 'input-available'
+          ) {
+            pendingCallId = part.toolCallId;
+            break;
+          }
+        }
+      }
+      const answered =
+        pendingCallId !== undefined &&
+        incomingMessage.parts.some(
+          (part) =>
+            isToolUIPart(part) &&
+            part.type === 'tool-askUser' &&
+            part.toolCallId === pendingCallId &&
+            part.state === 'output-available'
+        );
+      if (pendingCallId === undefined || !answered) {
+        return await rejectAfterClaim(
+          apiError(400, 'invalid_request', 'Invalid assistant message')
+        );
+      }
+    }
     const incomingIndex = historyMessages.findIndex((message) => message.id === incomingMessage.id);
     messages =
       incomingIndex >= 0
@@ -298,7 +337,12 @@ export async function POST(request: Request) {
       await deleteTrailingMessages(conversationId, incomingMessage.id);
     }
     const userText = extractText(incomingMessage);
-    if (incomingIndex < 0 && userText && conversation.title === DEFAULT_CONVERSATION_TITLE) {
+    if (
+      incomingMessage.role === 'user' &&
+      incomingIndex < 0 &&
+      userText &&
+      conversation.title === DEFAULT_CONVERSATION_TITLE
+    ) {
       titlePromise = generateConversationTitle(userText, usageSink);
     }
     await Promise.all([saveUserMessage(conversationId, incomingMessage), staleStreamStop]);
@@ -369,7 +413,15 @@ export async function POST(request: Request) {
             onEnd: async ({ messages: finalMessages, isAborted, outcome }) => {
               stopWatching();
               try {
-                await syncConversationMessages(conversationId, messages, finalMessages);
+                // 续答（askUser 回答）语义：AI SDK 会把回复**续写进原 assistant 消息**
+                // （getResponseUIMessageId：末条已是 assistant 时复用其 id），
+                // 该消息必须按「本轮产生」upsert——否则会被当作已有消息跳过，
+                // 续答内容只存在于客户端、刷新即丢失。流已 claim、无并发写者，覆盖安全。
+                const originalForSync =
+                  incomingMessage.role === 'assistant'
+                    ? messages.filter((message) => message.id !== incomingMessage.id)
+                    : messages;
+                await syncConversationMessages(conversationId, originalForSync, finalMessages);
                 await clearConversationActiveStream(conversationId, streamId);
               } finally {
                 try {

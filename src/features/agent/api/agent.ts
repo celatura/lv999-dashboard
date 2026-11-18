@@ -96,7 +96,12 @@ const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，�
     - layout 选择：上图下文用 "top-image"（封面常用）；图为主视觉、标题压在底部用 "full-image-bar"；
       横版左图右文用 "left-image"（竖版会自动退化为上图下文）
     - 一次对话不要多次调用；内含一次文生图（约 20-70 秒），调用前告知用户等待
-    - 产出无预览缩略图（用户打开画布保存后生成），告知用户点卡片去画布微调即可`;
+    - 产出无预览缩略图（用户打开画布保存后生成），告知用户点卡片去画布微调即可
+13. 澄清提问（askUser 工具，客户端会弹出选项卡收集回答）：
+    - 当关键创作参数缺失或有歧义、且显著影响产出结果时（图片比例/风格、封面标题文案、视频方向/时长等），
+      调用 askUser 一次性提出 1-3 个澄清问题，每个问题给 2-4 个简短选项（用户也可自行输入）
+    - 一次对话最多提问一轮；用户回答后直接执行，不要重复确认同一信息
+    - 能从上下文推断、用户已明确指定、或只是常规确认时不要提问，直接执行`;
 
 const CREATE_ASSET_DESCRIPTION =
   '把一份完整作品保存为结构化资产。Markdown 文章/文案用 kind=markdown；完整 HTML 网页用 kind=html（必须是可以直接打开运行的完整文档，样式与脚本内联）。';
@@ -270,6 +275,46 @@ const knowledgeSearchInputSchema = z.object({
   topK: z.int().min(1).max(8).optional().describe('返回片段数上限，默认 5')
 });
 
+const ASK_USER_DESCRIPTION =
+  '向用户提出 1-3 个澄清问题并等待回答（客户端会弹出选项卡，用户也可自行输入）。当关键创作参数缺失或有歧义、且显著影响产出结果时使用（如图片比例/风格、封面标题文案、视频方向/时长）。一次对话最多提问一轮；能从上下文推断或用户已明确指定时不要提问。';
+
+const askUserInputSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(200).describe('要问用户的问题（简短明确）'),
+        choices: z
+          .array(z.string().min(1).max(40))
+          .min(2)
+          .max(4)
+          .describe('2-4 个简短、互斥的回答选项（用户也可自行输入其他答案）')
+      })
+    )
+    .min(1)
+    .max(3)
+    .describe('要问的问题列表')
+});
+
+const askUserOutputSchema = z
+  .array(
+    z.object({
+      question: z.string(),
+      answer: z.string()
+    })
+  )
+  .describe('用户对每个问题的回答');
+
+/**
+ * 客户端工具：无 execute。模型调用后本轮流即结束（part 停留 input-available），
+ * 由客户端弹出选项卡收集回答，经 addToolOutput 回传 output 后自动续答
+ * （客户端 sendAutomaticallyWhen + 路由的 assistant 续答分支协同，见 docs/agent.md）。
+ */
+const askUserTool = tool({
+  description: ASK_USER_DESCRIPTION,
+  inputSchema: askUserInputSchema,
+  outputSchema: askUserOutputSchema
+});
+
 /** 服务端校验历史消息使用（无需 execute，与 Agent 内工具共享同一 schema） */
 export const agentValidationTools = {
   createAsset: tool({
@@ -311,7 +356,8 @@ export const agentValidationTools = {
   composeDesign: tool({
     description: COMPOSE_DESIGN_DESCRIPTION,
     inputSchema: composeDesignInputSchema
-  })
+  }),
+  askUser: askUserTool
 };
 
 /** 与 agentValidationTools 对齐的 UI 消息类型（供 validateUIMessages 泛型推导 tools 校验类型） */
@@ -938,6 +984,8 @@ export function buildAgent(params: {
   const tools = Object.fromEntries(
     allowedTools.map((name) => [name, toolFactories[name]()])
   ) as Record<string, Tool>;
+  // 澄清提问是跨技能的通用能力：不受技能 tools 白名单过滤（专家模式下也可先问清需求）
+  tools.askUser = askUserTool;
   return new ToolLoopAgent({
     model: resolveModel(modelKey),
     instructions,

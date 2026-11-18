@@ -14,6 +14,7 @@ import { imageThumbnailUrl } from '../../lib/asset-url';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 import { CopyButton } from '../copy-button';
+import { AskUserPart, type AskUserToolPart } from './ask-user-part';
 import { MessageReasoning } from './message-reasoning';
 import { ToolAssetPart, type CreateAssetToolPart } from './tool-asset-part';
 import { ToolDesignPart, type DesignAssetToolPart } from './tool-design-part';
@@ -144,6 +145,9 @@ export const MessageItem = memo(function MessageItem({
                 </Streamdown>
               </div>
             );
+          }
+          if (isToolUIPart(part) && part.type === 'tool-askUser') {
+            return <AskUserPart key={index} part={part as unknown as AskUserToolPart} />;
           }
           if (
             isToolUIPart(part) &&

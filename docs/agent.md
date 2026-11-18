@@ -11,7 +11,7 @@ LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然�
 
 - **入口**：`/dashboard/agent`（新建会话）与 `/dashboard/agent/[conversationId]`（会话页）；产出在 `/dashboard/assets`（我的资产）统一管理。
 - **编排**：AI SDK v7 `ToolLoopAgent`，每请求无状态构建，上下文经闭包注入工具。
-- **工具**：`createAsset`（Markdown / HTML）、`editAsset`（文本资产精确编辑）、`createImageAsset`（文生图 T2I）、`editImageAsset`（图生图 I2I）、`createVideoAsset`（文生视频 T2V）、`createVideoFromImageAsset`（图生视频 I2V）、`composeDesign`（一句话生成整版设计）、`findAssets` / `readAsset`（资产复用）、`knowledgeSearch`（知识库语义检索）。
+- **工具**：`createAsset`（Markdown / HTML）、`editAsset`（文本资产精确编辑）、`createImageAsset`（文生图 T2I）、`editImageAsset`（图生图 I2I）、`createVideoAsset`（文生视频 T2V）、`createVideoFromImageAsset`（图生视频 I2V）、`composeDesign`（一句话生成整版设计）、`findAssets` / `readAsset`（资产复用）、`knowledgeSearch`（知识库语义检索）、`askUser`（澄清提问，客户端回答后自动续答）。
 - **流式**：`resumable-stream` 可恢复 SSE，刷新 / 切回自动重连；停止走专用端点（跨实例真取消）。
 - **持久化**：Drizzle ORM + PostgreSQL，三张表 `conversations` / `messages` / `assets`；图片 / 视频二进制存 OSS，库里只存 `storageKey`。
 - **计费**：对话 / 生图 / 生视频 / 知识库摄取均在上游调用前原子预留 Credits，按实际结果结算；管理员可经 `/dashboard/admin/users` 发放 / 设定可用额度（仅 `ADMIN_USER_IDS` 白名单）；详见 [docs/credits.md](./credits.md)。
@@ -211,6 +211,16 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - `submitted` 阶段（首个 chunk 到达前）在消息列表尾部显示「正在思考…」占位，覆盖思考模型的静默等待窗口。
 - 纯渲染层改动：不改变流协议、持久化与计费；`MessageItem` 的 memo 纪律不受影响（展开/计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
 
+### 4.11 澄清提问（askUser，客户端工具）
+
+`askUser` 是没有 `execute` 的客户端工具：模型调用后本轮流即结束（part 停留 `input-available`），由消息滚动区底部的 `QuestionCard`（`@shadcn/react/questionnaire`）收集回答；回答经 `useChat.addToolOutput` 回写 tool output，客户端 `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` 随即自动续答。
+
+- **增量协议扩展**：续答请求发送的最后一条消息是 **assistant**（带 tool output），而非 user。路由在 claim 后读取历史并校验：该消息必须是最新一条、且含与历史中待回答 `askUser` 同 `toolCallId`、`state === 'output-available'` 的 part，否则 400；其余历史仍以 DB 为权威。该谓词只在 `addToolOutput` 后评估，普通服务端工具回合不会触发自动续答。
+- **持久化 / 刷新**：问题与回答随 `messages.parts` 落库。刷新后待回答的提问重新弹出卡片；已回答的提问渲染为「已确认 N 个创作细节」折叠行（[`ask-user-part.tsx`](../src/features/agent/components/chat/ask-user-part.tsx)）。
+- **计费**：提问轮与续答轮各是一次普通对话请求，按 usage 结算；续答余额不足时返回 402，可用错误条上的「编辑输入」回到原始请求重新发送。
+- **停止 / 恢复**：提问流结束后无活跃流；续答是新的可恢复流，停止 / 重连语义与普通回合一致。
+- **防滥用**：系统指令限制「一次对话最多提问一轮、能从上下文推断时不提问」；`askUser` 不受技能工具白名单过滤（专家模式下也可先问清需求）。
+
 ---
 
 ## 5. Agent 与工具
@@ -229,10 +239,11 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | `readAsset` | `assetId` | 读取资产内容：markdown/html 返回正文、image/video 返回生成 prompt（design 不支持），供“基于它再创作” |
 | `knowledgeSearch` | `query` / `topK?` | 在 RAG 知识库中按【语义】检索「资料」片段（问答/综述），返回 topK 片段 + 来源标题；见 [docs/knowledge-base.md](./knowledge-base.md) |
 | `composeDesign` | `title` / `imagePrompt` / `heading?` / `subheading?` / `layout`(top-image\|full-image-bar\|left-image) / `aspect?` | **一句话生成整版设计**：工具内限流（`image-generate`）→ `checkBalance` → 文生图（计费 image 档，比例按**版式主图区域**选最接近的一档）→ `createImageAsset`（主图仍沉淀为独立资产）→ `sharp` 读自然尺寸 → [`design/lib/layouts.ts`](../src/features/design/lib/layouts.ts) 按版式组装文档（坐标/字号/对齐全由代码计算）+ sanitize → `createDesignAsset(previewPng=null)`；返回 `{ assetId, title, kind:'design', sizeBytes, imageAssetId }`，对话内渲染「打开编辑」卡片。design 落库为纯 JSON 组装，**不额外计费**；无预览（预览由画布保存时客户端导出补上）。详见 [docs/design-editor.md](./design-editor.md) |
+| `askUser` | `questions[{ question, choices[2..4] }]`（1-3 个问题） | 客户端工具（无 `execute`）：向用户弹选项卡澄清关键创作参数，本轮流在此停住；回答后经 tool output 自动续答。不受技能 `tools` 白名单过滤（见 §4.11） |
 
 > 区分：`findAssets` 按标题找「作品」（复用/改写/改图）；`knowledgeSearch` 按语义找「资料」（基于内容作答并标注来源）。对话中的 `[引用资产]` 块给出的 id 可直接使用，无需再检索。
 
-工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 10 工具、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的 `tools` 白名单过滤注册（见 §5.1）——两者必须分离：会话中途切技能后，旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。
+工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 11 工具、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的 `tools` 白名单过滤注册（见 §5.1）——两者必须分离：会话中途切技能后，旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。`askUser` 例外：它恒被注册（白名单只约束生成类工具）。
 
 ### 5.1 技能系统（专家模式）
 

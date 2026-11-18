@@ -1,7 +1,11 @@
 'use client';
 
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, isToolUIPart } from 'ai';
+import {
+  DefaultChatTransport,
+  isToolUIPart,
+  lastAssistantMessageIsCompleteWithToolCalls
+} from 'ai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -56,6 +60,8 @@ import {
 import { ChatComposer } from './chat-composer';
 import { ChatEmptyState } from './chat-empty-state';
 import { MessageItem } from './message-item';
+import { QuestionCard } from './question-card';
+import type { AskUserToolPart } from './ask-user-part';
 
 interface ChatWindowProps {
   conversation?: Conversation;
@@ -102,46 +108,58 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const createConversation = useMutation(createConversationMutation);
   const updateConversation = useMutation(updateConversationMutation);
 
-  const { messages, sendMessage, status, stop, error, regenerate, clearError, resumeStream } =
-    useChat<AgentChatMessage>({
-      id: initialConversationId,
-      messages: initialMessages,
-      // 官方恢复语义（Resume Streams 官方示例）：仅「服务端已知存在活跃流」才重连，
-      // 不对既有会话无条件重连——新会话「创建 → 导航 → 挂载即发送首条消息」时，
-      // 挂载重连 GET 的 204 分支（SDK 内部 setStatus('ready')）会把 sendMessage
-      // 刚置上的 'submitted' 改回 'ready'，发送按钮要等首个 chunk 才变「停止」。
-      resume: Boolean(conversation?.activeStreamId),
-      transport: new DefaultChatTransport<AgentChatMessage>({
-        api: '/api/agent/chat',
-        body: () => ({
-          conversationId: conversationIdRef.current,
-          expectedModel: settingsRef.current.model,
-          expectedSkillId: settingsRef.current.skillId,
-          streamId: requestStreamIdRef.current
-        }),
-        // 增量发送：只发最后一条消息（新发送 / 重新生成 / 编辑皆然），历史以服务端 DB 为权威。
-        // 编辑/重新生成携带既有消息 id，服务端命中后替换并删除旧尾部，与全量发送语义一致
-        prepareSendMessagesRequest: ({ messages, body }) => ({
-          body: { ...body, messages: messages.slice(-1) }
-        }),
-        prepareReconnectToStreamRequest: ({ id }) => ({
-          api: `/api/agent/chat/${id}/stream`
-        })
+  const {
+    messages,
+    sendMessage,
+    status,
+    stop,
+    error,
+    regenerate,
+    clearError,
+    resumeStream,
+    addToolOutput
+  } = useChat<AgentChatMessage>({
+    id: initialConversationId,
+    messages: initialMessages,
+    // 客户端澄清提问（askUser）的回答经 addToolOutput 回传后自动发起续答；
+    // 谓词只在 addToolOutput 后触发，服务端工具回合结束不会误触发
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    // 官方恢复语义（Resume Streams 官方示例）：仅「服务端已知存在活跃流」才重连，
+    // 不对既有会话无条件重连——新会话「创建 → 导航 → 挂载即发送首条消息」时，
+    // 挂载重连 GET 的 204 分支（SDK 内部 setStatus('ready')）会把 sendMessage
+    // 刚置上的 'submitted' 改回 'ready'，发送按钮要等首个 chunk 才变「停止」。
+    resume: Boolean(conversation?.activeStreamId),
+    transport: new DefaultChatTransport<AgentChatMessage>({
+      api: '/api/agent/chat',
+      body: () => ({
+        conversationId: conversationIdRef.current,
+        expectedModel: settingsRef.current.model,
+        expectedSkillId: settingsRef.current.skillId,
+        streamId: requestStreamIdRef.current
       }),
-      onData: (part) => {
-        if (part.type === 'data-conversation-title') {
-          setTitle(part.data.title);
-          void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
-        }
-      },
-      onFinish: () => {
-        // 分域失效：会话列表（标题变化）+ 资产列表（聊天中可能新增资产）
-        if (conversationIdRef.current) {
-          refreshConversationPageWithNotice(queryClient, conversationIdRef.current);
-        }
-        void queryClient.invalidateQueries({ queryKey: agentKeys.assetsRoot() });
+      // 增量发送：只发最后一条消息（新发送 / 重新生成 / 编辑皆然），历史以服务端 DB 为权威。
+      // 编辑/重新生成携带既有消息 id，服务端命中后替换并删除旧尾部，与全量发送语义一致
+      prepareSendMessagesRequest: ({ messages, body }) => ({
+        body: { ...body, messages: messages.slice(-1) }
+      }),
+      prepareReconnectToStreamRequest: ({ id }) => ({
+        api: `/api/agent/chat/${id}/stream`
+      })
+    }),
+    onData: (part) => {
+      if (part.type === 'data-conversation-title') {
+        setTitle(part.data.title);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
       }
-    });
+    },
+    onFinish: () => {
+      // 分域失效：会话列表（标题变化）+ 资产列表（聊天中可能新增资产）
+      if (conversationIdRef.current) {
+        refreshConversationPageWithNotice(queryClient, conversationIdRef.current);
+      }
+      void queryClient.invalidateQueries({ queryKey: agentKeys.assetsRoot() });
+    }
+  });
 
   // 新会话首页 → 会话页的一次性首条消息交接（真实导航完成后由本页发送）。
   // 回到新会话首页（无 id）时丢弃未消费的交接，避免陈旧消息被误发送。
@@ -187,6 +205,16 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     Boolean(chatError?.isSizeLimit);
   const lastMessage = messages.at(-1);
   const assistantMessage = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+  // 待回答的澄清提问：仅最后一条 assistant 消息可承载（QuestionCard 吸附在滚动区底部）
+  const pendingQuestion =
+    lastMessage?.role === 'assistant'
+      ? (lastMessage.parts.find(
+          (part) =>
+            isToolUIPart(part) &&
+            part.type === 'tool-askUser' &&
+            (part.state === 'input-streaming' || part.state === 'input-available')
+        ) as AskUserToolPart | undefined)
+      : undefined;
   // 首个 chunk 到达前（submitted 阶段）没有 assistant 消息，思考模型可能静默 10-30s：
   // 用「正在思考…」占位表明请求已发出；出现实际内容（正文 / 思考正文 / 工具调用）后
   // 由 reasoning 折叠块或工具卡片接管。空壳 part（如 reasoning-start 尚无 delta）不算开始
@@ -216,6 +244,17 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     requestStreamIdRef.current = crypto.randomUUID();
     void regenerate();
   }, [regenerate]);
+
+  // 回答澄清提问：先刷新本轮 streamId，再回传 tool output——useChat 的
+  // sendAutomaticallyWhen 会在 output 落位后自动续答（增量协议只发这条 assistant 消息，
+  // 路由侧按「最新待回答的 askUser」校验并合并）
+  const handleAnswerQuestion = useCallback(
+    (toolCallId: string, answers: { question: string; answer: string }[]) => {
+      requestStreamIdRef.current = crypto.randomUUID();
+      void addToolOutput({ tool: 'askUser', toolCallId, output: answers });
+    },
+    [addToolOutput]
+  );
 
   // 引用去重（选择器已置灰已引用项，此处再兜一道）；函数式更新保证批量添加逐项生效
   const handleAddReference = useCallback((asset: ReferencedAsset) => {
@@ -617,6 +656,9 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
                 </MessageScrollerItem>
               )}
             </MessageScrollerContent>
+            {pendingQuestion && (
+              <QuestionCard part={pendingQuestion} onAnswer={handleAnswerQuestion} />
+            )}
           </MessageScrollerViewport>
           {messages.length > 0 && <MessageScrollerButton aria-label='回到底部' />}
         </MessageScroller>
