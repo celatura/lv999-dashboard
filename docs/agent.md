@@ -202,6 +202,15 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **计费**：预留预算按历史 + 增量的 file part 总数每张加 4096 token 余量估算；实际以 usage 结算（多模态超出预留部分由平台承担，见 credits.md）。
 - **能力边界**：附件让模型看到像素，但模型拿不到附件的 assetId（改图仍需用户经「引用资产」给出 id）；上传图已沉淀在「我的资产」，可随时引用。
 
+### 4.10 思考过程展示（reasoning）
+
+百炼对话模型默认思考：reasoning parts 由 AI SDK 随流下发（`toUIMessageStream` 默认 `sendReasoning`），本项目原样持久化在 `messages.parts`，其 token 已计入 `outputTokens` 计费。此前渲染层只处理 text 与已知 tool part，思考内容不可见；[`message-reasoning.tsx`](../src/features/agent/components/chat/message-reasoning.tsx) 把多个 reasoning part 合并为一个折叠块：
+
+- 思考中自动展开并跟随滚动，结束后 1s 自动收起；显示累计思考时长（客户端计时，历史消息无时长时显示「思考过程」）。
+- 「思考中」仅当消息仍处于流式末尾且存在 `state === 'streaming'` 的 reasoning part——中止后 part 不落终态（AI SDK 中止语义），避免历史消息永久停在「思考中」。
+- `submitted` 阶段（首个 chunk 到达前）在消息列表尾部显示「正在思考…」占位，覆盖思考模型的静默等待窗口。
+- 纯渲染层改动：不改变流协议、持久化与计费；`MessageItem` 的 memo 纪律不受影响（展开/计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
+
 ---
 
 ## 5. Agent 与工具

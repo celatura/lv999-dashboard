@@ -1,7 +1,7 @@
 'use client';
 
 import type { FileUIPart, TextUIPart, UIMessage } from 'ai';
-import { isToolUIPart } from 'ai';
+import { isReasoningUIPart, isToolUIPart } from 'ai';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
 import { Icons } from '@/components/icons';
@@ -14,6 +14,7 @@ import { imageThumbnailUrl } from '../../lib/asset-url';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 import { CopyButton } from '../copy-button';
+import { MessageReasoning } from './message-reasoning';
 import { ToolAssetPart, type CreateAssetToolPart } from './tool-asset-part';
 import { ToolDesignPart, type DesignAssetToolPart } from './tool-design-part';
 import { ToolImagePart, type ImageAssetToolPart } from './tool-image-part';
@@ -110,11 +111,30 @@ export const MessageItem = memo(function MessageItem({
   // 对历史中间消息 regenerate(messageId) 会截断其后所有对话，故不提供
   const canRegenerate = isLastAssistant && onRegenerate !== undefined;
 
+  // 思考过程：多个 reasoning part 合并为一个折叠块，只在首个 reasoning 位置渲染一次。
+  // reasoning 已随流下发并持久化（token 已计入计费），此处仅展示；isThinking 要求
+  // 当前消息仍是流式末尾且存在 streaming 状态的 reasoning part——中止后 part 不会
+  // 落终态（AI SDK 中止语义），用 isActive 兜底避免历史消息永久停在「思考中」
+  const reasoningParts = message.parts.filter(isReasoningUIPart);
+  const reasoningText = reasoningParts
+    .map((part) => part.text)
+    .filter((text) => text.trim().length > 0)
+    .join('\n\n');
+  // 合并块只渲染一次：定位首个有正文的 reasoning part 作为插入点
+  const firstReasoningIndex = message.parts.findIndex(
+    (part) => isReasoningUIPart(part) && part.text.trim().length > 0
+  );
+  const isThinking = isActive && reasoningParts.some((part) => part.state === 'streaming');
+
   return (
     // flex-col：Message 默认是行布局（avatar + 正文），此处让正文与操作栏同列堆叠
     <Message align='start' className='flex-col gap-0.5'>
       <MessageContent>
         {message.parts.map((part, index) => {
+          if (isReasoningUIPart(part)) {
+            if (index !== firstReasoningIndex) return null;
+            return <MessageReasoning key={index} text={reasoningText} isThinking={isThinking} />;
+          }
           if (part.type === 'text') {
             if (!part.text) return null;
             return (

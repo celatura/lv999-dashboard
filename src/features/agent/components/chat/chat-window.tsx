@@ -1,11 +1,12 @@
 'use client';
 
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, isToolUIPart } from 'ai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
 import {
@@ -184,6 +185,16 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     Boolean(chatError?.isSizeLimit);
   const lastMessage = messages.at(-1);
   const assistantMessage = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+  // 首个 chunk 到达前（submitted 阶段）没有 assistant 消息，思考模型可能静默 10-30s：
+  // 用「正在思考…」占位表明请求已发出；出现实际内容（正文 / 思考正文 / 工具调用）后
+  // 由 reasoning 折叠块或工具卡片接管。空壳 part（如 reasoning-start 尚无 delta）不算开始
+  const assistantStarted =
+    assistantMessage?.parts.some((part) => {
+      if (part.type === 'text' || part.type === 'reasoning') {
+        return part.text.trim().length > 0;
+      }
+      return isToolUIPart(part);
+    }) ?? false;
   const activeStreamId = assistantMessage?.metadata?.streamId ?? null;
   const requestStreamId =
     status === 'streaming'
@@ -513,6 +524,17 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
                     </MessageScrollerItem>
                   );
                 })
+              )}
+              {isGenerating && !assistantStarted && (
+                <MessageScrollerItem>
+                  <div
+                    role='status'
+                    className='text-muted-foreground flex items-center gap-2 py-1 text-sm'
+                  >
+                    <Icons.spinner className='size-4 animate-spin' />
+                    正在思考…
+                  </div>
+                </MessageScrollerItem>
               )}
               {chatError && (
                 <MessageScrollerItem>
