@@ -1,5 +1,4 @@
 import { getConnectedRedis } from '@/lib/redis';
-import { isUuid } from '@/lib/utils';
 
 /**
  * Agent 生成停止信号（跨实例）。
@@ -19,35 +18,19 @@ const STOP_SIGNAL_TTL_SECONDS = 300;
 const STOP_WATCH_INTERVAL_MS = 2000;
 
 /** stop 端点调用：写入停止标志 */
-export async function requestAgentStop(
-  conversationId: string,
-  streamId: string,
-  active = false
-): Promise<void> {
+export async function requestAgentStop(conversationId: string, streamId: string): Promise<void> {
   const redis = await getConnectedRedis();
   await redis.set(stopSignalKey(conversationId, streamId), '1', {
     expiration: { type: 'EX', value: STOP_SIGNAL_TTL_SECONDS }
   });
-  if (active && !isUuid(streamId)) {
-    await redis.set(`agent:stop:${streamId}`, '1', {
-      expiration: { type: 'EX', value: STOP_SIGNAL_TTL_SECONDS }
-    });
-  }
 }
 
 export async function consumeAgentStop(conversationId: string, streamId: string): Promise<boolean> {
   const redis = await getConnectedRedis();
-  const scopedKey = stopSignalKey(conversationId, streamId);
-  const legacyKey = `agent:stop:${streamId}`;
-  const [scoped, legacy] = await Promise.all([
-    redis.get(scopedKey),
-    isUuid(streamId) ? Promise.resolve(null) : redis.get(legacyKey)
-  ]);
-  const keys = [scoped ? scopedKey : null, legacy ? legacyKey : null].filter(
-    (key): key is string => key !== null
-  );
-  await Promise.all(keys.map((key) => redis.del(key)));
-  return Boolean(scoped || legacy);
+  const key = stopSignalKey(conversationId, streamId);
+  const value = await redis.get(key);
+  if (value) await redis.del(key);
+  return Boolean(value);
 }
 
 /**

@@ -13,11 +13,13 @@
  * 详见 chat-window.tsx 交接 effect 注释。
  */
 
+import type { ChatAttachment } from '../api/types';
 import type { ReferencedAsset } from './asset-reference';
 
 interface PendingFirstMessage {
   conversationId: string;
   text: string;
+  attachments: ChatAttachment[];
   createdAt: number;
 }
 
@@ -25,26 +27,37 @@ interface PendingFirstMessage {
 const FRESHNESS_MS = 30_000;
 
 let pending: PendingFirstMessage | null = null;
-let draft: { text: string; references: ReferencedAsset[]; createdAt: number } | null = null;
+let draft: {
+  text: string;
+  references: ReferencedAsset[];
+  attachments: ChatAttachment[];
+  createdAt: number;
+} | null = null;
 
 /** 发送首条消息前写入；随后立即 router.replace 到会话页 */
-export function setPendingFirstMessage(conversationId: string, text: string): void {
-  pending = { conversationId, text, createdAt: Date.now() };
+export function setPendingFirstMessage(
+  conversationId: string,
+  text: string,
+  attachments: ChatAttachment[] = []
+): void {
+  pending = { conversationId, text, attachments, createdAt: Date.now() };
 }
 
 /**
  * 取出并清空（仅当会话 id 匹配且未过期）。
  * 幂等：重复调用（含 StrictMode 双执行）第二次返回 null。
  */
-export function takePendingFirstMessage(conversationId: string): string | null {
+export function takePendingFirstMessage(
+  conversationId: string
+): { text: string; attachments: ChatAttachment[] } | null {
   if (!pending || pending.conversationId !== conversationId) return null;
   if (Date.now() - pending.createdAt > FRESHNESS_MS) {
     pending = null;
     return null;
   }
-  const { text } = pending;
+  const { text, attachments } = pending;
   pending = null;
-  return text;
+  return { text, attachments };
 }
 
 /** 回到新会话首页时丢弃未消费的交接，避免陈旧消息在稍后访问该会话时被误发送 */
@@ -52,16 +65,21 @@ export function clearPendingFirstMessage(): void {
   pending = null;
 }
 
-export function setPendingNewConversationDraft(text: string, references: ReferencedAsset[]): void {
-  draft = { text, references, createdAt: Date.now() };
+export function setPendingNewConversationDraft(
+  text: string,
+  references: ReferencedAsset[],
+  attachments: ChatAttachment[] = []
+): void {
+  draft = { text, references, attachments, createdAt: Date.now() };
 }
 
 export function takePendingNewConversationDraft(): {
   text: string;
   references: ReferencedAsset[];
+  attachments: ChatAttachment[];
 } | null {
   const current = draft;
   draft = null;
   if (!current || Date.now() - current.createdAt > FRESHNESS_MS) return null;
-  return { text: current.text, references: current.references };
+  return { text: current.text, references: current.references, attachments: current.attachments };
 }

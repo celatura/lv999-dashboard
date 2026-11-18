@@ -13,14 +13,24 @@ export interface CreateAssetToolPart {
 }
 
 /**
- * createAsset 工具的调用状态渲染：
+ * createAsset / editAsset 工具的调用状态渲染：
  * 生成中 → 状态条；完成 → 资产卡片；失败 → 错误条。
  *
  * 关于 active：与 ToolImagePart 同理——AI SDK 中止语义下进行中的 tool part 不落终态，
  * 非流式（active=false）时渲染中性「已停止」收尾，避免残留永久转圈的状态条。
  */
-export function ToolAssetPart({ part, active }: { part: CreateAssetToolPart; active: boolean }) {
+export function ToolAssetPart({
+  part,
+  active,
+  mode = 'create'
+}: {
+  part: CreateAssetToolPart;
+  active: boolean;
+  /** edit = editAsset 精确编辑（文案用「更新」）；create = createAsset 新建（文案用「保存」） */
+  mode?: 'create' | 'edit';
+}) {
   const state = part.state;
+  const action = mode === 'edit' ? '更新' : '保存';
 
   if (state === 'input-streaming' || state === 'input-available') {
     const title = part.input?.title;
@@ -28,14 +38,15 @@ export function ToolAssetPart({ part, active }: { part: CreateAssetToolPart; act
       return (
         <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
           <Icons.clock className='size-4' />
-          已停止：{title ? `${title} 未保存` : '资产未保存'}
+          已停止：{title ? `${title} 未${action}` : `资产未${action}`}
         </div>
       );
     }
     return (
       <div className='text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm'>
         <Icons.spinner className='size-4 animate-spin' />
-        正在生成资产{title ? `：${title}` : '…'}
+        {mode === 'edit' ? '正在编辑资产' : '正在生成资产'}
+        {title ? `：${title}` : '…'}
       </div>
     );
   }
@@ -48,7 +59,7 @@ export function ToolAssetPart({ part, active }: { part: CreateAssetToolPart; act
   if (state === 'output-error') {
     return (
       <div className='border-destructive/40 bg-destructive/5 text-destructive rounded-lg border px-3 py-2 text-sm'>
-        资产保存失败：{part.errorText ?? '未知错误'}
+        资产{action}失败：{part.errorText ?? '未知错误'}
       </div>
     );
   }

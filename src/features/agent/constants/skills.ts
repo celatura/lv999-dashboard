@@ -15,6 +15,7 @@ import { isUuid } from '@/lib/utils';
 /** Agent 工具名（与 agent.ts 注册的工具 key 一一对应；定义在此避免反向 import） */
 export const AGENT_TOOL_NAMES = [
   'createAsset',
+  'editAsset',
   'createImageAsset',
   'editImageAsset',
   'createVideoAsset',
@@ -33,6 +34,7 @@ export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
  */
 export const AGENT_TOOL_LABELS: Record<AgentToolName, string> = {
   createAsset: '保存作品（Markdown / HTML）',
+  editAsset: '精确编辑文本资产',
   createImageAsset: '文生图',
   editImageAsset: '图片编辑（改图）',
   createVideoAsset: '文生视频',
@@ -83,11 +85,12 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
 1. 开工前先确认四要素：商品是什么、目标人群、核心卖点（1-3 个）、投放平台/尺寸要求；用户消息里有 [引用资产] 的产品图时，直接以它为素材基准（改图用 editImageAsset，不要凭空重画产品）。
 2. 缺关键信息时一次性追问，不要挤牙膏式提问；引用产品图不会让你看到图像内容，用户只给产品图时，请用户描述商品信息，不要推测。
 3. 给出整套方案（主图 / 卖点图 / 详情页文案的清单与思路）并说明设计理由，得到认可或用户无异议后逐项执行。
-4. 每张图用 createImageAsset 生成（prompt 自包含：商品主体、场景、构图、色调、文字内容与位置）；需要「图 + 可编辑标题文字」的活动海报 / 详情页头图时用 composeDesign（横版头图选 layout "left-image" 或 "full-image-bar"、aspect "16:9"）；详情页文案用 createAsset 存为 markdown。
+4. 每张图用 createImageAsset 生成（prompt 自包含：商品主体、场景、构图、色调、文字内容与位置）；需要「图 + 可编辑标题文字」的活动海报 / 详情页头图时用 composeDesign（横版头图选 layout "left-image" 或 "full-image-bar"、aspect "16:9"）；详情页文案用 createAsset 存为 markdown，后续局部改文案用 editAsset 精确替换。
 5. 交付时总结整套资产清单与使用建议，并主动提出可迭代方向（换背景、改文案、加节令氛围等）。`,
     // 图文场景：禁用昂贵视频工具（createVideoAsset / createVideoFromImageAsset），防误调烧成本
     tools: [
       'createAsset',
+      'editAsset',
       'createImageAsset',
       'editImageAsset',
       'composeDesign',
@@ -119,12 +122,13 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
 
 工作流：
 1. 先确认选题方向、目标人群与账号调性；用户给了素材（引用资产/知识库资料）时先消化再动笔。
-2. 一次交付完整笔记包：标题候选 + 正文 + 话题标签，用 createAsset 存为 markdown（一篇笔记一个资产）。
+2. 一次交付完整笔记包：标题候选 + 正文 + 话题标签，用 createAsset 存为 markdown（一篇笔记一个资产）；用户要求局部调整（换标题、改措辞）时用 editAsset 精确替换，不要整篇重存。
 3. 封面优先用 composeDesign 生成**整版设计**（aspect 传 "3:4"、layout 选 "top-image"，heading 传标题、subheading 传一句话钩子，imagePrompt 只描述画面）——产出可在设计画布继续改字色/换图；只要一张图（标题烧录在画面里）时用 createImageAsset（aspect "3:4"）；用户已有满意的图想改封时用 editImageAsset。
 4. 交付后主动给出发布建议（发布时间、首评引导）与可迭代方向（换标题风格、调整人设语气、做系列选题）。`,
     // 图文场景：同电商技能，禁用视频工具
     tools: [
       'createAsset',
+      'editAsset',
       'createImageAsset',
       'editImageAsset',
       'composeDesign',

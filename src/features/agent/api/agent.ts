@@ -26,7 +26,8 @@ import {
   createImageAsset,
   createVideoAsset,
   getAsset,
-  searchAssets
+  searchAssets,
+  updateTextAsset
 } from './service';
 import { ASSET_KIND_VALUES } from './types';
 import { searchKnowledgeByText } from '@/features/knowledge/lib/search';
@@ -67,9 +68,9 @@ const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，�
    - 用户消息中出现 [引用资产] 块时，直接使用块内给出的 id，不要再调 findAssets 检索
    - 用户用自然语言指向已有作品（"我之前那张秋天的图""基于这篇文案再写一版"）时，先用 findAssets 检索确认，绝不臆造 id 或内容
    - 命中多个候选时，列出候选请用户确认，或选最相关的一个并说明依据；findAssets 无命中时如实告知并请用户补充线索
-   - 基于文本资产（markdown / html）改写或扩展 → 先 readAsset 取正文，再创作并用 createAsset 存为新资产（不要覆盖原资产）
+   - 基于文本资产（markdown / html）再创作 → 先 readAsset 取正文；局部小改（改标题、换措辞、调段落）用 editAsset 精确替换（保持原资产不变）；整体改写 / 扩展成新作品用 createAsset 存为新资产
    - 修改图片资产 → 用 editImageAsset（sourceAssetId 传该图 id），不要试图用 readAsset 的提示词去"重画"一张
-   - 引用图片不会把图片内容传给你；readAsset 返回的仅是可能为空的生成提示词，不代表图片实际内容。不要声称看到了图片或推测商品信息；需要了解图片内容时请用户描述
+   - 图片附件与引用资产的区别：用户消息中的图片附件（file part）你可以直接看到（多模态输入），可描述、分析或据此创作；[引用资产] 块只传 id 不传像素，readAsset 返回的仅是可能为空的生成提示词。对引用图片不要声称看到了内容或推测商品信息；需要了解时请用户描述，或建议用户改用图片附件上传
 6. 知识库（knowledgeSearch，按内容语义检索用户沉淀的资料）：
    - 用户说"我知识库里…""根据我的资料/笔记""基于我沉淀的文档写一版"，或问题必须引用用户自有资料才能作答时，先调 knowledgeSearch（可多次、用不同角度的 query）
    - 只依据返回的片段作答或创作，并说明引用了哪些文档（用 documentTitle 标注来源）
@@ -104,6 +105,27 @@ const createAssetInputSchema = z.object({
   title: z.string().min(1).max(100).describe('资产标题'),
   kind: z.enum(['markdown', 'html']).describe('资产类型'),
   content: z.string().min(1).describe('资产完整内容')
+});
+
+const EDIT_ASSET_DESCRIPTION =
+  '对已有文本资产（markdown / html）做精确的局部编辑：按 old_string → new_string 原文替换，assetId 保持不变。小改（改标题、换措辞、调段落、删片段）优先用本工具，不要整篇重写；整篇改写或扩展成新作品时才用 createAsset。old_string 必须与正文逐字一致（含空格换行），默认要求唯一命中，多处相同文本用 replace_all。';
+
+const editAssetInputSchema = z.object({
+  assetId: z
+    .uuid()
+    .describe(
+      '要编辑的文本资产 id（markdown / html；来自 readAsset / findAssets 结果、上文工具返回值或消息中的 [引用资产] 块）'
+    ),
+  old_string: z
+    .string()
+    .min(1)
+    .describe('要替换的原文片段：逐字复制（含空格与换行），带 3-5 行前后文确保唯一命中'),
+  new_string: z.string().describe('替换后的文本（空字符串 = 删除该片段）'),
+  replace_all: z
+    .boolean()
+    .optional()
+    .describe('替换全部命中（默认 false；false 时 old_string 必须在正文中恰好出现一次）'),
+  title: z.string().min(1).max(100).optional().describe('可选：编辑后的新资产标题')
 });
 
 const aspectFieldSchema = z
@@ -254,6 +276,10 @@ export const agentValidationTools = {
     description: CREATE_ASSET_DESCRIPTION,
     inputSchema: createAssetInputSchema
   }),
+  editAsset: tool({
+    description: EDIT_ASSET_DESCRIPTION,
+    inputSchema: editAssetInputSchema
+  }),
   createImageAsset: tool({
     description: CREATE_IMAGE_ASSET_DESCRIPTION,
     inputSchema: createImageAssetInputSchema
@@ -314,6 +340,60 @@ function createAssetTool(params: { userId: string; conversationId: string }) {
         content
       });
       return { assetId: asset.id, title, kind, sizeBytes: asset.sizeBytes };
+    }
+  });
+}
+
+/**
+ * 文本资产精确编辑（借鉴 Claude Code / chatbot editDocument 的 old_string/new_string 模式）：
+ * 局部小改保持 assetId 不变，避免整篇重写浪费 token 与资产身份断裂。
+ * 唯一命中守卫（replace_all 除外）防止误改多处相同文本；替换用函数 replacer，
+ * 避免 new_string 中的 $& 等被 String.replace 解释为替换模式。
+ */
+function editAssetTool(params: { userId: string }) {
+  return tool({
+    description: EDIT_ASSET_DESCRIPTION,
+    inputSchema: editAssetInputSchema,
+    execute: async ({ assetId, old_string, new_string, replace_all, title }) => {
+      const asset = await getAsset(params.userId, assetId);
+      if (!asset) {
+        throw new Error('找不到该资产（可能已删除或不属于当前用户），请用 findAssets 重新检索。');
+      }
+      if (asset.kind !== 'markdown' && asset.kind !== 'html') {
+        throw new Error('editAsset 仅支持 markdown / html 文本资产；修改图片请用 editImageAsset。');
+      }
+      const content = asset.content ?? '';
+      const occurrences = content.split(old_string).length - 1;
+      if (occurrences === 0) {
+        throw new Error(
+          '未在正文中找到 old_string：请先 readAsset 获取最新正文，逐字复制片段（含空格与换行）后重试。'
+        );
+      }
+      if (occurrences > 1 && !replace_all) {
+        throw new Error(
+          `old_string 在正文中出现 ${occurrences} 次：请补充前后文使其唯一命中，或传 replace_all=true 全部替换。`
+        );
+      }
+      const updated = replace_all
+        ? content.replaceAll(old_string, () => new_string)
+        : content.replace(old_string, () => new_string);
+      const sizeBytes = Buffer.byteLength(updated, 'utf8');
+      if (sizeBytes > MAX_ASSET_SIZE_BYTES) {
+        throw new Error(
+          `编辑后内容超过上限（${Math.round(MAX_ASSET_SIZE_BYTES / 1024)}KB），请精简后重试。`
+        );
+      }
+      const result = await updateTextAsset({
+        userId: params.userId,
+        assetId,
+        content: updated,
+        title
+      });
+      if (!result) {
+        throw new Error('资产更新失败（可能已被删除），请用 findAssets 重新检索。');
+      }
+      // 返回结构与 createAsset 对齐，复用对话内资产卡片渲染
+      return { assetId, title: result.title, kind: result.kind, sizeBytes: result.sizeBytes };
     }
   });
 }
@@ -631,7 +711,7 @@ function readAssetTool(params: { userId: string }) {
           kind: asset.kind,
           title: asset.title,
           content: asset.content ?? '',
-          hint: '这是文本资产正文；请基于它按用户要求改写/扩展，并用 createAsset 保存为新资产。'
+          hint: '这是文本资产正文；局部小改用 editAsset 精确替换（保持原资产），整体改写/扩展用 createAsset 保存为新资产。'
         };
       }
       if (asset.kind === 'image') {
@@ -840,10 +920,11 @@ export function buildAgent(params: {
     ? `\n\n# 当前技能：${skill.name}\n${skill.instructions}${renderExamples(skill.examples)}`
     : '';
   const instructions = `${AGENT_INSTRUCTIONS}${skillBlock}`;
-  // 工具名 → 工厂（与 agentValidationTools 的 9 工具一一对应）；按技能白名单懒构建，
+  // 工具名 → 工厂（与 agentValidationTools 的全量工具一一对应）；按技能白名单懒构建，
   // 未声明技能或技能未声明 tools 时回退全量（向后兼容，无技能 = 通用兜底）
   const toolFactories: Record<AgentToolName, () => Tool> = {
     createAsset: () => createAssetTool(params),
+    editAsset: () => editAssetTool(params),
     createImageAsset: () => createImageAssetTool(params),
     editImageAsset: () => editImageAssetTool(params),
     createVideoAsset: () => createVideoAssetTool(params),

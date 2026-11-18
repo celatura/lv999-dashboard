@@ -7,7 +7,7 @@ import {
   toUIMessageStream,
   TypeValidationError,
   validateUIMessages,
-  type InferAgentUIMessage,
+  type ModelMessage,
   type UIMessage
 } from 'ai';
 import { after } from 'next/server';
@@ -23,15 +23,22 @@ import {
 import { getSkillForUser } from '@/features/agent/api/skill-service';
 import { GenerationError } from '@/features/agent/api/generation-error';
 import {
-  applyAutoTitle,
-  cleanupSupersededResponses,
+  applyGeneratedTitle,
   clearConversationActiveStream,
+  deleteTrailingMessages,
   getConversation,
+  getMessagesContextSize,
+  listMessages,
   saveUserMessage,
   setConversationActiveStream,
-  syncConversationMessages,
-  touchConversation
+  syncConversationMessages
 } from '@/features/agent/api/service';
+import { prepareMessageAttachments } from '@/features/agent/api/attachment-urls';
+import { MODEL_REGISTRY, isModelKey } from '@/features/agent/constants/models';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/features/agent/api/types';
+import { generateConversationTitle } from '@/features/agent/api/title-generation';
+import { DEFAULT_CONVERSATION_TITLE } from '@/features/agent/constants/conversation';
+import type { AgentChatMessage } from '@/features/agent/api/types';
 import {
   consumeAgentStop,
   requestAgentStop,
@@ -104,10 +111,20 @@ export async function POST(request: Request) {
     return apiError(400, 'invalid_json', 'Invalid JSON body');
   }
 
-  const messages = body.messages as UIMessage[] | undefined;
+  // 增量协议：客户端每次只发最后一条消息（prepareSendMessagesRequest），
+  // 历史以服务端 DB 为权威，claim 后读取合并——消除全量历史带来的请求体膨胀
+  const incomingMessages = body.messages as UIMessage[] | undefined;
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : undefined;
-  if (!Array.isArray(messages) || messages.length === 0 || !conversationId) {
-    return apiError(400, 'invalid_request', 'messages and conversationId are required');
+  if (!Array.isArray(incomingMessages) || incomingMessages.length !== 1 || !conversationId) {
+    return apiError(
+      400,
+      'invalid_request',
+      'messages (exactly one) and conversationId are required'
+    );
+  }
+  const incomingMessage = incomingMessages[0];
+  if (incomingMessage?.role !== 'user' || !Array.isArray(incomingMessage.parts)) {
+    return apiError(400, 'invalid_request', 'Invalid message');
   }
   if (
     body.streamId !== undefined &&
@@ -115,34 +132,17 @@ export async function POST(request: Request) {
   ) {
     return apiError(400, 'invalid_request', 'Invalid stream id');
   }
+  if (incomingMessage.parts.length > MAX_PARTS_PER_MESSAGE) {
+    return apiError(413, 'payload_too_large', 'Too many message parts');
+  }
   if (
-    messages.length > MAX_MESSAGES ||
-    messages.some(
-      (message) => Array.isArray(message?.parts) && message.parts.length > MAX_PARTS_PER_MESSAGE
-    )
+    incomingMessage.parts.filter((part) => part?.type === 'file').length >
+    MAX_ATTACHMENTS_PER_MESSAGE
   ) {
-    return apiError(413, 'payload_too_large', 'Too many messages');
+    return apiError(400, 'invalid_request', 'Too many attachments');
   }
 
-  // 并行组 2：消息校验（CPU）与归属查询（DB）互不依赖；
-  // 保持「校验失败 400 优先于会话不存在 404」语义。
-  // 官方要求：含工具调用的消息在进入模型前必须先校验（畸形历史 → 400 而非 500）
-  let validatedMessages: AgentValidationUIMessage[];
-  let conversation: Awaited<ReturnType<typeof getConversation>>;
-  try {
-    [validatedMessages, conversation] = await Promise.all([
-      validateUIMessages<AgentValidationUIMessage>({
-        messages,
-        tools: agentValidationTools
-      }),
-      getConversation(userId, conversationId)
-    ]);
-  } catch (error) {
-    if (TypeValidationError.isInstance(error)) {
-      return apiError(400, 'invalid_request', 'Invalid messages');
-    }
-    throw error;
-  }
+  const conversation = await getConversation(userId, conversationId);
   if (!conversation) {
     return apiError(404, 'not_found', 'Conversation not found');
   }
@@ -151,37 +151,37 @@ export async function POST(request: Request) {
   }
 
   // 计费入口拦截：限流后、建流前；余额 ≤0 直接 402（不发起上游调用，杜绝陌生人刷爆 API）
-  // 并行：技能解析（uuid → 查 DB 归属 / 预置 key → 常量 / 无 → undefined）与余额校验互不依赖
-  const [skill, hasBalance] = await Promise.all([
+  // 并行：技能解析 / 余额校验 / 历史上下文规模（预算估算用）互不依赖
+  const [skill, hasBalance, contextSize] = await Promise.all([
     getSkillForUser(userId, conversation.activeSkillId),
-    checkBalance(userId)
+    checkBalance(userId),
+    getMessagesContextSize(conversationId)
   ]);
   if (!hasBalance) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
 
-  const modelMessages = await convertToModelMessages(validatedMessages, {
-    ignoreIncompleteToolCalls: true
-  });
-
   // usage 累加器：onStepEnd 累加每步 token，onEnd 据此结算扣费（每请求新建，serverless 无跨请求污染）
   const usageSink: UsageSink = { inputTokens: 0, outputTokens: 0 };
+  // LLM 标题生成（仅默认标题的首条消息）：与主生成并行，不阻塞流；usage 计入同一累加器
+  let titlePromise: Promise<string> | null = null;
 
   // 开新流前先登记活跃流（官方要求开始新流时立即更新，防止窗口期刷新重连到旧流或拿 204）；
   // 停止信号消费端：stop 端点写 Redis 标志 → 这里轮询命中后 abort 底层生成（真取消）。
   const streamId = typeof body.streamId === 'string' ? body.streamId : generateId();
 
-  const lastUserMessage = messages.toReversed().find((message) => message.role === 'user');
   if (await consumeAgentStop(conversationId, streamId)) {
-    if (lastUserMessage) {
-      await saveUserMessage(conversationId, lastUserMessage);
-    }
+    await saveUserMessage(conversationId, incomingMessage);
     return cancelledStreamResponse();
   }
-  // 按请求大小和每步输出上限估算预算；工具结果和多模态 token 仍可能使实际费用超出。
+  // 按上下文规模（DB 历史字节 + 本次增量消息 + 图片附件余量）与每步输出上限估算预算；
+  // 增量协议下请求体不再含历史，历史规模须取自 DB；每张图按 4096 token 余量估（实际以 usage 结算）。
+  const incomingFileParts = incomingMessage.parts.filter((part) => part?.type === 'file').length;
+  const imageAllowance = (contextSize.fileParts + incomingFileParts) * 4096;
   const budget = priceChat(
     conversation.model,
-    (Buffer.byteLength(rawBody, 'utf8') + 4096) * MAX_CHAT_STEPS,
+    (contextSize.bytes + Buffer.byteLength(rawBody, 'utf8') + 4096 + imageAllowance) *
+      MAX_CHAT_STEPS,
     MAX_CHAT_OUTPUT_TOKENS * MAX_CHAT_STEPS
   );
   const reservation = await reserveCredits({
@@ -217,7 +217,6 @@ export async function POST(request: Request) {
     await releaseReservation();
     throw error;
   }
-  type AgentUIMessage = InferAgentUIMessage<typeof agent>;
 
   let claimed: boolean;
   try {
@@ -238,25 +237,73 @@ export async function POST(request: Request) {
     return apiError(409, 'stream_changed', 'Conversation stream changed');
   }
 
+  // 建流前失败的统一清理：清活跃流登记 + 释放预留
+  const rejectAfterClaim = async (response: Response): Promise<Response> => {
+    await clearConversationActiveStream(conversationId, streamId).catch((cleanupError) => {
+      console.error('[agent] chat stream cleanup failed', { conversationId, error: cleanupError });
+    });
+    await releaseReservation();
+    return response;
+  };
+
+  let messages: UIMessage[];
+  let modelMessages: ModelMessage[];
   try {
-    const staleStreamStop = conversation.activeStreamId
-      ? requestAgentStop(conversationId, conversation.activeStreamId, true)
-      : Promise.resolve();
-    if (lastUserMessage) {
-      const userText = extractText(lastUserMessage);
-      await Promise.all([
-        saveUserMessage(conversationId, lastUserMessage),
-        userText ? applyAutoTitle(userId, conversation, userText) : Promise.resolve(),
-        staleStreamStop
-      ]);
-      await cleanupSupersededResponses(conversationId, lastUserMessage.id);
-    } else {
-      await staleStreamStop;
+    // claim 后读历史：activeStreamId 已串行化并发生成，避免陈旧视图误删新轮次。
+    // id 命中 = 编辑/重新生成（替换目标消息并删除旧尾部）；未命中 = 追加新消息。
+    const historyRows = await listMessages(userId, conversationId);
+    const historyMessages: UIMessage[] = (historyRows ?? []).map((message) => ({
+      id: message.id,
+      role: message.role,
+      parts: message.parts,
+      metadata: message.metadata ?? undefined
+    }));
+    const incomingIndex = historyMessages.findIndex((message) => message.id === incomingMessage.id);
+    messages =
+      incomingIndex >= 0
+        ? [...historyMessages.slice(0, incomingIndex), incomingMessage]
+        : [...historyMessages, incomingMessage];
+    if (messages.length > MAX_MESSAGES) {
+      return await rejectAfterClaim(apiError(413, 'payload_too_large', 'Too many messages'));
     }
+
+    // 官方要求：含工具调用的消息在进入模型前必须先校验（畸形历史 → 400 而非 500）
+    let validatedMessages: AgentValidationUIMessage[];
+    try {
+      validatedMessages = await validateUIMessages<AgentValidationUIMessage>({
+        messages,
+        tools: agentValidationTools
+      });
+    } catch (error) {
+      if (TypeValidationError.isInstance(error)) {
+        return await rejectAfterClaim(apiError(400, 'invalid_request', 'Invalid messages'));
+      }
+      throw error;
+    }
+    // 图片附件：file part 的稳定 /raw 路径重签为 OSS 签名 URL（百炼公网拉取）；
+    // 非多模态模型移除全部 file part（客户端已按能力禁用附件，此处兜底）
+    const vision = isModelKey(conversation.model)
+      ? (MODEL_REGISTRY[conversation.model].capabilities.multimodal ?? false)
+      : false;
+    const resolvedMessages = await prepareMessageAttachments(userId, validatedMessages, vision);
+    modelMessages = await convertToModelMessages(resolvedMessages, {
+      ignoreIncompleteToolCalls: true
+    });
+
+    const staleStreamStop = conversation.activeStreamId
+      ? requestAgentStop(conversationId, conversation.activeStreamId)
+      : Promise.resolve();
+    // 编辑/重新生成：先删除被取代的旧尾部（失败/半截回答或编辑点之后的旧内容）
+    if (incomingIndex >= 0) {
+      await deleteTrailingMessages(conversationId, incomingMessage.id);
+    }
+    const userText = extractText(incomingMessage);
+    if (incomingIndex < 0 && userText && conversation.title === DEFAULT_CONVERSATION_TITLE) {
+      titlePromise = generateConversationTitle(userText, usageSink);
+    }
+    await Promise.all([saveUserMessage(conversationId, incomingMessage), staleStreamStop]);
     if (await consumeAgentStop(conversationId, streamId)) {
-      await clearConversationActiveStream(conversationId, streamId);
-      await releaseReservation();
-      return cancelledStreamResponse();
+      return await rejectAfterClaim(cancelledStreamResponse());
     }
   } catch (error) {
     await clearConversationActiveStream(conversationId, streamId).catch((cleanupError) => {
@@ -290,65 +337,87 @@ export async function POST(request: Request) {
     });
 
   return createUIMessageStreamResponse({
-    stream: toUIMessageStream({
-      stream: result.stream,
-      originalMessages: messages as AgentUIMessage[],
-      // 官方要求（持久化场景必须提供响应消息 id 生成器，resume 官方示例同款写法）：
-      // 不提供时响应消息 id 为空串，空 id 会在 messages 主键上跨会话冲突，
-      // 导致 onConflictDoUpdate 覆盖其他会话的内容（历史事故：串会话 + 消息丢失）
-      generateMessageId: generateId,
-      // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）
-      messageMetadata: ({ part }) => (part.type === 'start' ? { streamId } : undefined),
-      // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
-      // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
-      // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；
-      // 生成类错误（图片/视频的 GenerationError）已携带用户可读中文（下载失败/超时/审核拒绝等），
-      // 原样透传供给工具卡片（如 tool-video-part）直接展示——否则会被兜底文案掩盖真实原因；
-      // 其余错误保持与客户端兜底文案一致的通用提示，详情只进服务端日志
-      onError: (error: unknown) => {
-        if (error instanceof GenerationError) return error.message;
-        const unavailable = detectModelUnavailable({
-          channel: 'chat',
-          error,
-          detail: { conversationId, model: conversation.model }
-        });
-        if (unavailable) return unavailable;
-        console.error('[agent] chat stream failed', { conversationId, error });
-        return '生成出错了，请重试。';
-      },
-      onEnd: async ({ messages: finalMessages, isAborted, outcome }) => {
-        stopWatching();
-        try {
-          await syncConversationMessages(conversationId, messages, finalMessages);
-          await clearConversationActiveStream(conversationId, streamId);
-          await touchConversation(conversationId);
-        } finally {
-          try {
-            const hasUsage = usageSink.inputTokens > 0 || usageSink.outputTokens > 0;
-            const cost =
-              hasUsage || outcome.status !== 'failed'
-                ? priceChat(conversation.model, usageSink.inputTokens, usageSink.outputTokens)
-                : 0;
-            await settleCredits({
-              reservationId: reservation.id,
-              cost,
-              meta: {
-                model: conversation.model,
-                inputTokens: usageSink.inputTokens,
-                outputTokens: usageSink.outputTokens,
-                conversationId,
-                aborted: isAborted
+    stream: createUIMessageStream<AgentChatMessage>({
+      execute: async ({ writer }) => {
+        writer.merge(
+          toUIMessageStream({
+            stream: result.stream,
+            originalMessages: messages as AgentChatMessage[],
+            // 官方要求（持久化场景必须提供响应消息 id 生成器，resume 官方示例同款写法）：
+            // 不提供时响应消息 id 为空串，空 id 会在 messages 主键上跨会话冲突，
+            // 导致 onConflictDoUpdate 覆盖其他会话的内容（历史事故：串会话 + 消息丢失）
+            generateMessageId: generateId,
+            // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）
+            messageMetadata: ({ part }) => (part.type === 'start' ? { streamId } : undefined),
+            // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
+            // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
+            // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；
+            // 生成类错误（图片/视频的 GenerationError）已携带用户可读中文（下载失败/超时/审核拒绝等），
+            // 原样透传供给工具卡片（如 tool-video-part）直接展示——否则会被兜底文案掩盖真实原因；
+            // 其余错误保持与客户端兜底文案一致的通用提示，详情只进服务端日志
+            onError: (error: unknown) => {
+              if (error instanceof GenerationError) return error.message;
+              const unavailable = detectModelUnavailable({
+                channel: 'chat',
+                error,
+                detail: { conversationId, model: conversation.model }
+              });
+              if (unavailable) return unavailable;
+              console.error('[agent] chat stream failed', { conversationId, error });
+              return '生成出错了，请重试。';
+            },
+            onEnd: async ({ messages: finalMessages, isAborted, outcome }) => {
+              stopWatching();
+              try {
+                await syncConversationMessages(conversationId, messages, finalMessages);
+                await clearConversationActiveStream(conversationId, streamId);
+              } finally {
+                try {
+                  // 等标题生成完成（自带 8s 超时）再结算，把其 usage 计入本次扣费；
+                  // 通常先于主流完成，不增加延迟
+                  if (titlePromise) await titlePromise;
+                  const hasUsage = usageSink.inputTokens > 0 || usageSink.outputTokens > 0;
+                  const cost =
+                    hasUsage || outcome.status !== 'failed'
+                      ? priceChat(conversation.model, usageSink.inputTokens, usageSink.outputTokens)
+                      : 0;
+                  await settleCredits({
+                    reservationId: reservation.id,
+                    cost,
+                    meta: {
+                      model: conversation.model,
+                      inputTokens: usageSink.inputTokens,
+                      outputTokens: usageSink.outputTokens,
+                      conversationId,
+                      aborted: isAborted
+                    }
+                  });
+                } catch (error) {
+                  console.error(
+                    '[agent] chat credit settlement failed; reservation remains pending',
+                    {
+                      conversationId,
+                      reservationId: reservation.id,
+                      model: conversation.model,
+                      usage: usageSink,
+                      outcome: outcome.status,
+                      aborted: isAborted,
+                      error
+                    }
+                  );
+                }
               }
-            });
-          } catch (error) {
-            console.error('[agent] chat credit settlement failed; reservation remains pending', {
-              conversationId,
-              reservationId: reservation.id,
-              model: conversation.model,
-              usage: usageSink,
-              outcome: outcome.status,
-              aborted: isAborted,
-              error
+            }
+          })
+        );
+        // 标题与主流并行：就绪即推 transient data part（不入消息 parts），
+        // 客户端经 onData 更新会话头部并失效会话列表；落库带默认标题守卫
+        if (titlePromise) {
+          const title = await titlePromise;
+          if (title !== DEFAULT_CONVERSATION_TITLE) {
+            writer.write({ type: 'data-conversation-title', data: { title }, transient: true });
+            await applyGeneratedTitle(userId, conversationId, title).catch((error) => {
+              console.error('[agent] failed to persist generated title', { conversationId, error });
             });
           }
         }

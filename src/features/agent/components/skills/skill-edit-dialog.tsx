@@ -43,7 +43,7 @@ interface SkillEditDialogProps {
 /**
  * 技能创建/编辑对话框（受控表单，与设计画布 AI 对话框同风格）。
  * 字段：名称 / 一句话描述 / 专家指令（大 textarea + 字数计数 + 撰写提示）/ 输入框引导语（可选）/
- * 工具范围（9 工具勾选，全勾 = 不限 → 存 null 全量）/ 示例（0-2 组，每组 用户输入 + 期望输出）。
+ * 工具范围（全量工具勾选，全勾 = 不限 → 存 null 全量）/ 示例（0-2 组，每组 用户输入 + 期望输出）。
  * 提交前用 skillMutationSchema 客户端校验（中文提示）；服务端再校验兜底。
  */
 export function SkillEditDialog({

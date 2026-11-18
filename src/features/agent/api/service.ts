@@ -20,7 +20,7 @@ import { cache } from 'react';
 import { getDb } from '@/lib/db';
 import { assets, conversations, messages } from '@/lib/db/schema';
 import { assetObjectKey, getOssServerClient, putObject } from '@/lib/oss';
-import { DEFAULT_CONVERSATION_TITLE, buildConversationTitle } from '../constants/conversation';
+import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
 import { CONVERSATIONS_PAGE_SIZE, type ConversationCursor } from '../lib/conversation-pagination';
 import type {
   Asset,
@@ -217,14 +217,6 @@ export async function deleteConversation(userId: string, conversationId: string)
   return rows.length > 0;
 }
 
-export async function touchConversation(conversationId: string): Promise<void> {
-  const db = getDb();
-  await db
-    .update(conversations)
-    .set({ updatedAt: new Date() })
-    .where(eq(conversations.id, conversationId));
-}
-
 /** 记录会话当前的活跃可恢复流（刷新后据此重连） */
 export async function setConversationActiveStream(
   conversationId: string,
@@ -263,16 +255,23 @@ export async function clearConversationActiveStream(
   return rows.length > 0;
 }
 
-/** 会话仍是默认标题时，用首条用户消息生成标题 */
-export async function applyAutoTitle(
+/** LLM 标题落库：仅当仍是默认标题时更新（原子守卫，避免覆盖用户手动改名） */
+export async function applyGeneratedTitle(
   userId: string,
-  conversation: Conversation,
-  userText: string
+  conversationId: string,
+  title: string
 ): Promise<void> {
-  if (conversation.title !== DEFAULT_CONVERSATION_TITLE) return;
-  const title = buildConversationTitle(userText);
-  if (title === DEFAULT_CONVERSATION_TITLE) return;
-  await updateConversation(userId, conversation.id, { title });
+  const db = getDb();
+  await db
+    .update(conversations)
+    .set({ title, updatedAt: new Date() })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.userId, userId),
+        eq(conversations.title, DEFAULT_CONVERSATION_TITLE)
+      )
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +319,24 @@ export async function listMessages(
   return rows.map(toChatMessage);
 }
 
+/**
+ * 会话历史上下文规模（SQL 聚合，不拉正文）：parts 的 JSON 字节总量 + 图片附件 file part 数。
+ * 供对话预留预算估算（增量协议下请求体不含历史，规模须取自 DB）。
+ */
+export async function getMessagesContextSize(
+  conversationId: string
+): Promise<{ bytes: number; fileParts: number }> {
+  const db = getDb();
+  const [{ bytes, fileParts }] = await db
+    .select({
+      bytes: sql<number>`coalesce(sum(octet_length(${messages.parts}::text)), 0)`,
+      fileParts: sql<number>`coalesce(sum((select count(*) from jsonb_array_elements(${messages.parts}) part where part->>'type' = 'file')), 0)`
+    })
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId));
+  return { bytes: Number(bytes), fileParts: Number(fileParts) };
+}
+
 /** 请求开始时先落一条用户消息（upsert，保证中断场景不丢输入） */
 export async function saveUserMessage(
   conversationId: string,
@@ -333,34 +350,27 @@ export async function saveUserMessage(
 }
 
 /**
- * 重试/重新生成场景的定点清理：若目标 user 消息仍是会话内最后一条用户消息，
- * 删除其后残留的 assistant 消息（被取代的失败/半截回答）。
- *
- * 只在新请求开始阶段执行（而非陈旧 onEnd 回调），天然避开历史并发误删问题；
- * 守卫条件保证不会误删其他端更新的新轮次。
+ * 编辑/重新生成场景的定点清理：删除目标消息之后的所有消息
+ * （被取代的旧尾部：失败/半截回答，或编辑点之后的旧内容）。
+ * 目标消息不存在时静默返回；只在新请求开始阶段执行，避开历史并发误删问题。
  */
-export async function cleanupSupersededResponses(
+export async function deleteTrailingMessages(
   conversationId: string,
-  userMessageId: string
+  messageId: string
 ): Promise<void> {
   const db = getDb();
-  const latestUserRows = await db
-    .select({ id: messages.id, createdAt: messages.createdAt })
+  const targetRows = await db
+    .select({ createdAt: messages.createdAt })
     .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'user')))
-    .orderBy(desc(messages.createdAt))
+    .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
     .limit(1);
-  const latestUser = latestUserRows[0];
-  if (!latestUser || latestUser.id !== userMessageId) return;
+  const target = targetRows[0];
+  if (!target) return;
 
   await db
     .delete(messages)
     .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        eq(messages.role, 'assistant'),
-        gt(messages.createdAt, latestUser.createdAt)
-      )
+      and(eq(messages.conversationId, conversationId), gt(messages.createdAt, target.createdAt))
     );
 }
 
@@ -449,6 +459,40 @@ export async function createAsset(params: {
     })
     .returning({ id: assets.id });
   return { id: rows[0].id, sizeBytes };
+}
+
+/**
+ * 精确编辑文本资产（markdown/html）：按所有权更新正文（可选改标题），assetId 不变。
+ * kind 守卫在 UPDATE 条件内（与调用方预检双保险）；sizeBytes 口径与 createAsset 一致 = 正文字节。
+ */
+export async function updateTextAsset(params: {
+  userId: string;
+  assetId: string;
+  content: string;
+  title?: string;
+}): Promise<{ title: string; kind: AssetKind; sizeBytes: number } | undefined> {
+  const sizeBytes = Buffer.byteLength(params.content, 'utf8');
+  const db = getDb();
+  const rows = await db
+    .update(assets)
+    .set({
+      content: params.content,
+      ...(params.title !== undefined ? { title: params.title } : {}),
+      sizeBytes,
+      updatedAt: new Date()
+    })
+    .where(
+      and(
+        eq(assets.id, params.assetId),
+        eq(assets.userId, params.userId),
+        inArray(assets.kind, ['markdown', 'html'])
+      )
+    )
+    .returning({ title: assets.title, kind: assets.kind, sizeBytes: assets.sizeBytes });
+  const row = rows[0];
+  return row
+    ? { title: row.title, kind: row.kind as AssetKind, sizeBytes: row.sizeBytes ?? sizeBytes }
+    : undefined;
 }
 
 /** 生成图片 mime → OSS 扩展名（mime 由下载阶段按魔数判定，见 api/image-generation.ts） */

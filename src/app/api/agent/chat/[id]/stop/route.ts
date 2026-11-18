@@ -77,7 +77,7 @@ export async function POST(request: Request, context: RouteContext) {
   if (isActive && body.assistantMessage) {
     await saveAssistantSnapshot(id, body.assistantMessage);
   }
-  await requestAgentStop(id, requestedStreamId, isActive);
+  await requestAgentStop(id, requestedStreamId);
   if (isActive) await clearConversationActiveStream(id, requestedStreamId);
   return Response.json({ success: true, outcome: 'requested' });
 }

@@ -1,7 +1,7 @@
 import { getUserId } from '@/lib/auth-session';
 import { notFound } from 'next/navigation';
-import type { UIMessage } from 'ai';
 import { getConversation, listMessages } from '@/features/agent/api/service';
+import type { AgentChatMessage } from '@/features/agent/api/types';
 import { ChatWindow } from '@/features/agent/components/chat/chat-window';
 
 export const metadata = {
@@ -21,11 +21,12 @@ export default async function ConversationPage({ params }: PageProps) {
   if (!conversation) notFound();
 
   const messageRows = await listMessages(userId, conversationId);
-  const initialMessages: UIMessage[] = (messageRows ?? []).map((message) => ({
+  // DB 行由服务端写入（parts 即 UIMessage parts），收窄到共享聊天消息类型
+  const initialMessages: AgentChatMessage[] = (messageRows ?? []).map((message) => ({
     id: message.id,
     role: message.role,
-    parts: message.parts,
-    metadata: message.metadata ?? undefined
+    parts: message.parts as AgentChatMessage['parts'],
+    metadata: (message.metadata ?? undefined) as AgentChatMessage['metadata']
   }));
 
   return (

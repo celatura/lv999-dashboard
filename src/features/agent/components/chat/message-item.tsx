@@ -1,6 +1,6 @@
 'use client';
 
-import type { TextUIPart, UIMessage } from 'ai';
+import type { FileUIPart, TextUIPart, UIMessage } from 'ai';
 import { isToolUIPart } from 'ai';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Message, MessageContent, MessageFooter } from '@/components/ui/message';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getAssetKindMeta } from '../../constants/kinds';
+import { imageThumbnailUrl } from '../../lib/asset-url';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 import { CopyButton } from '../copy-button';
@@ -48,9 +49,30 @@ export const MessageItem = memo(function MessageItem({
   onRegenerate?: () => void;
 }) {
   if (message.role === 'user') {
+    // 图片附件（file part）：url 为同源 /raw 代理路径，浏览器带 cookie 直接显示
+    const imageParts = message.parts.filter(
+      (part): part is FileUIPart => part.type === 'file' && part.mediaType.startsWith('image/')
+    );
     return (
       <Message align='end'>
         <MessageContent>
+          {imageParts.length > 0 && (
+            <div className='flex flex-wrap justify-end gap-1.5'>
+              {imageParts.map((part, index) => {
+                // 消息内缩略图走 /raw?thumb=1（320w）；从稳定 url 提取 assetId
+                const assetId = /\/api\/agent\/assets\/([^/]+)\/raw/.exec(part.url)?.[1];
+                return (
+                  // oxlint-disable-next-line nextjs/no-img-element -- 同源 /raw 代理缩略图，不经图片优化器
+                  <img
+                    key={index}
+                    src={assetId ? imageThumbnailUrl(assetId) : part.url}
+                    alt={part.filename ?? '图片附件'}
+                    className='max-h-40 max-w-60 rounded-lg border object-cover'
+                  />
+                );
+              })}
+            </div>
+          )}
           {message.parts.map((part, index) => {
             if (part.type !== 'text') return null;
             // 发送时注入的 [引用资产] 块渲染为 chip（不把 uuid 噪音抛给用户）
@@ -103,12 +125,16 @@ export const MessageItem = memo(function MessageItem({
               </div>
             );
           }
-          if (isToolUIPart(part) && part.type === 'tool-createAsset') {
+          if (
+            isToolUIPart(part) &&
+            (part.type === 'tool-createAsset' || part.type === 'tool-editAsset')
+          ) {
             return (
               <ToolAssetPart
                 key={index}
                 part={part as unknown as CreateAssetToolPart}
                 active={isActive}
+                mode={part.type === 'tool-editAsset' ? 'edit' : 'create'}
               />
             );
           }

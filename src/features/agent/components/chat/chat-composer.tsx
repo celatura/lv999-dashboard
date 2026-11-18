@@ -1,14 +1,17 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { Textarea } from '@/components/ui/textarea';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
+import { ACCEPTED_ATTACHMENT_MIMES } from '../../constants/limits';
 import { useSkillList } from '../../hooks/use-skill-list';
+import { imageThumbnailUrl } from '../../lib/asset-url';
 import type { ReferencedAsset } from '../../lib/asset-reference';
+import { MAX_ATTACHMENTS_PER_MESSAGE, type ChatAttachment } from '../../api/types';
 import { ModelSelector } from './model-selector';
 import { SkillSelector } from './skill-selector';
 
@@ -36,9 +39,17 @@ interface ChatComposerProps {
   referencedAssets: ReferencedAsset[];
   onAddReference: (asset: ReferencedAsset) => void;
   onRemoveReference: (id: string) => void;
+  /** 图片附件（已上传资产，提交时作为 file parts 发送） */
+  attachments: ChatAttachment[];
+  /** 进行中的附件上传数（渲染占位 + 禁止发送） */
+  uploadingCount: number;
+  /** 当前模型是否支持图片输入（注册表 capabilities.multimodal） */
+  visionSupported: boolean;
+  onAddFiles: (files: File[]) => void;
+  onRemoveAttachment: (assetId: string) => void;
 }
 
-/** 输入区：模型选择 + 技能选择 + 引用资产 + 文本输入 + 发送/停止 */
+/** 输入区：模型选择 + 技能选择 + 引用资产 + 图片附件 + 文本输入 + 发送/停止 */
 export function ChatComposer({
   value,
   onChange,
@@ -54,15 +65,21 @@ export function ChatComposer({
   onSkillChange,
   referencedAssets,
   onAddReference,
-  onRemoveReference
+  onRemoveReference,
+  attachments,
+  uploadingCount,
+  visionSupported,
+  onAddFiles,
+  onRemoveAttachment
 }: ChatComposerProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMounted, setPickerMounted] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      if (!isGenerating && !controlsDisabled && value.trim()) {
+      if (!isGenerating && !controlsDisabled && (value.trim() || attachments.length > 0)) {
         onSubmit();
       }
     }
@@ -91,6 +108,37 @@ export function ChatComposer({
     <div className='bg-background shrink-0 pt-2 pb-4'>
       <div className='mx-auto w-full max-w-3xl px-4'>
         <div className='border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/15 relative flex w-full flex-col rounded-xl border shadow-sm transition-[border-color,box-shadow] focus-within:ring-2'>
+          {(attachments.length > 0 || uploadingCount > 0) && (
+            <ul className='flex flex-wrap gap-2 px-3 pt-3' aria-label='图片附件'>
+              {attachments.map((attachment) => (
+                <li key={attachment.assetId} className='relative'>
+                  {/* oxlint-disable-next-line nextjs/no-img-element -- 同源 /raw 代理缩略图（OSS 等比缩放），不经图片优化器 */}
+                  <img
+                    src={imageThumbnailUrl(attachment.assetId)}
+                    alt={attachment.filename}
+                    className='size-14 rounded-md border object-cover'
+                  />
+                  <button
+                    type='button'
+                    onClick={() => onRemoveAttachment(attachment.assetId)}
+                    aria-label={`移除附件：${attachment.filename}`}
+                    className='bg-background/90 text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute -top-1.5 -right-1.5 rounded-full border p-0.5 shadow-sm focus-visible:ring-2 focus-visible:outline-none'
+                  >
+                    <Icons.close className='size-3' />
+                  </button>
+                </li>
+              ))}
+              {Array.from({ length: uploadingCount }).map((_, index) => (
+                <li
+                  key={`uploading-${index}`}
+                  className='bg-muted flex size-14 items-center justify-center rounded-md border border-dashed'
+                  aria-label='附件上传中'
+                >
+                  <Icons.spinner className='text-muted-foreground size-4 animate-spin' />
+                </li>
+              ))}
+            </ul>
+          )}
           {referencedAssets.length > 0 && (
             <ul className='flex flex-wrap gap-1.5 px-3 pt-3' aria-label='已引用资产'>
               {referencedAssets.map((asset) => {
@@ -126,6 +174,16 @@ export function ChatComposer({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={(event) => {
+              // 粘贴图片直接上传为附件（chatbot 同款交互）；纯文本粘贴不受影响
+              const images = Array.from(event.clipboardData.files).filter((file) =>
+                file.type.startsWith('image/')
+              );
+              if (images.length > 0) {
+                event.preventDefault();
+                onAddFiles(images);
+              }
+            }}
             placeholder={placeholder}
             rows={2}
             className='max-h-[min(10rem,25dvh)] min-h-[3.25rem] resize-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent'
@@ -152,6 +210,41 @@ export function ChatComposer({
               {/* 窄屏只留图标，避免与模型选择器、发送按钮挤在一行 */}
               <span className='hidden sm:inline'>引用资产</span>
             </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => fileInputRef.current?.click()}
+              disabled={
+                !visionSupported ||
+                isGenerating ||
+                controlsDisabled ||
+                attachments.length + uploadingCount >= MAX_ATTACHMENTS_PER_MESSAGE
+              }
+              aria-label='添加图片附件'
+              title={
+                visionSupported
+                  ? '添加图片附件（模型可直接看到图片内容）'
+                  : '当前模型不支持图片输入，请切换多模态模型'
+              }
+            >
+              <Icons.media />
+              <span className='hidden sm:inline'>图片</span>
+            </Button>
+            <input
+              ref={fileInputRef}
+              type='file'
+              accept={ACCEPTED_ATTACHMENT_MIMES.join(',')}
+              multiple
+              className='hidden'
+              aria-hidden='true'
+              tabIndex={-1}
+              onChange={(event) => {
+                if (event.target.files?.length) {
+                  onAddFiles(Array.from(event.target.files));
+                }
+                event.target.value = '';
+              }}
+            />
             {isGenerating ? (
               <LoadingButton
                 variant='outline'
@@ -170,7 +263,7 @@ export function ChatComposer({
                 size='sm'
                 className='ml-auto'
                 onClick={onSubmit}
-                disabled={!value.trim() || controlsDisabled}
+                disabled={(!value.trim() && attachments.length === 0) || controlsDisabled}
               >
                 <Icons.send /> 发送
               </Button>

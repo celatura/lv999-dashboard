@@ -83,6 +83,22 @@ export const editImageAssetMutation = mutationOptions({
   onSettled: invalidateAssets
 });
 
+/**
+ * 聊天图片附件上传（multipart）：复用资产上传端点，建 source='upload' 资产。
+ * FormData 不设 Content-Type（apiClient 已适配）；完成后失效资产域（「我的资产」出现新上传图）。
+ */
+export const uploadAttachmentMutation = mutationOptions({
+  mutationFn: ({ file }: { file: File }) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiClient<{ id: string }>('/agent/assets/upload', {
+      method: 'POST',
+      body: form
+    });
+  },
+  onSettled: invalidateAssets
+});
+
 /** 收藏/取消收藏（任意 kind） */
 export const setAssetFavoriteMutation = mutationOptions({
   mutationFn: ({ id, favorite }: { id: string; favorite: boolean }) =>

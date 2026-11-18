@@ -1,6 +1,5 @@
 'use client';
 
-import type { UIMessage } from 'ai';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -17,11 +16,25 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport
 } from '@/components/ui/message-scroller';
-import { createConversationMutation, updateConversationMutation } from '../../api/mutations';
+import {
+  createConversationMutation,
+  updateConversationMutation,
+  uploadAttachmentMutation
+} from '../../api/mutations';
 import { agentKeys } from '../../api/queries';
-import { ASSET_KIND_VALUES, type AssetKind, type Conversation } from '../../api/types';
+import {
+  ASSET_KIND_VALUES,
+  attachmentsToFileParts,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  type AgentChatMessage,
+  type AssetKind,
+  type ChatAttachment,
+  type Conversation
+} from '../../api/types';
 import { ConversationDrawer } from '../conversations/conversation-sidebar';
-import { DEFAULT_MODEL } from '../../constants/models';
+import { DEFAULT_CONVERSATION_TITLE } from '../../constants/conversation';
+import { ACCEPTED_ATTACHMENT_MIMES, MAX_ATTACHMENT_BYTES } from '../../constants/limits';
+import { DEFAULT_MODEL, isModelKey, MODEL_REGISTRY } from '../../constants/models';
 import {
   buildAssetReferenceText,
   parseAssetReferenceBlock,
@@ -43,7 +56,7 @@ import { MessageItem } from './message-item';
 
 interface ChatWindowProps {
   conversation?: Conversation;
-  initialMessages: UIMessage[];
+  initialMessages: AgentChatMessage[];
 }
 
 /**
@@ -58,6 +71,8 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const [initialConversationId] = useState(conversation?.id);
   const conversationIdRef = useRef(conversation?.id);
   const [input, setInput] = useState('');
+  // 会话标题：LLM 生成后经 transient data part 推送更新（onData），无需整页刷新
+  const [title, setTitle] = useState(conversation?.title ?? DEFAULT_CONVERSATION_TITLE);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [model, setModel] = useState(conversation?.model ?? DEFAULT_MODEL);
   // 会话级技能（专家模式）：与模型选择同构，切换即持久化到会话
@@ -72,6 +87,12 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const [stoppedStreamId, setStoppedStreamId] = useState<string | null>(null);
   // 已选定的引用资产：提交时以机器可读块注入文本，让模型确定性地拿到 assetId
   const [referencedAssets, setReferencedAssets] = useState<ReferencedAsset[]>([]);
+  // 图片附件（已上传资产）：提交时作为 file parts 发送，多模态模型可直接看到图片内容
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const uploadingRef = useRef(0);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -79,7 +100,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const updateConversation = useMutation(updateConversationMutation);
 
   const { messages, sendMessage, status, stop, error, regenerate, clearError, resumeStream } =
-    useChat({
+    useChat<AgentChatMessage>({
       id: initialConversationId,
       messages: initialMessages,
       // 官方恢复语义（Resume Streams 官方示例）：仅「服务端已知存在活跃流」才重连，
@@ -87,7 +108,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
       // 挂载重连 GET 的 204 分支（SDK 内部 setStatus('ready')）会把 sendMessage
       // 刚置上的 'submitted' 改回 'ready'，发送按钮要等首个 chunk 才变「停止」。
       resume: Boolean(conversation?.activeStreamId),
-      transport: new DefaultChatTransport({
+      transport: new DefaultChatTransport<AgentChatMessage>({
         api: '/api/agent/chat',
         body: () => ({
           conversationId: conversationIdRef.current,
@@ -95,12 +116,23 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
           expectedSkillId: settingsRef.current.skillId,
           streamId: requestStreamIdRef.current
         }),
+        // 增量发送：只发最后一条消息（新发送 / 重新生成 / 编辑皆然），历史以服务端 DB 为权威。
+        // 编辑/重新生成携带既有消息 id，服务端命中后替换并删除旧尾部，与全量发送语义一致
+        prepareSendMessagesRequest: ({ messages, body }) => ({
+          body: { ...body, messages: messages.slice(-1) }
+        }),
         prepareReconnectToStreamRequest: ({ id }) => ({
           api: `/api/agent/chat/${id}/stream`
         })
       }),
+      onData: (part) => {
+        if (part.type === 'data-conversation-title') {
+          setTitle(part.data.title);
+          void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
+        }
+      },
       onFinish: () => {
-        // 分域失效：会话列表（标题/updatedAt 变化）+ 资产列表（聊天中可能新增资产）
+        // 分域失效：会话列表（标题变化）+ 资产列表（聊天中可能新增资产）
         if (conversationIdRef.current) {
           refreshConversationPageWithNotice(queryClient, conversationIdRef.current);
         }
@@ -124,14 +156,18 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
       if (draft) {
         setInput(draft.text);
         setReferencedAssets(draft.references);
+        setAttachments(draft.attachments);
       }
       return;
     }
     const timer = setTimeout(() => {
-      const pendingText = takePendingFirstMessage(initialConversationId);
-      if (pendingText) {
+      const pending = takePendingFirstMessage(initialConversationId);
+      if (pending) {
         requestStreamIdRef.current = crypto.randomUUID();
-        void sendMessage({ text: pendingText });
+        void sendMessage({
+          text: pending.text,
+          files: attachmentsToFileParts(pending.attachments)
+        });
       }
     }, 0);
     return () => clearTimeout(timer);
@@ -143,12 +179,12 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     isSyncingSettings ||
     settingsUnavailable ||
     isStopping ||
+    uploadingCount > 0 ||
     createConversation.isPending ||
     Boolean(chatError?.isSizeLimit);
   const lastMessage = messages.at(-1);
   const assistantMessage = lastMessage?.role === 'assistant' ? lastMessage : undefined;
-  const activeStreamId =
-    (assistantMessage?.metadata as { streamId?: string } | undefined)?.streamId ?? null;
+  const activeStreamId = assistantMessage?.metadata?.streamId ?? null;
   const requestStreamId =
     status === 'streaming'
       ? (activeStreamId ?? requestStreamIdRef.current)
@@ -179,10 +215,61 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     setReferencedAssets((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
+  const { mutateAsync: uploadAttachmentAsync } = useMutation(uploadAttachmentMutation);
+
+  // 附件上传：客户端预检（类型/体积/数量）→ 复用资产上传端点 → 成功后加入附件列表。
+  // 并发上传用 ref 计占用名额，避免 setState 异步窗口内超发；上传中禁止发送（controlsDisabled）。
+  const handleAddFiles = useCallback(
+    (files: File[]) => {
+      const images = files.filter((file) =>
+        (ACCEPTED_ATTACHMENT_MIMES as readonly string[]).includes(file.type)
+      );
+      if (images.length === 0) {
+        toast.error('仅支持 PNG / JPEG / WebP 图片。');
+        return;
+      }
+      const room =
+        MAX_ATTACHMENTS_PER_MESSAGE - attachmentsRef.current.length - uploadingRef.current;
+      if (room <= 0) {
+        toast.error(`每条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 张图片。`);
+        return;
+      }
+      const accepted = images.slice(0, room);
+      if (images.length > accepted.length) {
+        toast.error(`每条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 张图片，超出部分已忽略。`);
+      }
+      for (const file of accepted) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          toast.error(`「${file.name}」超过 10MB 上限，已跳过。`);
+          continue;
+        }
+        uploadingRef.current += 1;
+        setUploadingCount(uploadingRef.current);
+        uploadAttachmentAsync({ file })
+          .then(({ id }) => {
+            setAttachments((prev) => [
+              ...prev,
+              { assetId: id, mediaType: file.type, filename: file.name }
+            ]);
+          })
+          .catch(() => toast.error(`「${file.name}」上传失败，请重试。`))
+          .finally(() => {
+            uploadingRef.current -= 1;
+            setUploadingCount(uploadingRef.current);
+          });
+      }
+    },
+    [uploadAttachmentAsync]
+  );
+
+  const handleRemoveAttachment = useCallback((assetId: string) => {
+    setAttachments((prev) => prev.filter((attachment) => attachment.assetId !== assetId));
+  }, []);
+
   const handleSubmit = async () => {
     const userText = input.trim();
     if (
-      !userText ||
+      (!userText && attachments.length === 0) ||
       isGenerating ||
       controlsDisabled ||
       settingsRequestRef.current ||
@@ -190,6 +277,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     )
       return;
     const text = buildAssetReferenceText(referencedAssets, userText);
+    const files = attachmentsToFileParts(attachments);
 
     if (!conversationIdRef.current) {
       try {
@@ -197,9 +285,10 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         // 必须真实导航（router.replace）进入会话页；不能用 window.history.replaceState——
         // 那会让 URL 与渲染树脱节，之后回到 /dashboard/agent 时组件被复用、状态不重置。
         // 首条消息经一次性交接由目标页消费发送（导航会重挂载本组件）。
-        setPendingFirstMessage(created.id, text);
+        setPendingFirstMessage(created.id, text, attachments);
         setInput('');
         setReferencedAssets([]);
+        setAttachments([]);
         router.replace(`/dashboard/agent/${created.id}`);
       } catch {
         toast.error('创建会话失败，请稍后重试');
@@ -209,27 +298,31 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
 
     setInput('');
     setReferencedAssets([]);
+    setAttachments([]);
     requestStreamIdRef.current = crypto.randomUUID();
     const messageId = editingMessageId ?? undefined;
     setEditingMessageId(null);
-    void sendMessage({ text, messageId });
+    void sendMessage({ text, files, messageId });
   };
 
   const recoverFailedDraft = (): {
     text: string;
     references: ReferencedAsset[];
+    attachments: ChatAttachment[];
     id: string;
   } | null => {
-    if (input.trim() || referencedAssets.length > 0) {
+    if (input.trim() || referencedAssets.length > 0 || attachments.length > 0) {
       toast.error('请先保存或清空输入框中的草稿。');
       return null;
     }
     const message = messages.toReversed().find((item) => item.role === 'user');
-    const raw = message?.parts
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text)
-      .join('\n\n');
-    if (!message || !raw) {
+    const raw =
+      message?.parts
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('\n\n') ?? '';
+    const fileParts = message?.parts.filter((part) => part.type === 'file') ?? [];
+    if (!message || (!raw && fileParts.length === 0)) {
       toast.error('无法恢复原始输入，请复制消息后重试。');
       return null;
     }
@@ -243,7 +336,18 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
       }
       references.push({ id: reference.id, title: reference.title, kind });
     }
-    return { text: parsed.text, references, id: message.id };
+    // 附件从 file part 的稳定 /raw 路径还原 assetId（上传资产仍在库中）
+    const recoveredAttachments: ChatAttachment[] = [];
+    for (const part of fileParts) {
+      const match = /\/api\/agent\/assets\/([^/]+)\/raw$/.exec(part.url);
+      if (!match) continue;
+      recoveredAttachments.push({
+        assetId: match[1],
+        mediaType: part.mediaType,
+        filename: part.filename ?? '图片附件'
+      });
+    }
+    return { text: parsed.text, references, attachments: recoveredAttachments, id: message.id };
   };
 
   const handleEditFailedMessage = () => {
@@ -251,6 +355,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     if (!draft) return;
     setInput(draft.text);
     setReferencedAssets(draft.references);
+    setAttachments(draft.attachments);
     setEditingMessageId(draft.id);
     clearError();
   };
@@ -258,7 +363,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const handleNewConversationWithDraft = () => {
     const draft = recoverFailedDraft();
     if (!draft) return;
-    setPendingNewConversationDraft(draft.text, draft.references);
+    setPendingNewConversationDraft(draft.text, draft.references, draft.attachments);
     router.push('/dashboard/agent');
   };
 
@@ -340,6 +445,12 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   };
 
   const handleModelChange = (next: string) => {
+    // 切到非多模态模型时移除附件（该模型看不到图片，静默丢弃会误导用户）
+    const vision = isModelKey(next) && MODEL_REGISTRY[next].capabilities.multimodal === true;
+    if (!vision && attachmentsRef.current.length > 0) {
+      setAttachments([]);
+      toast.info('当前模型不支持图片输入，已移除附件。');
+    }
     if (conversationIdRef.current) {
       void syncSettings({ model: next });
     } else {
@@ -363,7 +474,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         <div className='flex min-w-0 items-center gap-1.5'>
           {/* 窄屏（<lg）侧边栏隐藏时的会话管理入口 */}
           <ConversationDrawer />
-          <h1 className='truncate text-sm font-medium'>{conversation?.title ?? '新会话'}</h1>
+          <h1 className='truncate text-sm font-medium'>{title}</h1>
         </div>
       </div>
 
@@ -508,6 +619,13 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         referencedAssets={referencedAssets}
         onAddReference={handleAddReference}
         onRemoveReference={handleRemoveReference}
+        attachments={attachments}
+        uploadingCount={uploadingCount}
+        visionSupported={
+          isModelKey(model) && MODEL_REGISTRY[model].capabilities.multimodal === true
+        }
+        onAddFiles={handleAddFiles}
+        onRemoveAttachment={handleRemoveAttachment}
       />
     </div>
   );

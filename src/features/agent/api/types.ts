@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai';
+import type { FileUIPart, UIMessage } from 'ai';
 import { z } from 'zod';
 import { ASPECT_KEYS } from '../constants/image-models';
 import { AGENT_TOOL_NAMES, type AgentToolName, type SkillExample } from '../constants/skills';
@@ -22,6 +22,47 @@ export interface ChatMessage {
   parts: UIMessage['parts'];
   metadata: Record<string, unknown> | null;
   createdAt: string;
+}
+
+/** 响应消息 metadata：streamId 随流下发，客户端停止时据此携带最新流 id */
+export interface AgentMessageMetadata {
+  streamId?: string;
+}
+
+/** 自定义 data parts：conversation-title 为 transient（不入消息 parts），仅经 useChat onData 接收 */
+export type AgentDataParts = {
+  'conversation-title': { title: string };
+};
+
+/** Agent 聊天 UI 消息类型（客户端 useChat 与服务端流共用） */
+export type AgentChatMessage = UIMessage<AgentMessageMetadata, AgentDataParts>;
+
+/** 单条消息的图片附件上限 */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+
+/**
+ * 聊天图片附件（已上传为 source='upload' 资产）。
+ * 消息 file part 的 url 存同源 /raw 代理路径（稳定不过期，浏览器带 cookie 可显示）；
+ * 服务端调模型前按 assetId 重签 OSS 签名 URL（百炼公网可达），见 api/attachment-urls.ts。
+ */
+export interface ChatAttachment {
+  assetId: string;
+  mediaType: string;
+  filename: string;
+}
+
+export function attachmentRawUrl(assetId: string): string {
+  return `/api/agent/assets/${assetId}/raw`;
+}
+
+/** 附件 → 消息 file parts（url 为稳定 /raw 路径，服务端调模型前重签 OSS 签名 URL） */
+export function attachmentsToFileParts(attachments: ChatAttachment[]): FileUIPart[] {
+  return attachments.map((attachment) => ({
+    type: 'file',
+    mediaType: attachment.mediaType,
+    url: attachmentRawUrl(attachment.assetId),
+    filename: attachment.filename
+  }));
 }
 
 export interface ConversationsResponse {
@@ -203,7 +244,10 @@ export const skillMutationSchema = z.object({
   description: z.string().trim().min(1, '一句话描述不能为空').max(200, '描述不超过 200 字'),
   instructions: z.string().trim().min(1, '专家指令不能为空').max(8000, '专家指令不超过 8000 字'),
   placeholder: z.string().trim().max(100, '输入框引导语不超过 100 字').nullish(),
-  tools: z.array(z.enum(AGENT_TOOL_NAMES)).max(9, '工具最多 9 个').nullish(),
+  tools: z
+    .array(z.enum(AGENT_TOOL_NAMES))
+    .max(AGENT_TOOL_NAMES.length, `工具最多 ${AGENT_TOOL_NAMES.length} 个`)
+    .nullish(),
   examples: z.array(skillExampleSchema).max(2, '示例最多 2 条').default([])
 });
 
