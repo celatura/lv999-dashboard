@@ -1,1 +1,0 @@
-ALTER TABLE "conversations" DROP COLUMN "active_skill_id";

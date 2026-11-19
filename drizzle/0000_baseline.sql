@@ -24,7 +24,6 @@ CREATE TABLE "conversations" (
 	"user_id" text NOT NULL,
 	"title" text NOT NULL,
 	"model" text DEFAULT 'deepseek-flash' NOT NULL,
-	"active_skill_id" text,
 	"active_stream_id" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
