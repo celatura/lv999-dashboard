@@ -21,7 +21,7 @@ import {
   type AgentValidationUIMessage,
   type UsageSink
 } from '@/features/agent/api/agent';
-import { getSkillForUser } from '@/features/agent/api/skill-service';
+import { listSkillEntriesForUser } from '@/features/agent/api/skill-service';
 import { GenerationError } from '@/features/agent/api/generation-error';
 import {
   applyGeneratedTitle,
@@ -70,6 +70,31 @@ function extractText(message: UIMessage): string {
     .join(' ');
 }
 
+/** 从用户消息 metadata 读取显式技能 id（非法形状一律忽略，按自动模式处理） */
+function readExplicitSkillId(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== 'object') return undefined;
+  const value = (metadata as { skillId?: unknown }).skillId;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * 从「续答的 assistant 消息」中收集上一轮 loadSkill 已加载的技能名。
+ * askUser 续答是新的 HTTP 请求，Agent 的 loadedSkills 会重置；技能正文虽在历史里，
+ * 但工具边界需要据此回灌，否则同一回复内「先澄清 → 再执行」会静默放开全量工具。
+ */
+function readLoadedSkillNames(message: UIMessage): string[] {
+  const names = new Set<string>();
+  for (const part of message.parts) {
+    if (!isToolUIPart(part) || part.type !== 'tool-loadSkill') continue;
+    if (part.state !== 'output-available') continue;
+    const output = part.output as { name?: unknown } | undefined;
+    if (typeof output?.name === 'string' && output.name.trim()) {
+      names.add(output.name);
+    }
+  }
+  return [...names];
+}
+
 function cancelledStreamResponse(): Response {
   return createUIMessageStreamResponse({
     stream: createUIMessageStream({
@@ -103,7 +128,6 @@ export async function POST(request: Request) {
     messages?: unknown;
     conversationId?: unknown;
     expectedModel?: unknown;
-    expectedSkillId?: unknown;
     streamId?: unknown;
   };
   try {
@@ -157,15 +181,35 @@ export async function POST(request: Request) {
   }
 
   // 计费入口拦截：限流后、建流前；余额 ≤0 直接 402（不发起上游调用，杜绝陌生人刷爆 API）
-  // 并行：技能解析 / 余额校验 / 历史上下文规模（预算估算用）互不依赖
-  const [skill, hasBalance, contextSize] = await Promise.all([
-    getSkillForUser(userId, conversation.activeSkillId),
+  // 并行：技能目录/条目（目录 + loadSkill 解析 + 本条消息显式技能）/ 余额校验 / 历史上下文规模
+  const [skillEntries, hasBalance, contextSize] = await Promise.all([
+    listSkillEntriesForUser(userId),
     checkBalance(userId),
     getMessagesContextSize(conversationId)
   ]);
   if (!hasBalance) {
     return apiError(402, 'insufficient_credits', INSUFFICIENT_CREDITS_API_MESSAGE);
   }
+
+  // 本条消息显式指定的技能（用户消息 metadata.skillId，随消息持久化；
+  // assistant 续答轮由上一轮流的下发 metadata 恢复，见 messageMetadata）。
+  // 归属即权限：只能命中当前用户的预置/自定义技能；用户消息命中失败 → 400，
+  // 续答轮技能已被删除时降级自动模式（不阻断已回答一半的提问）。
+  const explicitSkillId = readExplicitSkillId(incomingMessage.metadata);
+  const forcedSkill = explicitSkillId
+    ? skillEntries.find((skill) => skill.id === explicitSkillId)
+    : undefined;
+  if (explicitSkillId && !forcedSkill) {
+    if (incomingMessage.role === 'user') {
+      return apiError(400, 'unknown_skill', 'Unknown skill');
+    }
+    console.warn('[agent] explicit skill missing on continuation', {
+      conversationId,
+      explicitSkillId
+    });
+  }
+  // 续答轮回灌上一轮已加载技能（用户消息没有 loadSkill part，自动为空）
+  const preloadedSkillNames = readLoadedSkillNames(incomingMessage);
 
   // usage 累加器：onStepEnd 累加每步 token，onEnd 据此结算扣费（每请求新建，serverless 无跨请求污染）
   const usageSink: UsageSink = { inputTokens: 0, outputTokens: 0 };
@@ -215,7 +259,9 @@ export async function POST(request: Request) {
       userId,
       conversationId,
       modelKey: conversation.model,
-      skill,
+      skills: skillEntries,
+      forcedSkill,
+      preloadedSkillNames,
       usageSink,
       reservationId: reservation.id
     });
@@ -391,8 +437,16 @@ export async function POST(request: Request) {
             // 不提供时响应消息 id 为空串，空 id 会在 messages 主键上跨会话冲突，
             // 导致 onConflictDoUpdate 覆盖其他会话的内容（历史事故：串会话 + 消息丢失）
             generateMessageId: generateId,
-            // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）
-            messageMetadata: ({ part }) => (part.type === 'start' ? { streamId } : undefined),
+            // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）；
+            // 显式技能也随 assistant 消息下发：askUser 续答只发 assistant 消息，
+            // 服务端据此在续答轮恢复「本条消息指定技能」的正文注入与工具边界。
+            messageMetadata: ({ part }) =>
+              part.type === 'start'
+                ? {
+                    streamId,
+                    ...(forcedSkill ? { skillId: forcedSkill.id, skillName: forcedSkill.name } : {})
+                  }
+                : undefined,
             // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
             // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
             // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；

@@ -12,6 +12,8 @@ import {
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { assetsQueryOptions } from '../../api/queries';
+import type { SkillCatalogItem } from '../../api/types';
+import { useSkillCatalog } from '../../hooks/use-skill-catalog';
 
 const EXAMPLES = [
   {
@@ -44,13 +46,22 @@ const EXAMPLES = [
 /** 复用示例：仅在资产库非空时展示，避免新用户首 run 点进「空库」的挫败体验 */
 const REUSE_EXAMPLE = '看看我的资产库里有哪些作品，挑一个继续创作';
 
-export function ChatEmptyState({ onPick }: { onPick: (text: string) => void }) {
+export function ChatEmptyState({
+  onPick,
+  onPickSkill
+}: {
+  onPick: (text: string) => void;
+  /** 选中一个技能（只作用于下一条消息，输入框出现技能 chip） */
+  onPickSkill: (skill: SkillCatalogItem) => void;
+}) {
   // 只取 total 判断库是否为空；与资产页/引用选择器共用 assets 缓存域，产出资产后自动失效刷新
   const { data } = useQuery({
     ...assetsQueryOptions({ page: 1, limit: 1 }),
     staleTime: 60_000
   });
   const hasAssets = (data?.total ?? 0) > 0;
+  // 技能目录：空态展示 3-5 个入口，解决「不知道有技能」的发现性问题
+  const { skills } = useSkillCatalog();
 
   return (
     <Empty className='border-none p-0'>
@@ -84,6 +95,23 @@ export function ChatEmptyState({ onPick }: { onPick: (text: string) => void }) {
             </button>
           ))}
         </div>
+        {skills.length > 0 && (
+          <div className='flex flex-wrap items-center justify-center gap-1.5'>
+            <span className='text-muted-foreground text-xs'>按技能开始：</span>
+            {skills.slice(0, 4).map((skill) => (
+              <button
+                key={skill.id}
+                type='button'
+                onClick={() => onPickSkill(skill)}
+                title='本条消息按该技能执行，发送后自动清除'
+                className='bg-card hover:bg-muted/70 focus-visible:ring-ring flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none'
+              >
+                <Icons.sparkles className='text-primary size-3.5 shrink-0' />
+                <span className='truncate'>{skill.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {hasAssets && (
           <button
             type='button'

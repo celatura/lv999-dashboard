@@ -18,14 +18,13 @@ import type { AgentToolName, SkillExample } from '../../features/agent/constants
 /**
  * Agent 创作模块数据表
  *
- * - conversations: 会话（含模型选择与会话级技能）
+ * - conversations: 会话（含模型选择；技能不落会话列，改由用户消息 metadata.skillId 指定）
  * - messages: 会话消息（parts 与 AI SDK 的 UIMessage.parts 结构对齐，原样存储）
  * - assets: 用户资产（Agent 生成 source='agent' / 用户上传 source='upload'）；
  *   文本内容存 content 列，二进制走 OSS 只存 storage_key；
  *   会话删除时 conversationId 置空（SET NULL）、资产保留；
  *   图片编辑（I2I）产出的新资产通过 sourceAssetId 指向源资产（源删除时置空）
- * - skills: 用户自定义技能（技能系统 2.0，用户私有）；与代码内预置技能同构，
- *   会话 active_skill_id 存预置 key（字符串）或自定义技能 uuid，解析时 isUuid 分流
+ * - skills: 用户自定义技能（按需加载的专家工作流包，用户私有）；与代码内预置技能同构
  *
  * RAG 知识库（语义检索增强）
  * - knowledge_documents: 知识库文档（手动粘贴 source='manual' / 从文本资产导入 source='asset'）；
@@ -42,8 +41,6 @@ export const conversations = pgTable('conversations', {
   userId: text('user_id').notNull(),
   title: text('title').notNull(),
   model: text('model').notNull().default('deepseek-flash'),
-  /** 会话级技能（专家模式）id：指向代码内技能注册表；null = 通用（无技能） */
-  activeSkillId: text('active_skill_id'),
   /** 正在进行的可恢复流 id（resumable-stream）；无活跃流时为 null */
   activeStreamId: text('active_stream_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -99,9 +96,9 @@ export const assets = pgTable(
 );
 
 /**
- * 用户自定义技能（技能系统 2.0）：与代码内预置技能（SkillRegistryEntry）同构，
- * 用户私有（按 userId 隔离）。会话 active_skill_id 引用其 uuid；解析映射为
- * SkillRegistryEntry 后复用 buildAgent 的指令注入与工具白名单过滤（零重复实现）。
+ * 用户自定义技能（按需加载的专家工作流包）：与代码内预置技能（SkillRegistryEntry）同构，
+ * 用户私有（按 userId 隔离）。消息通过 metadata.skillId 显式指定技能，或由模型 loadSkill 按需加载；
+ * 解析映射为 SkillRegistryEntry 后复用 buildAgent 的目录/加载/工具边界（零重复实现）。
  * tools 为 null = 全量（与预置技能未声明 tools 同语义）；examples null/空 = 无示例。
  */
 export const skills = pgTable(

@@ -34,9 +34,11 @@ import {
   attachmentsToFileParts,
   MAX_ATTACHMENTS_PER_MESSAGE,
   type AgentChatMessage,
+  type AgentMessageMetadata,
   type AssetKind,
   type ChatAttachment,
-  type Conversation
+  type Conversation,
+  type SkillSelection
 } from '../../api/types';
 import { ConversationDrawer } from '../conversations/conversation-sidebar';
 import { DEFAULT_CONVERSATION_TITLE } from '../../constants/conversation';
@@ -84,9 +86,9 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   const [title, setTitle] = useState(conversation?.title ?? DEFAULT_CONVERSATION_TITLE);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [model, setModel] = useState(conversation?.model ?? DEFAULT_MODEL);
-  // 会话级技能（专家模式）：与模型选择同构，切换即持久化到会话
-  const [skillId, setSkillId] = useState<string | null>(conversation?.activeSkillId ?? null);
-  const settingsRef = useRef({ model, skillId });
+  // 本条消息技能（不持久化到会话）：显式指定时随用户消息 metadata 发送，发送后清空
+  const [selectedSkill, setSelectedSkill] = useState<SkillSelection | null>(null);
+  const settingsRef = useRef({ model });
   const [isSyncingSettings, setIsSyncingSettings] = useState(false);
   const [settingsUnavailable, setSettingsUnavailable] = useState(false);
   const settingsRequestRef = useRef(false);
@@ -134,7 +136,6 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
       body: () => ({
         conversationId: conversationIdRef.current,
         expectedModel: settingsRef.current.model,
-        expectedSkillId: settingsRef.current.skillId,
         streamId: requestStreamIdRef.current
       }),
       // 增量发送：只发最后一条消息（新发送 / 重新生成 / 编辑皆然），历史以服务端 DB 为权威。
@@ -178,6 +179,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         setInput(draft.text);
         setReferencedAssets(draft.references);
         setAttachments(draft.attachments);
+        setSelectedSkill(draft.skill);
       }
       return;
     }
@@ -187,7 +189,10 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         requestStreamIdRef.current = crypto.randomUUID();
         void sendMessage({
           text: pending.text,
-          files: attachmentsToFileParts(pending.attachments)
+          files: attachmentsToFileParts(pending.attachments),
+          metadata: pending.skill
+            ? { skillId: pending.skill.id, skillName: pending.skill.name }
+            : undefined
         });
       }
     }, 0);
@@ -330,17 +335,21 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
       return;
     const text = buildAssetReferenceText(referencedAssets, userText);
     const files = attachmentsToFileParts(attachments);
+    const metadata = selectedSkill
+      ? { skillId: selectedSkill.id, skillName: selectedSkill.name }
+      : undefined;
 
     if (!conversationIdRef.current) {
       try {
-        const created = await createConversation.mutateAsync({ model, activeSkillId: skillId });
+        const created = await createConversation.mutateAsync({ model });
         // 必须真实导航（router.replace）进入会话页；不能用 window.history.replaceState——
         // 那会让 URL 与渲染树脱节，之后回到 /dashboard/agent 时组件被复用、状态不重置。
         // 首条消息经一次性交接由目标页消费发送（导航会重挂载本组件）。
-        setPendingFirstMessage(created.id, text, attachments);
+        setPendingFirstMessage(created.id, text, attachments, selectedSkill);
         setInput('');
         setReferencedAssets([]);
         setAttachments([]);
+        setSelectedSkill(null);
         router.replace(`/dashboard/agent/${created.id}`);
       } catch {
         toast.error('创建会话失败，请稍后重试');
@@ -351,16 +360,18 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     setInput('');
     setReferencedAssets([]);
     setAttachments([]);
+    setSelectedSkill(null);
     requestStreamIdRef.current = crypto.randomUUID();
     const messageId = editingMessageId ?? undefined;
     setEditingMessageId(null);
-    void sendMessage({ text, files, messageId });
+    void sendMessage({ text, files, messageId, metadata });
   };
 
   const recoverFailedDraft = (): {
     text: string;
     references: ReferencedAsset[];
     attachments: ChatAttachment[];
+    skill: SkillSelection | null;
     id: string;
   } | null => {
     if (input.trim() || referencedAssets.length > 0 || attachments.length > 0) {
@@ -399,7 +410,20 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         filename: part.filename ?? '图片附件'
       });
     }
-    return { text: parsed.text, references, attachments: recoveredAttachments, id: message.id };
+    // 技能从失败消息 metadata 还原（编辑重发时保持同一技能，与 regenerate 语义一致）；
+    // 但 unknown_skill 说明技能已删除，不能还原（否则重发必然再次 400）
+    const messageMeta = message.metadata as AgentMessageMetadata | undefined;
+    const skill =
+      chatError?.code !== 'unknown_skill' && messageMeta?.skillId && messageMeta.skillName
+        ? { id: messageMeta.skillId, name: messageMeta.skillName }
+        : null;
+    return {
+      text: parsed.text,
+      references,
+      attachments: recoveredAttachments,
+      skill,
+      id: message.id
+    };
   };
 
   const handleEditFailedMessage = () => {
@@ -408,14 +432,18 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     setInput(draft.text);
     setReferencedAssets(draft.references);
     setAttachments(draft.attachments);
+    setSelectedSkill(draft.skill);
     setEditingMessageId(draft.id);
+    if (chatError?.code === 'unknown_skill') {
+      toast.info('原技能已删除，已切换为自动匹配。');
+    }
     clearError();
   };
 
   const handleNewConversationWithDraft = () => {
     const draft = recoverFailedDraft();
     if (!draft) return;
-    setPendingNewConversationDraft(draft.text, draft.references, draft.attachments);
+    setPendingNewConversationDraft(draft.text, draft.references, draft.attachments, draft.skill);
     router.push('/dashboard/agent');
   };
 
@@ -456,13 +484,12 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   };
 
   const applySettings = (current: Conversation) => {
-    settingsRef.current = { model: current.model, skillId: current.activeSkillId };
+    settingsRef.current = { model: current.model };
     setModel(current.model);
-    setSkillId(current.activeSkillId);
     setSettingsUnavailable(false);
   };
 
-  const syncSettings = async (values?: { model?: string; activeSkillId?: string | null }) => {
+  const syncSettings = async (values?: { model?: string }) => {
     const conversationId = conversationIdRef.current;
     if (!conversationId || settingsRequestRef.current) return false;
     settingsRequestRef.current = true;
@@ -511,15 +538,6 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     }
   };
 
-  const handleSkillChange = (next: string | null) => {
-    if (conversationIdRef.current) {
-      void syncSettings({ activeSkillId: next });
-    } else {
-      settingsRef.current.skillId = next;
-      setSkillId(next);
-    }
-  };
-
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <div className='flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4'>
@@ -543,7 +561,10 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
               className='mx-auto w-full max-w-3xl px-4 py-4 sm:py-6'
             >
               {messages.length === 0 ? (
-                <ChatEmptyState onPick={setInput} />
+                <ChatEmptyState
+                  onPick={setInput}
+                  onPickSkill={(skill) => setSelectedSkill({ id: skill.id, name: skill.name })}
+                />
               ) : (
                 messages.map((message, index) => {
                   // 最后一条 assistant 消息：流式期间唯一 active 的消息，也是唯一可「重新生成」的对象
@@ -591,7 +612,11 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
                       </AlertDescription>
                     </div>
                     <div className='flex shrink-0 flex-wrap gap-2'>
-                      {chatError.isSizeLimit ? (
+                      {chatError.code === 'unknown_skill' ? (
+                        <Button variant='outline' size='sm' onClick={handleEditFailedMessage}>
+                          编辑输入
+                        </Button>
+                      ) : chatError.isSizeLimit ? (
                         <>
                           <Button variant='outline' size='sm' onClick={handleEditFailedMessage}>
                             编辑输入
@@ -691,8 +716,9 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
         controlsDisabled={controlsDisabled}
         model={model}
         onModelChange={handleModelChange}
-        skillId={skillId}
-        onSkillChange={handleSkillChange}
+        skill={selectedSkill}
+        onSelectSkill={(skill) => setSelectedSkill({ id: skill.id, name: skill.name })}
+        onClearSkill={() => setSelectedSkill(null)}
         referencedAssets={referencedAssets}
         onAddReference={handleAddReference}
         onRemoveReference={handleRemoveReference}

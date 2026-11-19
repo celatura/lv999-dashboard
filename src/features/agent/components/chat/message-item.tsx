@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Message, MessageContent, MessageFooter } from '@/components/ui/message';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getAssetKindMeta } from '../../constants/kinds';
+import type { AgentMessageMetadata } from '../../api/types';
 import { imageThumbnailUrl } from '../../lib/asset-url';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
@@ -21,6 +22,7 @@ import { ToolDesignPart, type DesignAssetToolPart } from './tool-design-part';
 import { ToolImagePart, type ImageAssetToolPart } from './tool-image-part';
 import { ToolVideoPart, type VideoAssetToolPart } from './tool-video-part';
 import { ToolKnowledgePart, type KnowledgeSearchToolPart } from './tool-knowledge-part';
+import { ToolSkillPart, type LoadSkillToolPart } from './tool-skill-part';
 
 /**
  * 消息项：memo 化（props 全为稳定值：message 引用 + 两个布尔 + useCallback 回调）。
@@ -55,6 +57,8 @@ export const MessageItem = memo(function MessageItem({
     const imageParts = message.parts.filter(
       (part): part is FileUIPart => part.type === 'file' && part.mediaType.startsWith('image/')
     );
+    // 本条消息显式指定的技能（随消息 metadata 持久化；名称仅用于展示）
+    const skillName = (message.metadata as AgentMessageMetadata | undefined)?.skillName;
     return (
       <Message align='end'>
         <MessageContent>
@@ -73,6 +77,15 @@ export const MessageItem = memo(function MessageItem({
                   />
                 );
               })}
+            </div>
+          )}
+          {skillName && (
+            <div className='flex justify-end'>
+              <span className='bg-primary/10 text-primary flex max-w-full items-center gap-1 rounded-md px-2 py-1 text-xs'>
+                <Icons.sparkles className='size-3.5 shrink-0' />
+                <span className='truncate'>{skillName}</span>
+                <span className='text-primary/70 shrink-0'>技能</span>
+              </span>
             </div>
           )}
           {message.parts.map((part, index) => {
@@ -202,6 +215,15 @@ export const MessageItem = memo(function MessageItem({
               <ToolKnowledgePart
                 key={index}
                 part={part as unknown as KnowledgeSearchToolPart}
+                active={isActive}
+              />
+            );
+          }
+          if (isToolUIPart(part) && part.type === 'tool-loadSkill') {
+            return (
+              <ToolSkillPart
+                key={index}
+                part={part as unknown as LoadSkillToolPart}
                 active={isActive}
               />
             );

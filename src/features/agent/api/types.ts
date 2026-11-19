@@ -7,8 +7,6 @@ export interface Conversation {
   id: string;
   title: string;
   model: string;
-  /** 会话级技能（专家模式）id：指向 SKILL_REGISTRY；null = 通用（无技能） */
-  activeSkillId: string | null;
   /** 正在进行的可恢复流 id（用于刷新后重连与停止）；无活跃流时为 null */
   activeStreamId: string | null;
   createdAt: string;
@@ -24,9 +22,22 @@ export interface ChatMessage {
   createdAt: string;
 }
 
-/** 响应消息 metadata：streamId 随流下发，客户端停止时据此携带最新流 id */
+/**
+ * 消息 metadata：
+ * - assistant：streamId 随流下发，客户端停止时据此携带最新流 id
+ * - user：skillId / skillName 记录「本条消息显式指定的技能」，服务端据此强制加载并限制工具边界；
+ *   随消息持久化，重新生成/编辑时天然保持同一技能
+ */
 export interface AgentMessageMetadata {
   streamId?: string;
+  skillId?: string;
+  skillName?: string;
+}
+
+/** 客户端「本条消息技能」选择：只需 id + name（正文/描述由技能目录查询补齐） */
+export interface SkillSelection {
+  id: string;
+  name: string;
 }
 
 /** 自定义 data parts：conversation-title 为 transient（不入消息 parts），仅经 useChat onData 接收 */
@@ -149,15 +160,11 @@ export interface AssetSearchHit {
 
 export interface CreateConversationPayload {
   model: string;
-  /** 创建时即激活的技能（可空；新建会话「带技能开始」） */
-  activeSkillId?: string | null;
 }
 
 export interface UpdateConversationPayload {
   title?: string;
   model?: string;
-  /** 切换技能；null = 清除回「通用」 */
-  activeSkillId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,34 +206,50 @@ export const batchDeleteRequestSchema = z.object({
 export type BatchDeleteRequest = z.infer<typeof batchDeleteRequestSchema>;
 
 // ---------------------------------------------------------------------------
-// 技能系统 2.0（用户自定义技能）
+// 技能目录与自定义技能
 // ---------------------------------------------------------------------------
 
 export type { AgentToolName, SkillExample };
 
 /**
- * 技能列表项：预置（source='builtin'，只读）与用户自定义（source='custom'，可编辑/删除）
- * 合并同构，供会话选择器与技能管理页共用一份查询。字段与 SkillRegistryEntry 对齐，
- * 另加 source / updatedAt 供 UI 区分与展示。
+ * 技能目录项（轻量）：常驻 system 的技能目录、输入区选择器、空态推荐只用这些字段。
+ * 不含 instructions/examples，避免聊天页为一个小按钮下载全部技能正文。
  */
-export interface SkillListItem {
+export interface SkillCatalogItem {
   id: string;
   name: string;
   description: string;
   /** builtin = 代码内预置（只读）；custom = 用户自定义（可编辑/删除） */
   source: 'builtin' | 'custom';
-  instructions: string;
+  /** 选中后输入框引导语（可选，UI 用） */
   placeholder: string | null;
-  /** 工具白名单；null = 全量 */
-  tools: AgentToolName[] | null;
-  /** few-shot 示例；[] = 无 */
-  examples: SkillExample[];
   /** 自定义技能的更新时间；预置为 null（无 DB 行） */
   updatedAt: string | null;
 }
 
+/**
+ * 技能完整内容（管理页编辑 / 复制为草稿用）：在目录项基础上带正文、工具边界与示例。
+ * 正文由 Agent 在需要时经 loadSkill 按需读取，不再常驻 system。
+ */
+export interface SkillDetail extends SkillCatalogItem {
+  instructions: string;
+  /** 工具边界；null = 全量 */
+  tools: AgentToolName[] | null;
+  /** few-shot 示例；[] = 无（随正文按需返回） */
+  examples: SkillExample[];
+}
+
+/** 兼容旧命名：管理页沿用 SkillListItem */
+export type SkillListItem = SkillDetail;
+
+/** GET /api/agent/skills（目录） */
 export interface SkillsResponse {
-  skills: SkillListItem[];
+  skills: SkillCatalogItem[];
+}
+
+/** GET /api/agent/skills?include=body（完整内容，管理页） */
+export interface SkillDetailsResponse {
+  skills: SkillDetail[];
 }
 
 export const skillExampleSchema = z.object({
@@ -236,13 +259,27 @@ export const skillExampleSchema = z.object({
 
 /**
  * 创建/更新自定义技能的请求体校验（Route Handler 用）。
- * 约束见 docs/agent.md §5.1：instructions ≤8000 字（控 system token）、tools 元素必须 ∈ AGENT_TOOL_NAMES
+ * 约束见 docs/agent.md §5.1：instructions ≤8000 字（控按需加载正文体积）、tools 元素必须 ∈ AGENT_TOOL_NAMES
  * （防非法工具名进入 toolFactories 查找）、examples ≤2 条。tools null/缺省 = 全量。
  */
 export const skillMutationSchema = z.object({
-  name: z.string().trim().min(1, '技能名称不能为空').max(50, '技能名称不超过 50 字'),
-  description: z.string().trim().min(1, '一句话描述不能为空').max(200, '描述不超过 200 字'),
-  instructions: z.string().trim().min(1, '专家指令不能为空').max(8000, '专家指令不超过 8000 字'),
+  name: z
+    .string()
+    .trim()
+    .min(1, '技能名称不能为空')
+    .max(50, '技能名称不超过 50 字')
+    .regex(/^[^\r\n]+$/, '技能名称不能包含换行'),
+  description: z
+    .string()
+    .trim()
+    .min(1, '一句话描述不能为空')
+    .max(200, '描述不超过 200 字')
+    .regex(/^[^\r\n]+$/, '一句话描述不能包含换行'),
+  instructions: z
+    .string()
+    .trim()
+    .min(1, '工作流正文不能为空')
+    .max(8000, '工作流正文不超过 8000 字'),
   placeholder: z.string().trim().max(100, '输入框引导语不超过 100 字').nullish(),
   tools: z
     .array(z.enum(AGENT_TOOL_NAMES))

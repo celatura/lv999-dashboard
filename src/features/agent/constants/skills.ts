@@ -1,18 +1,17 @@
 /**
- * 技能注册表 —— 会话级「专家模式」：用户为一段会话选定一个技能，
- * 服务端在 buildAgent 处把技能指令覆盖进 system 指令，并按技能 tools 白名单
- * 过滤注册给模型的工具（未声明 = 全量）；示例以 few-shot 段落追加进 system。
+ * 技能注册表 —— 按需加载的「专家工作流包」：
+ * system 里只常驻轻量目录（名称 + 何时用），模型判断任务匹配后调用 loadSkill
+ * 读取完整正文（instructions + 示例），正文作为 tool result 进入消息历史；
+ * 用户也可以对「某一条消息」显式指定技能（消息 metadata.skillId），服务端直接注入并限制工具边界。
  *
  * v1 全部在代码中定义（全局预置、非用户私有数据）；后续增删技能只改本文件。
- * id 是存库的稳定 key（conversations.active_skill_id），改名不影响已持久化的会话。
+ * id 是稳定 key（预置为字符串 key，自定义为 uuid），改名不影响已持久化的消息引用。
  *
  * 依赖方向：agent.ts → 本文件（单向）。工具名联合类型定义在此，避免反向 import 循环；
  * 历史消息校验用的 agentValidationTools 恒为全量（不随技能过滤），只有 buildAgent 的 tools 受限。
  */
 
-import { isUuid } from '@/lib/utils';
-
-/** Agent 工具名（与 agent.ts 注册的工具 key 一一对应；定义在此避免反向 import） */
+/** Agent 业务工具名（技能工具边界可配置；loadSkill / askUser 为系统工具，不在此列） */
 export const AGENT_TOOL_NAMES = [
   'createAsset',
   'editAsset',
@@ -29,7 +28,7 @@ export const AGENT_TOOL_NAMES = [
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
 
 /**
- * 工具中文名（自定义技能表单的工具白名单勾选用；与 AGENT_TOOL_NAMES 一一对应）。
+ * 工具中文名（自定义技能表单的工具边界勾选用；与 AGENT_TOOL_NAMES 一一对应）。
  * 新增工具时需同步补充本表，否则表单勾选框缺标签。
  */
 export const AGENT_TOOL_LABELS: Record<AgentToolName, string> = {
@@ -55,17 +54,17 @@ export interface SkillExample {
 export interface SkillRegistryEntry {
   /** 稳定 key，存库用 */
   id: string;
-  /** 展示名（如「电商套图设计专家」） */
+  /** 展示名（如「电商套图设计专家」）；同一用户内唯一（loadSkill 按名称查找） */
   name: string;
-  /** 「何时用」一句话，供列表展示与搜索 */
+  /** 「何时用」一句话，供目录展示、模型路由与搜索 */
   description: string;
-  /** 覆盖进 system 的专家人设 + 工作流 */
+  /** 技能完整正文（专家人设 + 工作流），按需加载 */
   instructions: string;
-  /** 激活后输入框引导语 */
+  /** 选中后输入框引导语 */
   placeholder?: string;
-  /** 工具白名单；未声明 = 全量（通用兜底）。声明时必须覆盖技能工作流所需全部工具，且与 instructions 提到的工具一致 */
+  /** 工具边界；未声明 = 全量（加载后本次回复内生效） */
   tools?: readonly AgentToolName[];
-  /** few-shot 示范（每技能 ≤2 条，随 system 每次请求发送，精简控制 token） */
+  /** few-shot 示范（每技能 ≤2 条），随正文按需返回，不常驻 system */
   examples?: readonly SkillExample[];
 }
 
@@ -174,21 +173,18 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
 
 export const SKILL_IDS = Object.keys(SKILL_REGISTRY);
 
-/** 未知/非法 id → false（技能被下架而会话仍引用旧 id 时，服务端据此回退通用） */
-export function isSkillId(value: unknown): value is string {
-  return typeof value === 'string' && value in SKILL_REGISTRY;
-}
-
-export function getSkill(id?: string | null): SkillRegistryEntry | undefined {
-  return isSkillId(id) ? SKILL_REGISTRY[id] : undefined;
-}
+/** 常驻 system 的技能目录上限：控制每请求 token；超出部分不在目录中，模型无法自动选择 */
+export const MAX_CATALOG_SKILLS = 16;
 
 /**
- * 是否为合法「技能引用」：预置 key（在注册表内）或用户自定义技能 uuid。
- * 供会话创建/切换技能时校验 activeSkillId。uuid 的归属在解析时按 userId 过滤
- * （getSkillForUser）——非法/越权/已删除的 uuid 解析为 undefined → 回退通用，
- * 故此处的语法校验足以安全接受自定义技能 id（不泄漏存在性、无需写路径查库）。
+ * 技能正文渲染：instructions + few-shot 示范段落（空则仅 instructions）。
+ * 由 loadSkill 工具结果与「本条消息指定技能」的 system 注入共用，保证两种入口内容一致。
  */
-export function isSkillReference(value: unknown): value is string {
-  return typeof value === 'string' && (isSkillId(value) || isUuid(value));
+export function renderSkillBody(skill: SkillRegistryEntry): string {
+  const examples = skill.examples?.length
+    ? `\n\n## 示范（模仿以下输出结构与风格，不要照搬内容）\n\n${skill.examples
+        .map((example) => `用户：${example.input}\n你：${example.output}`)
+        .join('\n\n')}`
+    : '';
+  return `${skill.instructions}${examples}\n\n（本技能指令优先于基础工作方式；若基础说明提到的工具当前不可用，按本技能工作流执行。）`;
 }

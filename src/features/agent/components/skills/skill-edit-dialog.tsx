@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Icons } from '@/components/icons';
+import { ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { createSkillMutation, updateSkillMutation } from '../../api/mutations';
 import { skillMutationSchema, type SkillListItem } from '../../api/types';
@@ -135,7 +136,11 @@ export function SkillEditDialog({
         toast.success('技能已创建');
       }
       onOpenChange(false);
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'skill_name_conflict') {
+        toast.error('技能名称已存在，请换一个名称');
+        return;
+      }
       toast.error(isEdit ? '更新失败，请稍后重试' : '创建失败，请稍后重试');
     }
   };
@@ -147,8 +152,8 @@ export function SkillEditDialog({
           <DialogTitle>{isEdit ? '编辑技能' : '新建技能'}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? '修改后立即生效：新对话按最新指令协作，已绑定该技能的会话下次请求读取最新。'
-              : '把你的创作套路沉淀为专属专家：人设指令 + 工具范围 + 示例，可在对话中与内置技能混用。'}
+              ? '修改后，后续加载该技能的消息立即使用最新正文；已发送的消息不受影响。'
+              : '把你的创作套路沉淀为专属技能：Agent 会在需要时按需加载正文，不再常驻上下文。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -164,7 +169,7 @@ export function SkillEditDialog({
                 id='skill-name'
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder='如「我的公众号风格」'
+                placeholder='名称需唯一，如「我的公众号风格」'
                 maxLength={50}
                 disabled={isPending}
               />
@@ -187,7 +192,7 @@ export function SkillEditDialog({
           <div className='space-y-1.5'>
             <div className='flex items-center gap-1.5'>
               <label htmlFor='skill-instructions' className='text-sm font-medium'>
-                专家指令 <span className='text-destructive'>*</span>
+                工作流正文 <span className='text-destructive'>*</span>
               </label>
               {/* 撰写提示用 tooltip：悬停/聚焦问号弹出，不占表单空间、无展开态 */}
               <Tooltip>
@@ -270,8 +275,9 @@ export function SkillEditDialog({
               </span>
             </div>
             <p className='text-muted-foreground text-xs'>
-              限定 Agent 能调用哪些能力（如纯写作技能可只留「保存作品」「知识库检索」）；全勾 =
-              不限。
+              限定 Agent
+              加载该技能后能调用哪些能力（如纯写作技能可只留「保存作品」「知识库检索」）； 全勾 =
+              不限。仅在技能被加载后生效。
             </p>
             <div className='grid gap-2 sm:grid-cols-2'>
               {ALL_TOOLS.map((tool) => (
@@ -307,7 +313,8 @@ export function SkillEditDialog({
               </Button>
             </div>
             <p className='text-muted-foreground text-xs'>
-              给一条「用户输入 → 期望输出」示范，Agent 会模仿其结构与风格（不照搬内容）。
+              给一条「用户输入 → 期望输出」示范，随技能正文一起按需加载，Agent
+              会模仿其结构与风格（不照搬内容）。
             </p>
             {examples.map((example, index) => (
               <div key={index} className='space-y-2 rounded-md border p-3'>

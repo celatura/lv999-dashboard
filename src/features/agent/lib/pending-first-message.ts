@@ -13,13 +13,15 @@
  * 详见 chat-window.tsx 交接 effect 注释。
  */
 
-import type { ChatAttachment } from '../api/types';
+import type { ChatAttachment, SkillSelection } from '../api/types';
 import type { ReferencedAsset } from './asset-reference';
 
 interface PendingFirstMessage {
   conversationId: string;
   text: string;
   attachments: ChatAttachment[];
+  /** 本条消息显式指定的技能（null = 自动） */
+  skill: SkillSelection | null;
   createdAt: number;
 }
 
@@ -31,6 +33,7 @@ let draft: {
   text: string;
   references: ReferencedAsset[];
   attachments: ChatAttachment[];
+  skill: SkillSelection | null;
   createdAt: number;
 } | null = null;
 
@@ -38,9 +41,10 @@ let draft: {
 export function setPendingFirstMessage(
   conversationId: string,
   text: string,
-  attachments: ChatAttachment[] = []
+  attachments: ChatAttachment[] = [],
+  skill: SkillSelection | null = null
 ): void {
-  pending = { conversationId, text, attachments, createdAt: Date.now() };
+  pending = { conversationId, text, attachments, skill, createdAt: Date.now() };
 }
 
 /**
@@ -49,15 +53,15 @@ export function setPendingFirstMessage(
  */
 export function takePendingFirstMessage(
   conversationId: string
-): { text: string; attachments: ChatAttachment[] } | null {
+): { text: string; attachments: ChatAttachment[]; skill: SkillSelection | null } | null {
   if (!pending || pending.conversationId !== conversationId) return null;
   if (Date.now() - pending.createdAt > FRESHNESS_MS) {
     pending = null;
     return null;
   }
-  const { text, attachments } = pending;
+  const { text, attachments, skill } = pending;
   pending = null;
-  return { text, attachments };
+  return { text, attachments, skill };
 }
 
 /** 回到新会话首页时丢弃未消费的交接，避免陈旧消息在稍后访问该会话时被误发送 */
@@ -68,18 +72,25 @@ export function clearPendingFirstMessage(): void {
 export function setPendingNewConversationDraft(
   text: string,
   references: ReferencedAsset[],
-  attachments: ChatAttachment[] = []
+  attachments: ChatAttachment[] = [],
+  skill: SkillSelection | null = null
 ): void {
-  draft = { text, references, attachments, createdAt: Date.now() };
+  draft = { text, references, attachments, skill, createdAt: Date.now() };
 }
 
 export function takePendingNewConversationDraft(): {
   text: string;
   references: ReferencedAsset[];
   attachments: ChatAttachment[];
+  skill: SkillSelection | null;
 } | null {
   const current = draft;
   draft = null;
   if (!current || Date.now() - current.createdAt > FRESHNESS_MS) return null;
-  return { text: current.text, references: current.references, attachments: current.attachments };
+  return {
+    text: current.text,
+    references: current.references,
+    attachments: current.attachments,
+    skill: current.skill
+  };
 }

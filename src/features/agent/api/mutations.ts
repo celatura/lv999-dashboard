@@ -23,9 +23,9 @@ function invalidateConversations(): void {
   void queryClient.invalidateQueries({ queryKey: agentKeys.conversations() });
 }
 
-/** 技能域失效：合并列表（预置 + 自定义）变化，selector 与管理页同步刷新 */
+/** 技能域失效：目录 + 管理页详情一起刷新（同一 skillsRoot） */
 function invalidateSkills(): void {
-  void getQueryClient().invalidateQueries({ queryKey: agentKeys.skills() });
+  void getQueryClient().invalidateQueries({ queryKey: agentKeys.skillsRoot() });
 }
 
 /** 资产域失效：列表 + 详情 */
@@ -137,14 +137,11 @@ export const updateSkillMutation = mutationOptions({
 });
 
 /**
- * 删除自定义技能：服务端同时把引用它的会话 activeSkillId 置 null，
- * 故除技能列表外一并失效会话列表（侧边栏技能标识/回退需刷新）。
+ * 删除自定义技能：消息里的技能引用保留（历史照常展示），后续不可再选择，
+ * 只需刷新技能目录与管理页。
  */
 export const deleteSkillMutation = mutationOptions({
   mutationFn: (id: string) =>
     apiClient<{ success: boolean }>(`/agent/skills/${id}`, { method: 'DELETE' }),
-  onSettled: () => {
-    invalidateSkills();
-    invalidateConversations();
-  }
+  onSettled: invalidateSkills
 });

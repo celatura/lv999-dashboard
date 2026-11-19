@@ -6,6 +6,8 @@ export function resolveChatError(error: unknown): {
   isSizeLimit: boolean;
   requiresSettingsSync: boolean;
   requiresReconnect?: boolean;
+  /** 服务端错误码（用于渲染针对性的操作按钮，如 unknown_skill → 编辑输入） */
+  code?: string;
 } {
   const raw = error instanceof Error ? error.message : String(error);
   if ((MODEL_UNAVAILABLE_MESSAGES as readonly string[]).includes(raw)) {
@@ -32,9 +34,17 @@ export function resolveChatError(error: unknown): {
         }
         if (envelope.code === 'settings_changed') {
           return {
-            message: '会话的模型或技能已发生变化，请同步后重试。',
+            message: '会话的模型已发生变化，请同步后重试。',
             isSizeLimit: false,
             requiresSettingsSync: true
+          };
+        }
+        if (envelope.code === 'unknown_skill') {
+          return {
+            message: '所选技能不存在或已删除，请重新选择后发送。',
+            isSizeLimit: false,
+            requiresSettingsSync: false,
+            code: 'unknown_skill'
           };
         }
         if (envelope.code === 'stream_changed') {

@@ -5,6 +5,7 @@ import type {
   AssetFilters,
   AssetsResponse,
   ConversationsResponse,
+  SkillDetailsResponse,
   SkillsResponse
 } from './types';
 
@@ -17,8 +18,12 @@ export const agentKeys = {
   /** 资产详情域根 key */
   assetRoot: () => [...agentKeys.all, 'asset'] as const,
   asset: (id: string) => [...agentKeys.assetRoot(), id] as const,
-  /** 技能域 key：合并列表（预置 + 自定义），会话选择器与技能管理页共用一份缓存 */
-  skills: () => [...agentKeys.all, 'skills'] as const
+  /** 技能域根 key：写操作后按此失效，目录与管理页详情一起刷新 */
+  skillsRoot: () => [...agentKeys.all, 'skills'] as const,
+  /** 轻量目录（选择器/空态）：不含正文 */
+  skills: () => [...agentKeys.skillsRoot(), 'catalog'] as const,
+  /** 完整内容（技能管理页） */
+  skillDetails: () => [...agentKeys.skillsRoot(), 'details'] as const
 };
 
 export function buildAssetQuery(filters: AssetFilters): string {
@@ -59,9 +64,18 @@ export const assetQueryOptions = (id: string) =>
     queryFn: () => apiClient<AssetDetail>(`/agent/assets/${id}`)
   });
 
-/** 合并技能列表（预置 + 自定义）：selector 与管理页共用，写操作后按 agentKeys.skills() 失效 */
+/** 轻量技能目录（预置 + 自定义）：输入区选择器/空态用，不含正文；写操作后按 skillsRoot 失效 */
 export const skillsQueryOptions = () =>
   queryOptions({
     queryKey: agentKeys.skills(),
-    queryFn: () => apiClient<SkillsResponse>('/agent/skills')
+    queryFn: () => apiClient<SkillsResponse>('/agent/skills'),
+    staleTime: 60_000
+  });
+
+/** 技能完整内容（管理页编辑/复制用）；与目录分开缓存，避免聊天页下载全部技能正文 */
+export const skillDetailsQueryOptions = () =>
+  queryOptions({
+    queryKey: agentKeys.skillDetails(),
+    queryFn: () => apiClient<SkillDetailsResponse>('/agent/skills?include=body'),
+    staleTime: 60_000
   });

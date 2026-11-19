@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { DEFAULT_MODEL, isModelKey } from '../constants/models';
 import {
   AGENT_TOOL_NAMES,
+  MAX_CATALOG_SKILLS,
+  renderSkillBody,
   type AgentToolName,
-  type SkillExample,
   type SkillRegistryEntry
 } from '../constants/skills';
 import { ASPECT_KEYS, ASPECT_PRESETS, type AspectKey } from '../constants/image-models';
@@ -304,6 +305,13 @@ const askUserOutputSchema = z
   )
   .describe('用户对每个问题的回答');
 
+const LOAD_SKILL_DESCRIPTION =
+  '加载一个专家技能（工作流/风格包）的完整指令。技能名称必须来自 system 中「可用技能」列表；当用户任务明显匹配某技能时，先加载再执行。若本会话历史中已加载过同一技能，可直接沿用，不必重复调用。加载后本次回复内按该技能的指令与工具边界工作；不要凭空假设技能内容。';
+
+const loadSkillInputSchema = z.object({
+  name: z.string().min(1).max(50).describe('技能名称（必须与「可用技能」列表中的名称完全一致）')
+});
+
 /**
  * 客户端工具：无 execute。模型调用后本轮流即结束（part 停留 input-available），
  * 由客户端弹出选项卡收集回答，经 addToolOutput 回传 output 后自动续答
@@ -356,6 +364,10 @@ export const agentValidationTools = {
   composeDesign: tool({
     description: COMPOSE_DESIGN_DESCRIPTION,
     inputSchema: composeDesignInputSchema
+  }),
+  loadSkill: tool({
+    description: LOAD_SKILL_DESCRIPTION,
+    inputSchema: loadSkillInputSchema
   }),
   askUser: askUserTool
 };
@@ -930,44 +942,98 @@ export interface UsageSink {
 }
 
 /**
- * 把技能示例渲染为 system 内的「示范」段落（few-shot，空则返回 ''）。
- * 示例随 system 每次请求发送，总长控制见 skills.ts 约定（每技能 ≤2 条、单条精简）。
+ * 按需技能加载工具：把技能正文作为 tool result 送入对话（渐进披露）。
+ * 加载记录写入每请求的 loadedSkills，供 prepareStep 在后续步骤收窄工具边界。
+ * 名称在用户范围内唯一（写入时校验），此处精确匹配；未命中抛错让模型回到目录重选。
  */
-function renderExamples(examples?: readonly SkillExample[]): string {
-  if (!examples?.length) return '';
-  const rendered = examples
-    .map((example) => `用户：${example.input}\n你：${example.output}`)
-    .join('\n\n');
-  return `\n\n## 示范（模仿以下输出结构与风格，不要照搬内容）\n\n${rendered}`;
+function loadSkillTool(params: {
+  skills: readonly SkillRegistryEntry[];
+  loadedSkills: Set<SkillRegistryEntry>;
+}) {
+  return tool({
+    description: LOAD_SKILL_DESCRIPTION,
+    inputSchema: loadSkillInputSchema,
+    execute: async ({ name }) => {
+      const requested = name.trim();
+      const normalized = requested.toLocaleLowerCase();
+      const skill = params.skills.find(
+        (entry) => entry.name.trim().toLocaleLowerCase() === normalized
+      );
+      if (!skill) {
+        throw new Error(
+          `未找到技能「${requested}」：请从 system 的「可用技能」列表中选择准确名称，不要臆造。`
+        );
+      }
+      params.loadedSkills.add(skill);
+      return { id: skill.id, name: skill.name, instructions: renderSkillBody(skill) };
+    }
+  });
+}
+
+/**
+ * system 内的常驻技能目录：只有名称 + 何时用（轻量），完整正文由 loadSkill 按需拉取。
+ * 目录是稳定前缀，利于 provider 侧上下文缓存；超出上限的技能不在目录中（无法自动选择）。
+ */
+function renderSkillCatalog(skills: readonly SkillRegistryEntry[]): string {
+  if (skills.length === 0) return '';
+  const catalog = skills
+    .slice(0, MAX_CATALOG_SKILLS)
+    .map((skill) => `- ${skill.name}：${skill.description}`)
+    .join('\n');
+  const overflow =
+    skills.length > MAX_CATALOG_SKILLS
+      ? `\n（另有 ${skills.length - MAX_CATALOG_SKILLS} 个技能未在目录中，可在技能管理页查看。）`
+      : '';
+  return `\n\n# 可用技能（按需加载）\n当用户任务明显匹配下面的某个技能时，先调用 loadSkill 加载它的完整工作流，再按该工作流执行；不要凭空假设技能内容。若历史中已加载过同一技能，可直接沿用。\n${catalog}${overflow}\n技能加载后，在本次回复内按该技能的指令与工具边界工作。`;
 }
 
 /**
  * 每请求构建一个 Agent（serverless 无状态，上下文经闭包注入工具）。
- * skill：会话级技能对象（专家模式），由 chat route 经 getSkillForUser 解析后传入（预置或用户自定义同构）；
- * 传入时把技能指令 + 示例追加到基础指令后，并按 skill.tools 白名单过滤注册给模型的工具
- * （未传技能或技能未声明 tools = 全量）。buildAgent 保持纯函数不碰 DB（解析在服务层完成）。
- * 注意：agentValidationTools 恒为全量不随技能过滤 —— 会话中途切技能后，
- * 旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。
- * 防御：skill 为 null/undefined（含技能被删除后回退）时用基础指令 + 全量工具，不报错。
+ * skills：本用户可用技能（预置 + 自定义，由 chat 路由一次查询后传入），用于：
+ * 1) system 常驻轻量目录（名称 + 何时用）；
+ * 2) loadSkill 工具按需返回完整正文；
+ * 3) 用户对本条消息显式指定技能时（forcedSkill）直接注入正文并从第一步限制工具。
+ * forcedSkill 缺省 = 自动模式：全量工具 + loadSkill，加载后由 prepareStep 收窄 activeTools。
+ * buildAgent 保持纯函数不碰 DB（解析在服务层完成）。
+ * 注意：agentValidationTools 恒为全量不随技能过滤 —— 历史消息可能含任意技能的工具调用，
+ * 若校验工具也过滤会导致历史校验 400。
  */
 export function buildAgent(params: {
   userId: string;
   conversationId: string;
   modelKey: string;
   reservationId: string;
-  /** 会话级技能（专家模式）对象；null/缺省 = 通用（无技能） */
-  skill?: SkillRegistryEntry | null;
+  /** 本用户可用技能（预置 + 自定义，已解析）；缺省 = 无技能目录 */
+  skills?: readonly SkillRegistryEntry[];
+  /** 用户对本条消息显式指定的技能；null/缺省 = 自动 */
+  forcedSkill?: SkillRegistryEntry | null;
+  /**
+   * 上一轮 assistant 已加载的技能名（askUser 续答轮从消息 parts 回灌）：
+   * 续答是新请求，loadSkill 的 tool result 只在历史里，需据此恢复 loadedSkills，
+   * 否则工具边界会在续答轮默默失效（同一回复内「先澄清 → 再执行」路径）。
+   */
+  preloadedSkillNames?: readonly string[];
   /** 可变 usage 累加器：onStepEnd 累加每步 usage，供 route 的 onEnd 结算扣费（每请求新建，无跨请求污染） */
   usageSink?: UsageSink;
 }) {
   const modelKey = isModelKey(params.modelKey) ? params.modelKey : DEFAULT_MODEL;
-  const skill = params.skill ?? undefined;
-  const skillBlock = skill
-    ? `\n\n# 当前技能：${skill.name}\n${skill.instructions}${renderExamples(skill.examples)}`
-    : '';
+  const skills = params.skills ?? [];
+  const forcedSkill = params.forcedSkill ?? undefined;
+  // 本次请求已加载的技能（loadSkill.execute 写入 / 续答轮从消息 parts 回灌，prepareStep 读取）：
+  // Agent 每请求新建，无跨请求污染；用于加载后收窄 activeTools（工具边界只在本次回复内生效）。
+  const loadedSkills = new Set<SkillRegistryEntry>();
+  for (const name of params.preloadedSkillNames ?? []) {
+    const normalized = name.trim().toLocaleLowerCase();
+    const skill = skills.find((entry) => entry.name.trim().toLocaleLowerCase() === normalized);
+    if (skill) loadedSkills.add(skill);
+  }
+
+  const skillBlock = forcedSkill
+    ? `\n\n# 本条消息指定技能：${forcedSkill.name}\n${renderSkillBody(forcedSkill)}`
+    : renderSkillCatalog(skills);
   const instructions = `${AGENT_INSTRUCTIONS}${skillBlock}`;
-  // 工具名 → 工厂（与 agentValidationTools 的全量工具一一对应）；按技能白名单懒构建，
-  // 未声明技能或技能未声明 tools 时回退全量（向后兼容，无技能 = 通用兜底）
+  // 工具名 → 工厂（与 agentValidationTools 的全量工具一一对应）；按技能工具边界懒构建，
+  // 未声明技能或技能未声明 tools 时回退全量（无技能 = 通用兜底）
   const toolFactories: Record<AgentToolName, () => Tool> = {
     createAsset: () => createAssetTool(params),
     editAsset: () => editAssetTool(params),
@@ -980,12 +1046,18 @@ export function buildAgent(params: {
     knowledgeSearch: () => knowledgeSearchTool(params),
     composeDesign: () => composeDesignTool(params)
   };
-  const allowedTools = skill?.tools ?? AGENT_TOOL_NAMES;
+  const allowedTools = (forcedSkill?.tools ?? AGENT_TOOL_NAMES).filter(
+    (name) => name in toolFactories
+  );
   const tools = Object.fromEntries(
     allowedTools.map((name) => [name, toolFactories[name]()])
   ) as Record<string, Tool>;
-  // 澄清提问是跨技能的通用能力：不受技能 tools 白名单过滤（专家模式下也可先问清需求）
+  // 澄清提问是跨技能的通用能力：不受技能工具边界过滤（专家模式下也可先问清需求）
   tools.askUser = askUserTool;
+  // 显式技能不提供 loadSkill：用户已选定边界，避免模型再加载另一个技能绕过
+  if (!forcedSkill && skills.length > 0) {
+    tools.loadSkill = loadSkillTool({ skills, loadedSkills });
+  }
   return new ToolLoopAgent({
     model: resolveModel(modelKey),
     instructions,
@@ -995,6 +1067,23 @@ export function buildAgent(params: {
     // totalMs 必须 ≥ 视频轮询上限（VIDEO_POLL_TIMEOUT_MS=280s）+ 转存/落库开销，
     // 否则长视频会被 Agent 总超时提前中止；上限仍 < Route Handler maxDuration=300（平台硬杀）。
     timeout: { totalMs: 295_000 },
+    // 加载技能后收窄后续步骤可用工具。activeTools 只对当前 step 生效，故每步根据
+    // loadedSkills 重新计算；任一所载技能未声明 tools（全量）→ 不限制。
+    // 显式技能已在注册期过滤，无需 prepareStep。
+    prepareStep: forcedSkill
+      ? undefined
+      : () => {
+          if (loadedSkills.size === 0) return undefined;
+          if ([...loadedSkills].some((skill) => !skill.tools)) return undefined;
+          const active = new Set<string>(['loadSkill', 'askUser']);
+          for (const skill of loadedSkills) {
+            for (const name of skill.tools ?? []) {
+              // 防御历史/脏数据里的非法工具名（写入时已校验，这里再兜一道）
+              if (name in toolFactories) active.add(name);
+            }
+          }
+          return { activeTools: [...active] };
+        },
     // 生命周期回调（官方推荐 onStepEnd/onEnd）：记录 step/usage/工具调用，为限额、计费与排障提供数据
     onStepEnd: ({ stepNumber, finishReason, toolCalls, usage }) => {
       // 累加每步 usage 到 route 传入的累加器（对已完成的步触发，含 abort 前的步）；

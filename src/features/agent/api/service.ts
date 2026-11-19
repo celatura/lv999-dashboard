@@ -87,7 +87,6 @@ function toConversation(row: ConversationRow): Conversation {
     id: row.id,
     title: row.title,
     model: row.model,
-    activeSkillId: row.activeSkillId ?? null,
     activeStreamId: row.activeStreamId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
@@ -176,19 +175,14 @@ export const getConversation = cache(
   }
 );
 
-export async function createConversation(
-  userId: string,
-  model: string,
-  options?: { activeSkillId?: string | null }
-): Promise<Conversation> {
+export async function createConversation(userId: string, model: string): Promise<Conversation> {
   const db = getDb();
   const rows = await db
     .insert(conversations)
     .values({
       userId,
       model,
-      title: DEFAULT_CONVERSATION_TITLE,
-      activeSkillId: options?.activeSkillId ?? null
+      title: DEFAULT_CONVERSATION_TITLE
     })
     .returning();
   return toConversation(rows[0]);
@@ -197,7 +191,7 @@ export async function createConversation(
 export async function updateConversation(
   userId: string,
   conversationId: string,
-  patch: { title?: string; model?: string; activeSkillId?: string | null }
+  patch: { title?: string; model?: string }
 ): Promise<Conversation | undefined> {
   const db = getDb();
   const rows = await db

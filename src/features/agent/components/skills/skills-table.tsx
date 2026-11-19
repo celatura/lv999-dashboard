@@ -25,7 +25,7 @@ import {
 import { Icons } from '@/components/icons';
 import { formatDate } from '@/lib/format';
 import { deleteSkillMutation } from '../../api/mutations';
-import { skillsQueryOptions } from '../../api/queries';
+import { skillDetailsQueryOptions } from '../../api/queries';
 import type { SkillListItem } from '../../api/types';
 
 /** 编辑/复制对话框按需加载：未打开就不下载该 chunk（bundle-dynamic-imports） */
@@ -42,10 +42,10 @@ type DialogState =
 
 /**
  * 技能管理列表：预置（内置 badge，只读，可「复制为草稿」）+ 用户自定义（可编辑/删除）。
- * 数据源为合并列表（skillsQueryOptions，服务端已预取）；写操作按域失效自动刷新。
+ * 数据源为完整内容列表（skillDetailsQueryOptions，服务端已预取）；写操作按域失效自动刷新。
  */
 export function SkillsTable() {
-  const { data } = useSuspenseQuery(skillsQueryOptions());
+  const { data } = useSuspenseQuery(skillDetailsQueryOptions());
   const [dialog, setDialog] = useState<DialogState>(null);
   const [dialogMounted, setDialogMounted] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SkillListItem | null>(null);
@@ -83,7 +83,7 @@ export function SkillsTable() {
         }}
         loading={deleteMutation.isPending}
         title={`删除技能「${deleteTarget?.name ?? ''}」？`}
-        description='引用它的会话将回退「通用」，此操作不可撤销。'
+        description='删除后，后续消息将无法再选择该技能；已发送的消息不受影响。此操作不可撤销。'
         confirmLabel='删除'
       />
 

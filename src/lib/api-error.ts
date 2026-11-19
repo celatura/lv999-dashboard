@@ -22,6 +22,8 @@ export type ApiErrorCode =
   | 'settings_changed'
   | 'stream_changed'
   | 'stream_unavailable'
+  | 'unknown_skill'
+  | 'skill_name_conflict'
   | 'too_many_requests'
   | 'insufficient_credits'
   | 'generation_failed'

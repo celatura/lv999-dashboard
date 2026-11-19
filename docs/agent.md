@@ -45,7 +45,7 @@ src/features/agent/
 │   ├── models.ts           # 对话模型注册表（4 个文本模型）
 │   ├── image-models.ts     # 图像模型注册表（2 个）+ 比例预设 ASPECT_PRESETS
 │   ├── video-models.ts     # 视频模型注册表（wan3.0-video 默认 + prime 优速）
-│   ├── skills.ts           # 技能注册表（专家模式，3 个预置技能）
+│   ├── skills.ts           # 技能注册表（按需加载，3 个预置技能）
 │   ├── kinds.ts            # 资产类型元数据（markdown / html / image / design / video）
 │   ├── conversation.ts     # 默认标题与标题生成
 │   ├── embedding.ts        # RAG embedding 配置（模型 / 维度 / 批次）
@@ -75,9 +75,10 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | `userId` | text | Better Auth user id |
 | `title` | text | 会话标题（首条消息经 LLM 并行生成，失败回退截断；见 §4.8） |
 | `model` | text | 会话级模型选择，默认 `deepseek-flash` |
-| `activeSkillId` | text \| null | 会话级技能（专家模式）id，指向代码内技能注册表；null = 通用（无技能） |
 | `activeStreamId` | text \| null | 正在进行的可恢复流 id；无活跃流时为 null |
 | `createdAt` / `updatedAt` | timestamptz | |
+
+> 技能不落会话列：每条用户消息的 `metadata.skillId` 记录本条显式指定的技能（见 §5.1）。
 
 ### messages（消息）
 
@@ -87,7 +88,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 | `conversationId` | uuid FK → conversations | `ON DELETE CASCADE` |
 | `role` | text | user / assistant 等 |
 | `parts` | jsonb | 原样存储 AI SDK `UIMessage.parts` |
-| `metadata` | jsonb \| null | 含 `streamId` 等 |
+| `metadata` | jsonb \| null | assistant 含 `streamId`；user 含 `skillId` / `skillName`（本条显式指定技能） |
 | `createdAt` | timestamptz | 索引：`(conversationId, createdAt)` |
 
 ### assets（资产）
@@ -177,8 +178,9 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 4.7 会话设置、列表与限制
 
-- 新会话空态提供写内容、做图片、生成视频、设计封面四种示例；点击只填入输入框，不自动发送。资产库非空时另提供复用作品示例；空态从顶部显示，已有消息则保持末条消息锚点与自动滚动。
-- 模型和技能切换等待服务端保存后才更新显示，期间暂停发送；保存和读取各有 10 秒超时。保存失败时重新读取权威设置，无法读取时须手动重试同步。对话请求携带当前显示的模型和技能，若与服务端不一致返回 `settings_changed`，客户端可同步后重试。
+- 新会话空态提供写内容、做图片、生成视频、设计封面四种示例；点击只填入输入框，不自动发送。资产库非空时另提供复用作品示例；空态从顶部显示，已有消息则保持末条消息锚点与自动滚动。空态另提供「按技能开始」入口：只选中技能（作用于下一条消息），不自动发送。
+- 模型切换等待服务端保存后才更新显示，期间暂停发送；保存和读取各有 10 秒超时。保存失败时重新读取权威设置，无法读取时须手动重试同步。对话请求携带当前显示的模型，若与服务端不一致返回 `settings_changed`，客户端可同步后重试。
+- 技能不写会话设置：输入区的选择只作用于**下一条消息**（消息 metadata.skillId），发送后自动清除；不选时由 Agent 按技能目录自动匹配（见 §5.1）。
 - 侧边栏每次加载 50 个会话，按不可变的创建时间和 id 倒序游标分页，避免活跃会话更新时间改变时遗漏记录；界面注明排序方式。会话更新或生成结束仅刷新包含该会话的已加载页，新建和删除则刷新整个列表。
 - 对话请求只含一条增量消息（单条 ≤500 个 part、请求体 ≤4 MB）；服务端合并后的历史最多 200 条消息。触及限制时可编辑失败消息，或将输入与资产引用带到新会话；后者通过客户端内存一次性交接，页面刷新会丢弃未交接草稿。
 
@@ -219,7 +221,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **持久化 / 刷新**：问题与回答随 `messages.parts` 落库。刷新后待回答的提问重新弹出卡片；已回答的提问渲染为「已确认 N 个创作细节」折叠行（[`ask-user-part.tsx`](../src/features/agent/components/chat/ask-user-part.tsx)）。
 - **计费**：提问轮与续答轮各是一次普通对话请求，按 usage 结算；续答余额不足时返回 402，可用错误条上的「编辑输入」回到原始请求重新发送。
 - **停止 / 恢复**：提问流结束后无活跃流；续答是新的可恢复流，停止 / 重连语义与普通回合一致。
-- **防滥用**：系统指令限制「一次对话最多提问一轮、能从上下文推断时不提问」；`askUser` 不受技能工具白名单过滤（专家模式下也可先问清需求）。
+- **防滥用**：系统指令限制「一次对话最多提问一轮、能从上下文推断时不提问」；`askUser` 不受技能工具边界过滤（技能加载后也可先问清需求）。
 
 ---
 
@@ -239,25 +241,29 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | `readAsset` | `assetId` | 读取资产内容：markdown/html 返回正文、image/video 返回生成 prompt（design 不支持），供“基于它再创作” |
 | `knowledgeSearch` | `query` / `topK?` | 在 RAG 知识库中按【语义】检索「资料」片段（问答/综述），返回 topK 片段 + 来源标题；见 [docs/knowledge-base.md](./knowledge-base.md) |
 | `composeDesign` | `title` / `imagePrompt` / `heading?` / `subheading?` / `layout`(top-image\|full-image-bar\|left-image) / `aspect?` | **一句话生成整版设计**：工具内限流（`image-generate`）→ `checkBalance` → 文生图（计费 image 档，比例按**版式主图区域**选最接近的一档）→ `createImageAsset`（主图仍沉淀为独立资产）→ `sharp` 读自然尺寸 → [`design/lib/layouts.ts`](../src/features/design/lib/layouts.ts) 按版式组装文档（坐标/字号/对齐全由代码计算）+ sanitize → `createDesignAsset(previewPng=null)`；返回 `{ assetId, title, kind:'design', sizeBytes, imageAssetId }`，对话内渲染「打开编辑」卡片。design 落库为纯 JSON 组装，**不额外计费**；无预览（预览由画布保存时客户端导出补上）。详见 [docs/design-editor.md](./design-editor.md) |
-| `askUser` | `questions[{ question, choices[2..4] }]`（1-3 个问题） | 客户端工具（无 `execute`）：向用户弹选项卡澄清关键创作参数，本轮流在此停住；回答后经 tool output 自动续答。不受技能 `tools` 白名单过滤（见 §4.11） |
+| `loadSkill` | `name`（必须与目录名称一致） | **按需加载技能**：system 只常驻技能目录（名称 + 何时用），模型判断任务匹配后调用本工具拿到完整正文（tool result 进入历史）；`prepareStep` 在加载后按技能 `tools` 收窄后续步骤的 `activeTools`（本次回复内生效） |
+| `askUser` | `questions[{ question, choices[2..4] }]`（1-3 个问题） | 客户端工具（无 `execute`）：向用户弹选项卡澄清关键创作参数，本轮流在此停住；回答后经 tool output 自动续答。不受技能工具边界过滤（见 §4.11） |
 
 > 区分：`findAssets` 按标题找「作品」（复用/改写/改图）；`knowledgeSearch` 按语义找「资料」（基于内容作答并标注来源）。对话中的 `[引用资产]` 块给出的 id 可直接使用，无需再检索。
 
-工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 11 工具、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的 `tools` 白名单过滤注册（见 §5.1）——两者必须分离：会话中途切技能后，旧消息可能含已被当前技能禁用的工具调用，若校验工具也过滤会导致历史校验 400。`askUser` 例外：它恒被注册（白名单只约束生成类工具）。
+工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 12 工具（10 业务 + loadSkill + askUser）、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的工具边界过滤注册（见 §5.1）——两者必须分离：历史消息可能含任意技能的工具调用，若校验工具也过滤会导致历史校验 400。`askUser` 例外：它恒被注册（工具边界只约束业务工具）。
 
-### 5.1 技能系统（专家模式）
+### 5.1 技能系统（按需加载的专家工作流包）
 
-会话级「专家模式」：用户为一段会话选定一个技能，服务端在 `buildAgent` 处把技能指令与示例**追加**到基础指令后，并按技能的 `tools` 白名单过滤注册给模型的工具（能力边界，防误调昂贵工具）。**技能系统 2.0** 起，技能 = 代码内**预置**（builtin，全局只读）+ 用户**自建**（custom，私有可 CRUD）两类，同构混用、被 Agent 同等对待。
+技能 = 可被模型发现、**按需加载**的工作流/风格包，不是「会话模式」。system 只常驻轻量目录（名称 + 何时用），模型判断任务匹配后调用 `loadSkill` 读取完整正文；用户也可以对**某一条消息**显式指定技能。技能 = 代码内**预置**（builtin，全局只读）+ 用户**自建**（custom，私有可 CRUD）两类，同构混用、被 Agent 同等对待。
 
-- **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是覆盖进 system 的专家人设 + 工作流；`placeholder` 是激活后输入框引导语；`tools` 是工具白名单（`AgentToolName[]`，**未声明 / null = 全量**）；`examples` 是 few-shot 示范（`{ input, output }[]`，经 `renderExamples` 渲染为「示范」段落追加进 system，每技能 ≤2 条、单条精简控制 token）。预置与自定义技能**映射为同一结构**，零重复复用注入 / 过滤逻辑。
-- **预置注册表** `SKILL_REGISTRY`（constants/skills.ts）：3 个内置技能 `ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，各声明 8 工具白名单（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量兜底）。`id` 为稳定字符串 key、只读（增删改需改代码）。
+- **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是技能完整正文（专家人设 + 工作流），按需加载；`placeholder` 是选中后输入框引导语；`tools` 是工具边界（`AgentToolName[]`，**未声明 / null = 全量**，加载后本次回复内生效）；`examples` 是 few-shot 示范（`{ input, output }[]`，随正文经 `renderSkillBody` 按需返回，每技能 ≤2 条）。预置与自定义技能**映射为同一结构**，零重复复用目录 / 加载 / 工具边界逻辑。
+- **两条入口**：
+  1. **自动**：`buildAgent` 把轻量目录（名称 + description，最多 `MAX_CATALOG_SKILLS=16` 个）拼进 system；模型调用 `loadSkill({ name })`，正文以 tool result 进入消息历史；`prepareStep` 在加载后按技能 `tools` 收窄后续步骤的 `activeTools`（每步重新计算；任一技能未声明 tools = 不限制）。
+  2. **显式**：用户消息 `metadata: { skillId, skillName }`（`sendMessage` 的 metadata，随消息持久化）。chat 路由从 `listSkillEntriesForUser` 中按 id 解析（归属过滤），直接注入正文并从第一步限制工具；**不注册 `loadSkill`**，避免模型再加载另一个技能绕过用户选定的边界。找不到 → 400 `unknown_skill`。
+- **预置注册表** `SKILL_REGISTRY`（constants/skills.ts）：3 个内置技能 `ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，各声明 8 工具边界（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量）。`id` 为稳定字符串 key、只读（增删改需改代码）。
 - **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量（与预置未声明同语义）。
-- **id 命名空间分流**：`conversations.activeSkillId`（text 可空）存预置 key（字符串）或自定义技能 uuid；`isUuid` 分流「查 DB / 查常量」，无需额外标记列。会话创建 / 切换技能用 `isSkillReference`（预置 key **或** uuid）校验，uuid 的归属在解析时按 `userId` 过滤。
+- **名称唯一**：`loadSkill` 按 name 查找，`createSkill` / `updateSkill` 校验「预置 + 当前用户自定义」范围内名称唯一（`SkillNameConflictError` → 409 `skill_name_conflict`），避免加载到不可预期的技能。
 - **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量与中文名表 `AGENT_TOOL_LABELS`；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界）。
-- **解析链**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`getSkillForUser(userId, skillId)` → uuid 查 DB（`userId` 归属过滤）映射为 `SkillRegistryEntry`、非 uuid 查预置常量 `getSkill`、无匹配 → `undefined`；`listSkillsForUser(userId)` 返回合并列表（预置 `source='builtin'` + 自定义 `source='custom'`）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skill?: SkillRegistryEntry | null`（不再是 `skillId`），由 `chat` 路由先 `await getSkillForUser(userId, conversation.activeSkillId)` 再传入。
-- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（合并列表 `{ skills }`，选择器与管理页共用）/ `POST`（创建，Zod 校验 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除 + 把引用会话 `activeSkillId` 置 null 回退通用）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000`（控 system token）/ `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
-- **UI**：会话选择器（[`skill-selector.tsx`](../src/features/agent/components/chat/skill-selector.tsx)）经 `useSkillList`（合并列表 `useQuery` + 预置兜底，非 suspense）渲染，自定义技能带「自定义」badge、底部「管理技能…」入口跳转管理页；技能管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（内置只读、可「复制为草稿」+ 自定义可编辑 / 删除）+ 创建 / 编辑对话框（名称 / 描述 / 专家指令 + 撰写提示 / 引导语 / 全量工具勾选 / 0-2 组示例）。
-- **防御**：技能被删除或非法 / 越权 id → `getSkillForUser` 返回 undefined，`buildAgent` 回退基础指令 + 全量工具，不报错（双保险：删除时已置空引用会话的 `activeSkillId`）；工具过滤只影响「模型能调什么」，不影响「历史消息能否被校验」（`agentValidationTools` 恒全量，见 §5）。
+- **读取分档**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`listSkillEntriesForUser`（完整条目，服务端目录 / loadSkill / 显式技能校验）、`listSkillCatalogForUser`（轻量目录，客户端选择器 / 空态）、`listSkillDetailsForUser`（完整内容，管理页）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skills: SkillRegistryEntry[]` + `forcedSkill?: SkillRegistryEntry | null`，由 chat 路由一次查询后传入。
+- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（轻量目录 `{ skills }`，选择器/空态用）/ `GET /api/agent/skills?include=body`（完整内容，管理页用）/ `POST`（创建，Zod 校验 + 名称唯一 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除；历史消息里的技能引用保留，界面按名称展示）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000` / `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
+- **UI**：输入区 [`skill-picker.tsx`](../src/features/agent/components/chat/skill-picker.tsx)（`SkillPicker`）为「下一条消息」选择技能，选中后输入框出现技能 chip，发送后由 chat-window 清空；不选 = 自动匹配。空态提供技能入口。消息流：用户消息按 metadata 显示技能 chip；assistant 的 `tool-loadSkill` 渲染为「已加载技能：X」。管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（内置只读、可「复制为草稿」+ 自定义可编辑 / 删除）+ 创建 / 编辑对话框（名称 / 描述 / 工作流正文 + 撰写提示 / 引导语 / 工具边界 / 0-2 组示例）。
+- **防御**：显式技能 id 非法 / 越权 / 已删除 → 400 `unknown_skill`（客户端提示重选）；自动加载名称未命中 → 工具报错让模型回到目录重选；`agentValidationTools` 恒为全量（含 `loadSkill`），历史消息仍可被校验。
 
 ---
 
@@ -343,8 +349,8 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | GET | `/api/agent/chat/[id]/stream` | 重连进行中的流（`resume`）|
 | POST | `/api/agent/chat/[id]/stop` | 停止生成（保存快照 + 写停止信号）|
 | GET | `/api/agent/conversations?cursor=...` | 会话列表（按创建时间倒序游标分页，每页 50 条；返回 `conversations` / `nextCursor`，首次省略 cursor，无下一页时为 null）|
-| POST | `/api/agent/conversations` | 创建会话（可带 `activeSkillId` 激活技能）|
-| PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型 / `activeSkillId`）/ 删除会话 |
+| POST | `/api/agent/conversations` | 创建会话（标题/模型；技能随消息 metadata 指定，见 §5.1）|
+| PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型）/ 删除会话 |
 | GET | `/api/agent/assets` | 资产列表（分页 / 搜索 / kind 筛选 / `favorite` 筛选 / 排序）|
 | POST | `/api/agent/assets` | 创建 design 资产（限流 scope `design` 30/分）——详见 design-editor.md |
 | POST | `/api/agent/assets/upload` | 本地图片上传（multipart；魔数校验 PNG/JPEG/WebP ≤10MB → OSS + `source='upload'` 资产；限流 30/分，不计费）——聊天附件与设计画布共用 |
@@ -369,7 +375,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 错误信封（API 契约硬化 v1）
 
-服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `forbidden` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `settings_changed` / `stream_changed` / `stream_unavailable` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
+服务端可预期错误一律通过 [`apiError(status, code, message, headers?)`](../src/lib/api-error.ts) 返回 `{ error: { code, message } }`；`code` 取值：`unauthorized` / `forbidden` / `invalid_json` / `invalid_request` / `not_found` / `payload_too_large` / `settings_changed` / `stream_changed` / `stream_unavailable` / `unknown_skill` / `skill_name_conflict` / `too_many_requests` / `insufficient_credits` / `generation_failed` / `not_implemented`。客户端 `api-client.ts` 的 `ApiError` 解析信封并暴露 `status` 与 `code`。
 
 - **例外：`generation_failed`（502）的 `message` 为中文**——图片/视频生成失败原因（内容审核拒绝 / 上游限流 / 鉴权 / 参数 / 超时）已由 `GenerationError` 映射为用户可读文案，端点直接透传作为单一来源，客户端按 `code` 识别后原样展示（见 design 域的 `resolveAiImageError`）；其余 code 的 `message` 仍为简短英文。
 - **路径参数**：所有 `[id]` 路由先用 [`isUuid`](../src/lib/utils.ts) 预校验，非法格式返回 404 `not_found`（避免直达 DB 产生 500）。

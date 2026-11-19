@@ -2,7 +2,11 @@ import { getUserId } from '@/lib/auth-session';
 import { apiError } from '@/lib/api-error';
 import { isUuid } from '@/lib/utils';
 import { checkRateLimit } from '@/features/agent/api/rate-limit';
-import { deleteSkill, updateSkill } from '@/features/agent/api/skill-service';
+import {
+  deleteSkill,
+  SkillNameConflictError,
+  updateSkill
+} from '@/features/agent/api/skill-service';
 import { skillMutationSchema } from '@/features/agent/api/types';
 
 export const runtime = 'nodejs';
@@ -45,16 +49,23 @@ export async function PATCH(request: Request, context: RouteContext) {
     return apiError(400, 'invalid_request', 'Invalid skill');
   }
 
-  const updated = await updateSkill(userId, id, parsed.data);
-  if (!updated) {
-    return apiError(404, 'not_found', 'Skill not found');
+  try {
+    const updated = await updateSkill(userId, id, parsed.data);
+    if (!updated) {
+      return apiError(404, 'not_found', 'Skill not found');
+    }
+    return Response.json({ success: true });
+  } catch (error) {
+    if (error instanceof SkillNameConflictError) {
+      return apiError(409, 'skill_name_conflict', 'Skill name already exists');
+    }
+    throw error;
   }
-  return Response.json({ success: true });
 }
 
 /**
- * DELETE：删除自定义技能（仅 uuid + 归属）。deleteSkill 内同时把引用它的会话
- * activeSkillId 置 null（显式回退通用）。预置 key → 404；越权/不存在 → 404。
+ * DELETE：删除自定义技能（仅 uuid + 归属）。消息里的技能引用保留（历史照常展示），
+ * 后续不可再选择；预置 key → 404；越权/不存在 → 404。
  */
 export async function DELETE(_request: Request, context: RouteContext) {
   const userId = await getUserId();

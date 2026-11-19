@@ -18,12 +18,17 @@ import { LoadingButton } from '@/components/ui/loading-button';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
 import { ACCEPTED_ATTACHMENT_MIMES } from '../../constants/limits';
-import { useSkillList } from '../../hooks/use-skill-list';
+import { useSkillCatalog } from '../../hooks/use-skill-catalog';
 import { imageThumbnailUrl } from '../../lib/asset-url';
 import type { ReferencedAsset } from '../../lib/asset-reference';
-import { MAX_ATTACHMENTS_PER_MESSAGE, type ChatAttachment } from '../../api/types';
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  type ChatAttachment,
+  type SkillCatalogItem,
+  type SkillSelection
+} from '../../api/types';
 import { ModelSelector } from './model-selector';
-import { SkillSelector } from './skill-selector';
+import { SkillPicker } from './skill-picker';
 
 /** 按需加载：不打开选择器就不下载弹窗 chunk（bundle-dynamic-imports） */
 const AssetReferencePicker = dynamic(
@@ -42,9 +47,10 @@ interface ChatComposerProps {
   controlsDisabled: boolean;
   model: string;
   onModelChange: (value: string) => void;
-  /** 会话级技能 id（null = 通用） */
-  skillId: string | null;
-  onSkillChange: (value: string | null) => void;
+  /** 本条消息指定的技能（null = 自动匹配）；发送后由父层清空 */
+  skill: SkillSelection | null;
+  onSelectSkill: (skill: SkillCatalogItem) => void;
+  onClearSkill: () => void;
   /** 已引用的资产（展示为可移除 chip，提交时由 chat-window 注入机器可读块） */
   referencedAssets: ReferencedAsset[];
   onAddReference: (asset: ReferencedAsset) => void;
@@ -59,7 +65,7 @@ interface ChatComposerProps {
   onRemoveAttachment: (assetId: string) => void;
 }
 
-/** 输入区：引用资产 + 图片附件 + 模型选择 + 技能选择 + 文本输入 + 发送/停止 */
+/** 输入区：引用资产 + 本条消息技能 + 图片附件 + 模型选择 + 文本输入 + 发送/停止 */
 export function ChatComposer({
   value,
   onChange,
@@ -71,8 +77,9 @@ export function ChatComposer({
   controlsDisabled,
   model,
   onModelChange,
-  skillId,
-  onSkillChange,
+  skill,
+  onSelectSkill,
+  onClearSkill,
   referencedAssets,
   onAddReference,
   onRemoveReference,
@@ -102,16 +109,16 @@ export function ChatComposer({
   };
 
   // 已选引用但还没输入时，用 placeholder 引导下一步（否则发送禁用会让人以为按钮坏了）；
-  // 无引用但技能激活时，用技能引导语（引用优先：它更贴近即将发送的这条消息）
-  const { getById } = useSkillList();
-  const skill = getById(skillId);
+  // 无引用但技能已指定时，用技能引导语（引用优先：它更贴近即将发送的这条消息）
+  const { getById } = useSkillCatalog();
+  const skillMeta = getById(skill?.id);
   const placeholder =
     referencedAssets.length > 0
       ? `想基于《${referencedAssets[0].title.replace(/\s+/g, ' ').trim()}》${
           referencedAssets.length > 1 ? `等 ${referencedAssets.length} 个资产` : ''
         }做什么？`
       : skill
-        ? (skill.placeholder ?? `描述你的需求，「${skill.name}」将按专家套路与你协作…`)
+        ? (skillMeta?.placeholder ?? `描述你的需求，「${skill.name}」将按专家套路与你协作…`)
         : '描述你的创作需求…（Enter 发送，Shift+Enter 换行）';
 
   return (
@@ -155,6 +162,26 @@ export function ChatComposer({
                   </Attachment>
                 ))}
               </AttachmentGroup>
+            </InputGroupAddon>
+          )}
+          {skill && (
+            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+              <div className='flex w-full min-w-0 items-center gap-1.5 text-xs'>
+                <span className='text-muted-foreground shrink-0'>技能</span>
+                <span className='bg-primary/10 text-primary flex min-w-0 max-w-full items-center gap-1 rounded-md py-1 pr-1 pl-2 text-xs'>
+                  <Icons.sparkles className='size-3.5 shrink-0' />
+                  <span className='truncate font-medium'>{skill.name}</span>
+                  <button
+                    type='button'
+                    onClick={onClearSkill}
+                    aria-label={`清除技能：${skill.name}`}
+                    className='hover:bg-primary/15 focus-visible:ring-ring shrink-0 rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none'
+                  >
+                    <Icons.close className='size-3.5' />
+                  </button>
+                </span>
+                <span className='text-muted-foreground shrink-0'>仅本条消息生效</span>
+              </div>
             </InputGroupAddon>
           )}
           {referencedAssets.length > 0 && (
@@ -216,9 +243,10 @@ export function ChatComposer({
               onChange={onModelChange}
               disabled={isGenerating || controlsDisabled}
             />
-            <SkillSelector
-              value={skillId}
-              onChange={onSkillChange}
+            <SkillPicker
+              value={skill}
+              onSelect={onSelectSkill}
+              onClear={onClearSkill}
               disabled={isGenerating || controlsDisabled}
             />
             <Button
