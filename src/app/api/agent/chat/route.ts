@@ -78,21 +78,28 @@ function readExplicitSkillId(metadata: unknown): string | undefined {
 }
 
 /**
- * 从「续答的 assistant 消息」中收集上一轮 loadSkill 已加载的技能名。
+ * 从「续答的 assistant 消息」中收集上一轮 loadSkill 已加载技能的稳定 id。
  * askUser 续答是新的 HTTP 请求，Agent 的 loadedSkills 会重置；技能正文虽在历史里，
  * 但工具边界需要据此回灌，否则同一回复内「先澄清 → 再执行」会静默放开全量工具。
+ * 优先取 id（自定义技能改名后仍可恢复）；旧历史没有 id 时回退名称。
+ * 技能在续答前被删除 / id 无法解析时，该技能不参与边界计算（降级为全量），
+ * 与显式技能删除时的降级一致。
  */
-function readLoadedSkillNames(message: UIMessage): string[] {
-  const names = new Set<string>();
+function readLoadedSkillIds(message: UIMessage): string[] {
+  const refs = new Set<string>();
   for (const part of message.parts) {
     if (!isToolUIPart(part) || part.type !== 'tool-loadSkill') continue;
     if (part.state !== 'output-available') continue;
-    const output = part.output as { name?: unknown } | undefined;
-    if (typeof output?.name === 'string' && output.name.trim()) {
-      names.add(output.name);
-    }
+    const output = part.output as { id?: unknown; name?: unknown } | undefined;
+    const ref =
+      typeof output?.id === 'string' && output.id.trim()
+        ? output.id
+        : typeof output?.name === 'string' && output.name.trim()
+          ? output.name
+          : undefined;
+    if (ref) refs.add(ref);
   }
-  return [...names];
+  return [...refs];
 }
 
 function cancelledStreamResponse(): Response {
@@ -209,7 +216,7 @@ export async function POST(request: Request) {
     });
   }
   // 续答轮回灌上一轮已加载技能（用户消息没有 loadSkill part，自动为空）
-  const preloadedSkillNames = readLoadedSkillNames(incomingMessage);
+  const preloadedSkillIds = readLoadedSkillIds(incomingMessage);
 
   // usage 累加器：onStepEnd 累加每步 token，onEnd 据此结算扣费（每请求新建，serverless 无跨请求污染）
   const usageSink: UsageSink = { inputTokens: 0, outputTokens: 0 };
@@ -261,7 +268,7 @@ export async function POST(request: Request) {
       modelKey: conversation.model,
       skills: skillEntries,
       forcedSkill,
-      preloadedSkillNames,
+      preloadedSkillIds,
       usageSink,
       reservationId: reservation.id
     });

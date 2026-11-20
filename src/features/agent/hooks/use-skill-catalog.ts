@@ -3,24 +3,16 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { skillsQueryOptions } from '../api/queries';
-import type { SkillCatalogItem } from '../api/types';
-import { SKILL_IDS, SKILL_REGISTRY } from '../constants/skills';
+import { toCatalogItem, type SkillCatalogItem } from '../api/types';
+import { PRESET_SKILLS } from '../constants/skills';
 
 /**
  * 预置技能兜底目录：合并查询返回前先渲染，保证预置技能即时可用、不闪空。
- * 形状与 skill-service 的 presetToCatalog 一致（source='builtin'，无 updatedAt）。
+ * 与 skill-service 共用 toCatalogItem 映射，字段变更时不会各写一份而漂移。
  */
-const BUILTIN_FALLBACK: SkillCatalogItem[] = SKILL_IDS.map((id) => {
-  const entry = SKILL_REGISTRY[id];
-  return {
-    id: entry.id,
-    name: entry.name,
-    description: entry.description,
-    source: 'builtin',
-    placeholder: entry.placeholder ?? null,
-    updatedAt: null
-  };
-});
+const BUILTIN_FALLBACK: SkillCatalogItem[] = PRESET_SKILLS.map((entry) =>
+  toCatalogItem(entry, 'builtin', null)
+);
 
 /**
  * 轻量技能目录（预置 + 用户自定义）：输入区选择器、空态推荐与占位符解析共用。

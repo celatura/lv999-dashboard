@@ -4,8 +4,10 @@
  * 读取完整正文（instructions + 示例），正文作为 tool result 进入消息历史；
  * 用户也可以对「某一条消息」显式指定技能（消息 metadata.skillId），服务端直接注入并限制工具边界。
  *
- * v1 全部在代码中定义（全局预置、非用户私有数据）；后续增删技能只改本文件。
- * id 是稳定 key（预置为字符串 key，自定义为 uuid），改名不影响已持久化的消息引用。
+ * 本文件只定义「预置技能」（全局只读、随代码发布）；用户自建技能在 skills 表，
+ * 二者映射为同一 SkillRegistryEntry，复用目录 / 加载 / 工具边界逻辑。
+ * id 是稳定 key（预置为 slug，自定义为 uuid），也是历史消息 / 续答回灌的解析依据；
+ * 改名不影响已持久化的引用，但 id 一旦发布不可更改（见 docs/agent.md §5.1）。
  *
  * 依赖方向：agent.ts → 本文件（单向）。工具名联合类型定义在此，避免反向 import 循环；
  * 历史消息校验用的 agentValidationTools 恒为全量（不随技能过滤），只有 buildAgent 的 tools 受限。
@@ -54,7 +56,7 @@ export interface SkillExample {
 export interface SkillRegistryEntry {
   /** 稳定 key，存库用 */
   id: string;
-  /** 展示名（如「电商套图设计专家」）；同一用户内唯一（loadSkill 按名称查找） */
+  /** 展示名（如「电商套图设计专家」）；同一用户内唯一（loadSkill 先按 id、再按名称解析） */
   name: string;
   /** 「何时用」一句话，供目录展示、模型路由与搜索 */
   description: string;
@@ -72,7 +74,8 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
   'ecommerce-imagery': {
     id: 'ecommerce-imagery',
     name: '电商套图设计专家',
-    description: '为商品产出整套电商视觉：主图、卖点图、详情页文案与配图',
+    description:
+      '当用户要做商品主图、卖点图、详情页头图或整套电商视觉时使用；不用于纯文字写作、视频生成。',
     instructions: `你现在戴上「电商套图设计专家」的帽子，以资深电商视觉策划的身份与用户持续协作。
 
 专业要求：
@@ -109,7 +112,8 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
   xiaohongshu: {
     id: 'xiaohongshu',
     name: '小红书图文专家',
-    description: '产出小红书风格的爆款笔记：标题、正文、话题标签与竖版封面',
+    description:
+      '当用户要写小红书笔记、标题/话题标签或竖版封面时使用；不用于电商详情页、长文报告。',
     instructions: `你现在戴上「小红书图文专家」的帽子，以资深小红书内容操盘手的身份与用户持续协作。
 
 专业要求：
@@ -147,7 +151,8 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
   'general-creation': {
     id: 'general-creation',
     name: '通用创作专家',
-    description: '通用型内容创作协作：文章、报告、方案、网页的结构化产出',
+    description:
+      '当用户要写长文、报告、方案、白皮书或完整网页时使用；普通问答、短文案、闲聊不要加载。',
     instructions: `你现在戴上「通用创作专家」的帽子，以资深内容主创的身份与用户持续协作。
 
 专业要求：
@@ -173,8 +178,85 @@ export const SKILL_REGISTRY: Record<string, SkillRegistryEntry> = {
 
 export const SKILL_IDS = Object.keys(SKILL_REGISTRY);
 
+/** 预置技能按注册顺序展开（路由目录的实际顺序由 skill-service 决定：自定义优先） */
+export const PRESET_SKILLS: readonly SkillRegistryEntry[] = SKILL_IDS.map(
+  (id) => SKILL_REGISTRY[id]
+);
+
+/** 是否为代码内预置技能 id（预置只读 / 兼容性校验用） */
+export function isPresetSkillId(id: string): boolean {
+  return Object.hasOwn(SKILL_REGISTRY, id);
+}
+
+/**
+ * 名称是否被预置占用：预置名称或预置 id 都不可作为自定义技能名。
+ * loadSkill 先按 id、再按 name 解析；若允许自定义技能叫 'xiaohongshu'，
+ * 模型按目录名称加载时会静默命中预置 id，因此写入时必须拦截。
+ */
+export function isReservedSkillName(name: string): boolean {
+  const normalized = name.trim().toLocaleLowerCase();
+  if (!normalized) return false;
+  return (
+    PRESET_SKILLS.some((entry) => entry.name.trim().toLocaleLowerCase() === normalized) ||
+    isPresetSkillId(normalized)
+  );
+}
+
+/**
+ * 按引用解析技能：先精确匹配 id（稳定 key），再按展示名（trim + 大小写不敏感）。
+ * 调用方传入的数组顺序决定同名时的优先级（路由场景由 skill-service 保证自定义在前）。
+ */
+export function findSkillByRef(
+  skills: readonly SkillRegistryEntry[],
+  ref: string
+): SkillRegistryEntry | undefined {
+  const trimmed = ref.trim();
+  if (!trimmed) return undefined;
+  const byId = skills.find((entry) => entry.id === trimmed);
+  if (byId) return byId;
+  const normalized = trimmed.toLocaleLowerCase();
+  return skills.find((entry) => entry.name.trim().toLocaleLowerCase() === normalized);
+}
+
 /** 常驻 system 的技能目录上限：控制每请求 token；超出部分不在目录中，模型无法自动选择 */
 export const MAX_CATALOG_SKILLS = 16;
+
+/**
+ * 计算加载技能后的有效业务工具集：声明了 tools 的技能取交集，未声明 = 全量、不额外放宽。
+ * 返回 null 表示不限制（没有任何已加载技能声明 tools）；空数组表示只剩系统工具可用。
+ * 空 tools 数组（旧数据）按“无业务工具”处理，不视为全量；schema 已拒绝新写入空数组。
+ * 注意：这是成本/能力提示，不是安全边界；真正的兜底是 Credits 与工具级限流。
+ */
+export function computeActiveTools(
+  loadedSkills: readonly SkillRegistryEntry[]
+): readonly AgentToolName[] | null {
+  // undefined = 未声明（全量）；[] = 显式声明但为空（旧数据 -> 无业务工具）
+  const restricted = loadedSkills.filter((skill) => skill.tools !== undefined);
+  if (restricted.length === 0) return null;
+  let active = new Set<string>(AGENT_TOOL_NAMES);
+  for (const skill of restricted) {
+    const allowed = new Set<string>(skill.tools ?? []);
+    active = new Set([...active].filter((name) => allowed.has(name)));
+  }
+  return AGENT_TOOL_NAMES.filter((name) => active.has(name));
+}
+
+/**
+ * system 内的常驻技能目录：只有名称 + 何时用（轻量），完整正文由 loadSkill 按需拉取。
+ * 目录是稳定前缀，利于 provider 侧上下文缓存；超出上限的技能不在目录中（无法自动选择）。
+ */
+export function renderSkillCatalog(skills: readonly SkillRegistryEntry[]): string {
+  if (skills.length === 0) return '';
+  const catalog = skills
+    .slice(0, MAX_CATALOG_SKILLS)
+    .map((skill) => `- ${skill.name}：${skill.description}`)
+    .join('\n');
+  const overflow =
+    skills.length > MAX_CATALOG_SKILLS
+      ? `\n（另有 ${skills.length - MAX_CATALOG_SKILLS} 个技能未在目录中；目录最多 ${MAX_CATALOG_SKILLS} 个，优先展示你的自定义技能，可在技能管理页查看。）`
+      : '';
+  return `\n\n# 可用技能（按需加载）\n当用户任务明显匹配下面的某个技能时，先调用 loadSkill 加载它的完整工作流，再按该工作流执行；不要凭空假设技能内容。若历史中已加载过同一技能，可直接沿用。\n${catalog}${overflow}\n技能加载后，在本次回复内按该技能的指令与工具边界工作；一次回复尽量只加载一个技能（多个技能的工具边界取交集，可能裁掉必需工具）。`;
+}
 
 /**
  * 技能正文渲染：instructions + few-shot 示范段落（空则仅 instructions）。
@@ -186,5 +268,5 @@ export function renderSkillBody(skill: SkillRegistryEntry): string {
         .map((example) => `用户：${example.input}\n你：${example.output}`)
         .join('\n\n')}`
     : '';
-  return `${skill.instructions}${examples}\n\n（本技能指令优先于基础工作方式；若基础说明提到的工具当前不可用，按本技能工作流执行。）`;
+  return `${skill.instructions}${examples}\n\n（在不违反系统安全与事实底线的范围内，本技能指令优先于基础工作方式；若基础说明提到的工具当前不可用，按本技能工作流执行。）`;
 }

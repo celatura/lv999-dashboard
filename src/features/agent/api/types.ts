@@ -1,7 +1,12 @@
 import type { FileUIPart, UIMessage } from 'ai';
 import { z } from 'zod';
 import { ASPECT_KEYS } from '../constants/image-models';
-import { AGENT_TOOL_NAMES, type AgentToolName, type SkillExample } from '../constants/skills';
+import {
+  AGENT_TOOL_NAMES,
+  type AgentToolName,
+  type SkillExample,
+  type SkillRegistryEntry
+} from '../constants/skills';
 
 export interface Conversation {
   id: string;
@@ -228,6 +233,25 @@ export interface SkillCatalogItem {
 }
 
 /**
+ * SkillRegistryEntry → 轻量目录项：预置与自定义共用，避免目录映射在 service 与客户端兜底里
+ * 各写一份、字段变更时漂移。source / updatedAt 由数据来源提供（预置无更新时间）。
+ */
+export function toCatalogItem(
+  entry: SkillRegistryEntry,
+  source: SkillCatalogItem['source'],
+  updatedAt: string | null
+): SkillCatalogItem {
+  return {
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    source,
+    placeholder: entry.placeholder ?? null,
+    updatedAt
+  };
+}
+
+/**
  * 技能完整内容（管理页编辑 / 复制为草稿用）：在目录项基础上带正文、工具边界与示例。
  * 正文由 Agent 在需要时经 loadSkill 按需读取，不再常驻 system。
  */
@@ -260,7 +284,7 @@ export const skillExampleSchema = z.object({
 /**
  * 创建/更新自定义技能的请求体校验（Route Handler 用）。
  * 约束见 docs/agent.md §5.1：instructions ≤8000 字（控按需加载正文体积）、tools 元素必须 ∈ AGENT_TOOL_NAMES
- * （防非法工具名进入 toolFactories 查找）、examples ≤2 条。tools null/缺省 = 全量。
+ * （防非法工具名进入 toolFactories 查找）且非 null 时至少 1 个、examples ≤2 条。tools null/缺省 = 全量。
  */
 export const skillMutationSchema = z.object({
   name: z
@@ -283,6 +307,7 @@ export const skillMutationSchema = z.object({
   placeholder: z.string().trim().max(100, '输入框引导语不超过 100 字').nullish(),
   tools: z
     .array(z.enum(AGENT_TOOL_NAMES))
+    .min(1, '至少选择一个工具，或全选 = 不限')
     .max(AGENT_TOOL_NAMES.length, `工具最多 ${AGENT_TOOL_NAMES.length} 个`)
     .nullish(),
   examples: z.array(skillExampleSchema).max(2, '示例最多 2 条').default([])

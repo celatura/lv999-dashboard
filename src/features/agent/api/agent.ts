@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { DEFAULT_MODEL, isModelKey } from '../constants/models';
 import {
   AGENT_TOOL_NAMES,
-  MAX_CATALOG_SKILLS,
+  computeActiveTools,
+  findSkillByRef,
   renderSkillBody,
+  renderSkillCatalog,
   type AgentToolName,
   type SkillRegistryEntry
 } from '../constants/skills';
@@ -955,36 +957,17 @@ function loadSkillTool(params: {
     inputSchema: loadSkillInputSchema,
     execute: async ({ name }) => {
       const requested = name.trim();
-      const normalized = requested.toLocaleLowerCase();
-      const skill = params.skills.find(
-        (entry) => entry.name.trim().toLocaleLowerCase() === normalized
-      );
+      const skill = findSkillByRef(params.skills, requested);
       if (!skill) {
         throw new Error(
           `未找到技能「${requested}」：请从 system 的「可用技能」列表中选择准确名称，不要臆造。`
         );
       }
       params.loadedSkills.add(skill);
+      // id 是稳定 key：askUser 续答 / 技能改名后仍能据此恢复工具边界（见 docs/agent.md §5.1）
       return { id: skill.id, name: skill.name, instructions: renderSkillBody(skill) };
     }
   });
-}
-
-/**
- * system 内的常驻技能目录：只有名称 + 何时用（轻量），完整正文由 loadSkill 按需拉取。
- * 目录是稳定前缀，利于 provider 侧上下文缓存；超出上限的技能不在目录中（无法自动选择）。
- */
-function renderSkillCatalog(skills: readonly SkillRegistryEntry[]): string {
-  if (skills.length === 0) return '';
-  const catalog = skills
-    .slice(0, MAX_CATALOG_SKILLS)
-    .map((skill) => `- ${skill.name}：${skill.description}`)
-    .join('\n');
-  const overflow =
-    skills.length > MAX_CATALOG_SKILLS
-      ? `\n（另有 ${skills.length - MAX_CATALOG_SKILLS} 个技能未在目录中，可在技能管理页查看。）`
-      : '';
-  return `\n\n# 可用技能（按需加载）\n当用户任务明显匹配下面的某个技能时，先调用 loadSkill 加载它的完整工作流，再按该工作流执行；不要凭空假设技能内容。若历史中已加载过同一技能，可直接沿用。\n${catalog}${overflow}\n技能加载后，在本次回复内按该技能的指令与工具边界工作。`;
 }
 
 /**
@@ -1008,11 +991,12 @@ export function buildAgent(params: {
   /** 用户对本条消息显式指定的技能；null/缺省 = 自动 */
   forcedSkill?: SkillRegistryEntry | null;
   /**
-   * 上一轮 assistant 已加载的技能名（askUser 续答轮从消息 parts 回灌）：
+   * 上一轮 assistant 已加载技能的稳定 id（askUser 续答轮从消息 parts 回灌）：
    * 续答是新请求，loadSkill 的 tool result 只在历史里，需据此恢复 loadedSkills，
    * 否则工具边界会在续答轮默默失效（同一回复内「先澄清 → 再执行」路径）。
+   * 用 id 而非名称：自定义技能改名后仍能恢复；旧历史没有 id 时回退名称。
    */
-  preloadedSkillNames?: readonly string[];
+  preloadedSkillIds?: readonly string[];
   /** 可变 usage 累加器：onStepEnd 累加每步 usage，供 route 的 onEnd 结算扣费（每请求新建，无跨请求污染） */
   usageSink?: UsageSink;
 }) {
@@ -1022,9 +1006,8 @@ export function buildAgent(params: {
   // 本次请求已加载的技能（loadSkill.execute 写入 / 续答轮从消息 parts 回灌，prepareStep 读取）：
   // Agent 每请求新建，无跨请求污染；用于加载后收窄 activeTools（工具边界只在本次回复内生效）。
   const loadedSkills = new Set<SkillRegistryEntry>();
-  for (const name of params.preloadedSkillNames ?? []) {
-    const normalized = name.trim().toLocaleLowerCase();
-    const skill = skills.find((entry) => entry.name.trim().toLocaleLowerCase() === normalized);
+  for (const ref of params.preloadedSkillIds ?? []) {
+    const skill = findSkillByRef(skills, ref);
     if (skill) loadedSkills.add(skill);
   }
 
@@ -1067,22 +1050,17 @@ export function buildAgent(params: {
     // totalMs 必须 ≥ 视频轮询上限（VIDEO_POLL_TIMEOUT_MS=280s）+ 转存/落库开销，
     // 否则长视频会被 Agent 总超时提前中止；上限仍 < Route Handler maxDuration=300（平台硬杀）。
     timeout: { totalMs: 295_000 },
-    // 加载技能后收窄后续步骤可用工具。activeTools 只对当前 step 生效，故每步根据
-    // loadedSkills 重新计算；任一所载技能未声明 tools（全量）→ 不限制。
+    // 加载技能后收窄后续步骤可用工具（交集语义：每个声明了 tools 的技能都取交集，
+    // 未声明 = 全量、不额外放宽）。activeTools 只对当前 step 生效，故每步重新计算；
+    // 例如「电商（8 工具）+ 通用（未声明）」仍保持视频工具关闭，避免加载通用技能绕过成本护栏。
     // 显式技能已在注册期过滤，无需 prepareStep。
     prepareStep: forcedSkill
       ? undefined
       : () => {
-          if (loadedSkills.size === 0) return undefined;
-          if ([...loadedSkills].some((skill) => !skill.tools)) return undefined;
-          const active = new Set<string>(['loadSkill', 'askUser']);
-          for (const skill of loadedSkills) {
-            for (const name of skill.tools ?? []) {
-              // 防御历史/脏数据里的非法工具名（写入时已校验，这里再兜一道）
-              if (name in toolFactories) active.add(name);
-            }
-          }
-          return { activeTools: [...active] };
+          const active = computeActiveTools([...loadedSkills]);
+          if (!active) return undefined;
+          // 澄清 / 继续加载其他技能始终可用；交集为空时模型可先澄清或换技能
+          return { activeTools: [...active, 'loadSkill', 'askUser'] };
         },
     // 生命周期回调（官方推荐 onStepEnd/onEnd）：记录 step/usage/工具调用，为限额、计费与排障提供数据
     onStepEnd: ({ stepNumber, finishReason, toolCalls, usage }) => {

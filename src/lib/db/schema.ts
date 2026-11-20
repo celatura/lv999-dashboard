@@ -110,7 +110,7 @@ export const skills = pgTable(
     description: text('description').notNull(),
     instructions: text('instructions').notNull(),
     placeholder: text('placeholder'),
-    /** 工具白名单；null = 全量（与预置技能 tools 未声明同语义） */
+    /** 工具白名单；null = 全量；非 null 时至少 1 个（空数组会被 schema 拒绝） */
     tools: jsonb('tools').$type<AgentToolName[] | null>(),
     /** few-shot 示例（0-2 条）；null/空 = 无 */
     examples: jsonb('examples').$type<SkillExample[] | null>(),

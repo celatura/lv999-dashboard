@@ -75,7 +75,9 @@ export function SkillEditDialog({
       setDescription(source.description);
       setInstructions(source.instructions);
       setPlaceholder(source.placeholder ?? '');
-      setTools(source.tools ? [...source.tools] : [...ALL_TOOLS]);
+      // 历史数据可能是 tools: []（旧 schema 允许）；运行时表示“无业务工具”，
+      // 直接回填会让保存被 min(1) 拦住，归一为全选，让用户显式确认后保存。
+      setTools(source.tools?.length ? [...source.tools] : [...ALL_TOOLS]);
       setExamples(source.examples.map((example) => ({ ...example })));
     } else {
       setName('');
@@ -182,10 +184,13 @@ export function SkillEditDialog({
                 id='skill-description'
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder='何时用它，如「按我的语气写公众号推文」'
+                placeholder='做什么 + 何时用，如「当用户要…时使用；不用于…」'
                 maxLength={200}
                 disabled={isPending}
               />
+              <p className='text-muted-foreground text-xs'>
+                这是 Agent 判断是否加载该技能的主要依据：写清适用场景与不适用场景。
+              </p>
             </div>
           </div>
 
@@ -224,6 +229,10 @@ export function SkillEditDialog({
                     <li>
                       <span className='font-semibold'>禁忌</span>
                       ：明确不要做什么（如禁用绝对化用语、不编造数据）。
+                    </li>
+                    <li>
+                      <span className='font-semibold'>篇幅</span>：建议 &lt;500 行 / &lt;5000
+                      tokens；整段会在加载时进入上下文，过长请精简或拆成多个技能。
                     </li>
                   </ul>
                 </TooltipContent>
@@ -277,7 +286,7 @@ export function SkillEditDialog({
             <p className='text-muted-foreground text-xs'>
               限定 Agent
               加载该技能后能调用哪些能力（如纯写作技能可只留「保存作品」「知识库检索」）； 全勾 =
-              不限。仅在技能被加载后生效。
+              不限，至少选 1 个。多个技能同时加载时取交集；这是成本/能力提示，不是安全边界。
             </p>
             <div className='grid gap-2 sm:grid-cols-2'>
               {ALL_TOOLS.map((tool) => (

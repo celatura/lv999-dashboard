@@ -179,6 +179,7 @@ bun run lint:fix        # Auto-fix and format
 bun run lint:strict     # Zero warnings tolerance
 
 bun run typecheck    # tsc --noEmit
+bun run skills:check # Skill contract check (preset ids / fields / tool boundary / catalog)
 
 # Formatting
 bun run format       # Format with Oxfmt

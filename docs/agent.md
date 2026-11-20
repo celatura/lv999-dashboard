@@ -252,18 +252,29 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 技能 = 可被模型发现、**按需加载**的工作流/风格包，不是「会话模式」。system 只常驻轻量目录（名称 + 何时用），模型判断任务匹配后调用 `loadSkill` 读取完整正文；用户也可以对**某一条消息**显式指定技能。技能 = 代码内**预置**（builtin，全局只读）+ 用户**自建**（custom，私有可 CRUD）两类，同构混用、被 Agent 同等对待。
 
-- **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是技能完整正文（专家人设 + 工作流），按需加载；`placeholder` 是选中后输入框引导语；`tools` 是工具边界（`AgentToolName[]`，**未声明 / null = 全量**，加载后本次回复内生效）；`examples` 是 few-shot 示范（`{ input, output }[]`，随正文经 `renderSkillBody` 按需返回，每技能 ≤2 条）。预置与自定义技能**映射为同一结构**，零重复复用目录 / 加载 / 工具边界逻辑。
+- **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是技能完整正文（专家人设 + 工作流），按需加载；`placeholder` 是选中后输入框引导语；`tools` 是工具边界（`AgentToolName[]`，**未声明 / null = 全量；非 null 时至少 1 个，空数组由 schema 拒绝**，加载后本次回复内生效）；`examples` 是 few-shot 示范（`{ input, output }[]`，随正文经 `renderSkillBody` 按需返回，每技能 ≤2 条）。预置与自定义技能**映射为同一结构**，零重复复用目录 / 加载 / 工具边界逻辑。
 - **两条入口**：
-  1. **自动**：`buildAgent` 把轻量目录（名称 + description，最多 `MAX_CATALOG_SKILLS=16` 个）拼进 system；模型调用 `loadSkill({ name })`，正文以 tool result 进入消息历史；`prepareStep` 在加载后按技能 `tools` 收窄后续步骤的 `activeTools`（每步重新计算；任一技能未声明 tools = 不限制）。
-  2. **显式**：用户消息 `metadata: { skillId, skillName }`（`sendMessage` 的 metadata，随消息持久化）。chat 路由从 `listSkillEntriesForUser` 中按 id 解析（归属过滤），直接注入正文并从第一步限制工具；**不注册 `loadSkill`**，避免模型再加载另一个技能绕过用户选定的边界。找不到 → 400 `unknown_skill`。
-- **预置注册表** `SKILL_REGISTRY`（constants/skills.ts）：3 个内置技能 `ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，各声明 8 工具边界（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量）。`id` 为稳定字符串 key、只读（增删改需改代码）。
-- **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量（与预置未声明同语义）。
-- **名称唯一**：`loadSkill` 按 name 查找，`createSkill` / `updateSkill` 校验「预置 + 当前用户自定义」范围内名称唯一（`SkillNameConflictError` → 409 `skill_name_conflict`），避免加载到不可预期的技能。
+  1. **自动**：`buildAgent` 把轻量目录（名称 + description，最多 `MAX_CATALOG_SKILLS=16` 个）拼进 system；目录顺序为**自定义在前、预置兜底**（避免截断时挤掉用户技能）。模型调用 `loadSkill({ name })`，正文与稳定 `id` 以 tool result 进入消息历史；`prepareStep` 在加载后按技能 `tools` **取交集**收窄后续步骤的 `activeTools`（每步重新计算；未声明 tools = 全量，不额外放宽）。
+  2. **显式**：用户消息 `metadata: { skillId, skillName }`（`sendMessage` 的 metadata，随消息持久化）。chat 路由从 `listSkillEntriesForUser` 中按 id 解析（归属过滤），直接注入正文并从第一步限制工具；**不注册 `loadSkill`**，避免模型再加载另一个技能绕过用户选定的边界。找不到 → 400 `unknown_skill`。askUser 续答时从上一轮 `tool-loadSkill` 的 `output.id` 回灌已加载技能（旧历史回退名称），自定义技能改名不影响边界恢复。
+- **预置注册表** `SKILL_REGISTRY`（constants/skills.ts）：3 个示例技能 `ecommerce-imagery`（电商套图设计专家）/ `xiaohongshu`（小红书图文专家）/ `general-creation`（通用创作专家）。电商与小红书为图文场景，各声明 8 工具边界（禁用 `createVideoAsset` / `createVideoFromImageAsset`，防误烧视频成本）；通用不声明 tools（= 全量）。`id` 为稳定 slug、只读；描述统一为「做什么 + 何时用 + 不用于什么」。**预置 id 是 public API**：只增不改，新增预置前跑 `bun run skills:check`（含 DB 重名检查）。
+- **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量（与预置未声明同语义）；非 null 时至少 1 个。
+- **名称唯一**：`loadSkill` 先按 id、再按 name 查找（同名时按传入顺序，自定义在前）；`createSkill` / `updateSkill` 校验「预置 + 当前用户自定义」范围内名称唯一，且名称不得等于预置名称或预置 id（`SkillNameConflictError` → 409 `skill_name_conflict`），避免加载到不可预期的技能。
 - **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量与中文名表 `AGENT_TOOL_LABELS`；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界）。
-- **读取分档**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`listSkillEntriesForUser`（完整条目，服务端目录 / loadSkill / 显式技能校验）、`listSkillCatalogForUser`（轻量目录，客户端选择器 / 空态）、`listSkillDetailsForUser`（完整内容，管理页）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skills: SkillRegistryEntry[]` + `forcedSkill?: SkillRegistryEntry | null`，由 chat 路由一次查询后传入。
-- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（轻量目录 `{ skills }`，选择器/空态用）/ `GET /api/agent/skills?include=body`（完整内容，管理页用）/ `POST`（创建，Zod 校验 + 名称唯一 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除；历史消息里的技能引用保留，界面按名称展示）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000` / `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
+- **读取分档**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`listSkillEntriesForUser`（完整条目，服务端目录 / loadSkill / 显式技能校验）、`listSkillCatalogForUser`（轻量目录，客户端选择器 / 空态）、`listSkillDetailsForUser`（完整内容，管理页）。前两者**自定义在前、预置兜底**，管理页保持预置在前（官方示例区）。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skills: SkillRegistryEntry[]` + `forcedSkill?: SkillRegistryEntry | null` + `preloadedSkillIds?: readonly string[]`，由 chat 路由一次查询后传入。
+- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（轻量目录 `{ skills }`，选择器/空态用）/ `GET /api/agent/skills?include=body`（完整内容，管理页用）/ `POST`（创建，Zod 校验 + 名称唯一 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**；预置 key → 404）/ `DELETE /api/agent/skills/[id]`（删除；历史消息里的技能引用保留，界面按名称展示）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000` / `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES 且非空?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
 - **UI**：输入区 [`skill-picker.tsx`](../src/features/agent/components/chat/skill-picker.tsx)（`SkillPicker`）为「下一条消息」选择技能，选中后输入框出现技能 chip，发送后由 chat-window 清空；不选 = 自动匹配。空态提供技能入口。消息流：用户消息按 metadata 显示技能 chip；assistant 的 `tool-loadSkill` 渲染为「已加载技能：X」。管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（内置只读、可「复制为草稿」+ 自定义可编辑 / 删除）+ 创建 / 编辑对话框（名称 / 描述 / 工作流正文 + 撰写提示 / 引导语 / 工具边界 / 0-2 组示例）。
-- **防御**：显式技能 id 非法 / 越权 / 已删除 → 400 `unknown_skill`（客户端提示重选）；自动加载名称未命中 → 工具报错让模型回到目录重选；`agentValidationTools` 恒为全量（含 `loadSkill`），历史消息仍可被校验。
+- **防御**：显式技能 id 非法 / 越权 / 已删除 → 400 `unknown_skill`（客户端提示重选）；自动加载名称未命中 → 工具报错让模型回到目录重选；`agentValidationTools` 恒为全量（含 `loadSkill`），历史消息仍可被校验；续答回灌用稳定 id，预置 id 快照 + `bun run skills:check` 防止漂移。已加载技能在续答前被删除 / id 无法解析时，该技能不参与边界计算（降级为全量），与显式技能删除时的降级一致。
+- **编写规范与兼容性**（对齐 Agent Skills 开放格式）：
+  - `id` 是稳定 slug，也是历史消息 / 续答回灌的解析依据；只增不改，改名可以。
+  - `name` 是展示名，同一用户内唯一，且不得等于任何预置名称或预置 id（loadSkill 先按 id 解析，否则会静默命中预置）。
+  - `description` 是唯一路由信号：写清「做什么 + 何时用 + 不用于什么」，建议包含触发关键词；预置与自定义均限 200 字。
+  - `instructions` 是加载后整段进入上下文的正文：建议 <500 行 / <5000 tokens（硬上限 8000 字），过长请精简或拆技能。
+  - `examples` ≤2 条，随正文按需返回。
+  - `tools` 是成本/能力提示，不是安全边界；多个技能同时加载取交集，真正的兜底是 Credits + 工具级限流。
+  - 一次回复尽量只加载一个技能；多技能工具边界取交集，可能裁掉必需工具；交集为空时先澄清或换技能。
+  - 目录上限 `MAX_CATALOG_SKILLS=16`，自定义优先、预置兜底；超出部分不参与自动路由（选择器仍可见）。
+  - `bun run skills:check` 校验预置 id 快照、字段长度、工具名、目录渲染、schema；配置 `DATABASE_URL` 时额外检查新增预置与用户技能重名。
+  - 不采用 provider 级 `uploadSkill`：百炼不支持 SkillsV4，且会把执行权交给 provider、绕开 Credits 与工具边界。
 
 ---
 
@@ -435,6 +446,6 @@ bun run db:check
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-stamp.ts`（为已有库补写迁移记录）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`skills-smoke.ts`（技能契约检查：预置 id 快照 / 字段 / 工具边界 / 目录渲染 / 可选 DB 重名）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-stamp.ts`（为已有库补写迁移记录）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。
