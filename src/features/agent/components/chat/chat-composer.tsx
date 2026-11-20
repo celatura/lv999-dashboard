@@ -7,14 +7,25 @@ import {
   AttachmentAction,
   AttachmentActions,
   AttachmentContent,
-  AttachmentDescription,
   AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle
 } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
-import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea
+} from '@/components/ui/input-group';
 import { LoadingButton } from '@/components/ui/loading-button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icons } from '@/components/icons';
 import { getAssetKindMeta } from '../../constants/kinds';
 import { ACCEPTED_ATTACHMENT_MIMES } from '../../constants/limits';
@@ -119,16 +130,25 @@ export function ChatComposer({
         }做什么？`
       : skill
         ? (skillMeta?.placeholder ?? `描述你的需求，「${skill.name}」将按专家套路与你协作…`)
-        : '描述你的创作需求…（Enter 发送，Shift+Enter 换行）';
+        : '描述你的创作需求…';
+
+  // 「+」菜单里图片项的可用性与禁用原因（菜单里没有 title 提示，需内联说明）
+  const atAttachmentLimit = attachments.length + uploadingCount >= MAX_ATTACHMENTS_PER_MESSAGE;
+  const canAddImages = visionSupported && !isGenerating && !controlsDisabled && !atAttachmentLimit;
+  const imageBlockedReason = !visionSupported
+    ? '当前模型不支持图片输入，请切换多模态模型'
+    : atAttachmentLimit
+      ? `图片附件已达上限（${MAX_ATTACHMENTS_PER_MESSAGE} 张）`
+      : null;
 
   return (
     <div className='bg-background shrink-0 pt-2 pb-4'>
       <div className='mx-auto w-full max-w-3xl px-4'>
         {/* has-disabled:* 覆盖：InputGroup 基础样式按「内部有禁用控件」给整组置灰，
             但这里被禁用常驻的是发送/模型等按钮而非输入框，空输入时整组会被误置灰并降透明度 */}
-        <InputGroup className='bg-card dark:bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-card rounded-xl shadow-sm'>
+        <InputGroup className='bg-card dark:bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-card rounded-2xl shadow-sm'>
           {(attachments.length > 0 || uploadingCount > 0) && (
-            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+            <InputGroupAddon align='block-start' className='px-3 pt-2'>
               <AttachmentGroup aria-label='图片附件'>
                 {attachments.map((attachment) => (
                   <Attachment key={attachment.assetId} size='sm' state='done'>
@@ -138,7 +158,6 @@ export function ChatComposer({
                     </AttachmentMedia>
                     <AttachmentContent>
                       <AttachmentTitle>{attachment.filename}</AttachmentTitle>
-                      <AttachmentDescription>图片附件</AttachmentDescription>
                     </AttachmentContent>
                     <AttachmentActions>
                       <AttachmentAction
@@ -157,7 +176,6 @@ export function ChatComposer({
                     </AttachmentMedia>
                     <AttachmentContent>
                       <AttachmentTitle>上传中…</AttachmentTitle>
-                      <AttachmentDescription>图片附件</AttachmentDescription>
                     </AttachmentContent>
                   </Attachment>
                 ))}
@@ -165,10 +183,13 @@ export function ChatComposer({
             </InputGroupAddon>
           )}
           {skill && (
-            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+            <InputGroupAddon align='block-start' className='px-3 pt-2'>
               <div className='flex w-full min-w-0 items-center gap-1.5 text-xs'>
                 <span className='text-muted-foreground shrink-0'>技能</span>
-                <span className='bg-primary/10 text-primary flex min-w-0 max-w-full items-center gap-1 rounded-md py-1 pr-1 pl-2 text-xs'>
+                <span
+                  title='仅本条消息生效，发送后自动清除'
+                  className='bg-primary/10 text-primary flex min-w-0 max-w-full items-center gap-1 rounded-md py-1 pr-1 pl-2 text-xs'
+                >
                   <Icons.sparkles className='size-3.5 shrink-0' />
                   <span className='truncate font-medium'>{skill.name}</span>
                   <button
@@ -180,12 +201,11 @@ export function ChatComposer({
                     <Icons.close className='size-3.5' />
                   </button>
                 </span>
-                <span className='text-muted-foreground shrink-0'>仅本条消息生效</span>
               </div>
             </InputGroupAddon>
           )}
           {referencedAssets.length > 0 && (
-            <InputGroupAddon align='block-start' className='px-2.5 pt-2'>
+            <InputGroupAddon align='block-start' className='px-3 pt-2'>
               <div className='flex w-full flex-col gap-1.5'>
                 <ul className='flex flex-wrap gap-1.5' aria-label='已引用资产'>
                   {referencedAssets.map((asset) => {
@@ -237,7 +257,39 @@ export function ChatComposer({
             rows={2}
             className='max-h-[min(10rem,25dvh)] min-h-[3.25rem] resize-none px-3 py-3'
           />
-          <InputGroupAddon align='block-end' className='flex-wrap px-2.5 pt-0 pb-2.5'>
+          <InputGroupAddon align='block-end' className='flex-wrap gap-1 px-3 pt-0 pb-2'>
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <DropdownMenuTrigger
+                      render={<InputGroupButton size='icon-sm' aria-label='添加引用资产或图片' />}
+                    />
+                  }
+                >
+                  <Icons.add />
+                </TooltipTrigger>
+                <TooltipContent>引用资产或上传图片</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align='start' side='top' className='w-56'>
+                <DropdownMenuItem onClick={openPicker}>
+                  <Icons.paperclip className='text-muted-foreground' />
+                  引用我的资产…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!canAddImages}
+                >
+                  <Icons.media className='text-muted-foreground' />
+                  上传图片
+                </DropdownMenuItem>
+                {imageBlockedReason && (
+                  <p className='text-muted-foreground px-1.5 pt-1 text-xs leading-relaxed'>
+                    {imageBlockedReason}
+                  </p>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <ModelSelector
               value={model}
               onChange={onModelChange}
@@ -249,37 +301,6 @@ export function ChatComposer({
               onClear={onClearSkill}
               disabled={isGenerating || controlsDisabled}
             />
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={openPicker}
-              aria-label='引用资产'
-              title='引用「我的资产」中的作品，让 Agent 基于它继续创作'
-            >
-              <Icons.paperclip />
-              {/* 窄屏只留图标，避免与模型选择器、发送按钮挤在一行 */}
-              <span className='hidden sm:inline'>引用资产</span>
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => fileInputRef.current?.click()}
-              disabled={
-                !visionSupported ||
-                isGenerating ||
-                controlsDisabled ||
-                attachments.length + uploadingCount >= MAX_ATTACHMENTS_PER_MESSAGE
-              }
-              aria-label='添加图片附件'
-              title={
-                visionSupported
-                  ? '添加图片附件（模型可直接看到图片内容）'
-                  : '当前模型不支持图片输入，请切换多模态模型'
-              }
-            >
-              <Icons.media />
-              <span className='hidden sm:inline'>图片</span>
-            </Button>
             <input
               ref={fileInputRef}
               type='file'
@@ -298,24 +319,27 @@ export function ChatComposer({
             {isGenerating ? (
               <LoadingButton
                 variant='outline'
-                size='sm'
-                className='ml-auto'
+                size='icon'
+                className='ml-auto rounded-full'
                 onClick={onStop}
                 disabled={!canStop}
                 loading={isStopping}
                 loadingLabel='正在停止生成'
-                title={canStop ? '停止已发起的生成仍可能产生费用' : '正在建立生成，请稍候'}
+                aria-label='停止生成'
+                title={canStop ? '停止后已发起的生成仍可能产生费用' : '正在建立生成，请稍候'}
               >
-                <Icons.stop /> 停止
+                <Icons.stop />
               </LoadingButton>
             ) : (
               <Button
-                size='sm'
-                className='ml-auto'
+                size='icon'
+                className='ml-auto rounded-full'
                 onClick={onSubmit}
                 disabled={(!value.trim() && attachments.length === 0) || controlsDisabled}
+                aria-label='发送'
+                title='Enter 发送，Shift+Enter 换行'
               >
-                <Icons.send /> 发送
+                <Icons.send />
               </Button>
             )}
           </InputGroupAddon>

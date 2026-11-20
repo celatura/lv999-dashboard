@@ -64,12 +64,11 @@ export function SkillPicker({ value, onSelect, onClear, disabled }: SkillPickerP
         aria-pressed={value !== null}
         title='为下一条消息指定技能；不指定则由 Agent 自动匹配'
         className={cn(
-          'flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium',
-          'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+          'flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium',
+          'hover:bg-muted/50 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+          'aria-expanded:bg-muted',
           'disabled:pointer-events-none disabled:opacity-50',
-          value
-            ? 'border-primary/50 bg-primary/10 text-primary'
-            : 'border-input bg-background text-muted-foreground hover:bg-muted/50'
+          value ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
         )}
       >
         <Icons.sparkles className='size-3.5 shrink-0' />
