@@ -18,7 +18,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**
- * PATCH：更新自定义技能。仅 uuid 可改——预置 key（非 uuid）→ 404（预置只读，不泄漏存在性）；
+ * PATCH：更新技能。仅 uuid 可改——非 uuid 一律 404（与不存在同样处理，不泄漏存在性）；
  * uuid 的归属过滤在 updateSkill 内完成，越权/不存在 → 404。
  */
 export async function PATCH(request: Request, context: RouteContext) {
@@ -64,8 +64,8 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 /**
- * DELETE：删除自定义技能（仅 uuid + 归属）。消息里的技能引用保留（历史照常展示），
- * 后续不可再选择；预置 key → 404；越权/不存在 → 404。
+ * DELETE：删除技能（仅 uuid + 归属）。消息里的技能引用保留（历史照常展示），
+ * 后续不可再选择；非 uuid → 404；越权/不存在 → 404。
  */
 export async function DELETE(_request: Request, context: RouteContext) {
   const userId = await getUserId();

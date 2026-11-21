@@ -10,7 +10,7 @@ export default function SkillsPage() {
   return (
     <PageContainer
       pageTitle='技能'
-      pageDescription='把你的创作套路沉淀为专属专家：人设指令 + 工具范围 + 示例，在对话中与内置技能混用。'
+      pageDescription='把你的创作套路沉淀为专属专家：人设指令 + 工具范围 + 示例，Agent 在需要时按需加载。'
       pageHeaderAction={<CreateSkillButton />}
     >
       <SkillsListing />

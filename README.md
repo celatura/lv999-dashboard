@@ -9,7 +9,7 @@
 ## 功能特性
 
 - **AI Agent 创作**：自然语言对话驱动的创作工作台，产出 Markdown / HTML 文本、文生图 / 图生图、文生视频 / 图生视频与一句话整版设计；可恢复流式输出，刷新自动重连、支持跨实例停止；消息操作栏一键**复制回复（Markdown 源码）/ 重新生成最后一条**。详见 [docs/agent.md](./docs/agent.md)
-- **技能系统（按需加载的专家工作流）**：system 只常驻轻量技能目录，Agent 按任务自动 `loadSkill` 加载完整工作流；也可在输入区为**单条消息**指定技能。技能可声明工具边界（图文技能禁用视频工具，多技能叠加取交集）；内置 3 个**示例技能**（只读，可复制为草稿）+ 用户自建技能（`/dashboard/skills` 管理）
+- **技能系统（按需加载的专家工作流）**：system 只常驻轻量技能目录，Agent 按任务自动 `loadSkill` 加载完整工作流；也可在输入区为**单条消息**指定技能。技能可声明工具边界（图文技能禁用视频工具，多技能叠加取交集）；技能由你在 `/dashboard/skills` 自建（可从模板一键新建），模板只做表单预填、不进入运行时目录
 - **对话内资产引用**：从「我的资产」挑选资产随消息提交，让模型确定性拿到 assetId、无需再检索
 - **AI 原生设计画布**：Konva 画布摆放文字 / 图形 / 图片，画布内直接 AI 生图 / 改图、对话内一句话生成整版设计，支持多选 / 复制粘贴 / 吸附对齐，导出 PNG 并沉淀为可再编辑资产。详见 [docs/design-editor.md](./docs/design-editor.md)
 - **RAG 知识库**：文本与上传文件（PDF / Office / Markdown）切分向量化存入 pgvector，Agent 按语义检索作答并标注来源；页面可预览切分片段、做检索测试。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)
@@ -53,7 +53,7 @@
 | `/dashboard/overview` | 总览：统计卡片 + 图表（并行路由独立加载） |
 | `/dashboard/agent` | Agent 创作：新建会话与对话创作入口 |
 | `/dashboard/agent/[conversationId]` | Agent 会话：可恢复流式对话、工具调用与对话内资产卡片 |
-| `/dashboard/skills` | 技能管理：内置技能（只读）+ 用户自建专属技能的 CRUD |
+| `/dashboard/skills` | 技能管理：专属技能的 CRUD（可从模板一键新建） |
 | `/dashboard/assets` | 我的资产：资产表格（筛选 / 搜索 / 预览 / 下载 / 删除） |
 | `/dashboard/design` | 设计画布：新建空白画布 |
 | `/dashboard/design/[id]` | 设计画布：打开已存设计继续编辑 |
@@ -113,7 +113,7 @@ bun run dev
 | `bun run db:check` | 校验迁移链快照（手动排查用，仅能发现快照损坏 / 冲突） |
 | `bun run db:stamp` | 为已有库补写已应用记录（默认 dry-run，`--apply` 写入） |
 | `bun run typecheck` | TypeScript 类型检查 |
-| `bun run skills:check` | 技能契约检查（预置 id 快照 / 字段 / 工具边界 / 目录渲染） |
+| `bun run skills:check` | 技能契约检查（引用解析 / 目录渲染上限 / 工具边界 / schema / 模板可一键新建） |
 | `bun run lint` | Oxlint 检查 + 弃用 API 守卫 |
 | `bun run lint:strict` | Oxlint 零警告 |
 | `bun run lint:deprecated` | 类型感知检查 `@deprecated` API 使用 |
@@ -129,7 +129,7 @@ src/
 │   ├── dashboard/          # 后台路由
 │   │   ├── overview/       # 总览（并行路由：@area_stats、@bar_stats、@pie_stats、@sales）
 │   │   ├── agent/          # Agent 创作（会话列表 + [conversationId] 会话页）
-│   │   ├── skills/         # 技能管理（内置只读 + 用户自建专属技能 CRUD）
+│   │   ├── skills/         # 技能管理（专属技能 CRUD，可从模板一键新建）
 │   │   ├── assets/         # 我的资产（资产表格）
 │   │   ├── design/         # 设计画布（新建 + [id] 编辑页）
 │   │   ├── knowledge/      # RAG 知识库（文档管理）

@@ -64,7 +64,7 @@ export const assetQueryOptions = (id: string) =>
     queryFn: () => apiClient<AssetDetail>(`/agent/assets/${id}`)
   });
 
-/** 轻量技能目录（预置 + 自定义）：输入区选择器/空态用，不含正文；写操作后按 skillsRoot 失效 */
+/** 轻量技能目录：输入区选择器/空态用，不含正文；写操作后按 skillsRoot 失效 */
 export const skillsQueryOptions = () =>
   queryOptions({
     queryKey: agentKeys.skills(),
@@ -72,7 +72,7 @@ export const skillsQueryOptions = () =>
     staleTime: 60_000
   });
 
-/** 技能完整内容（管理页编辑/复制用）；与目录分开缓存，避免聊天页下载全部技能正文 */
+/** 技能完整内容（管理页编辑用）；与目录分开缓存，避免聊天页下载全部技能正文 */
 export const skillDetailsQueryOptions = () =>
   queryOptions({
     queryKey: agentKeys.skillDetails(),

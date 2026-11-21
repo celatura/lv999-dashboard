@@ -17,7 +17,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 /**
  * GET：默认返回轻量技能目录（不含正文），供输入区选择器/空态使用；
- * `?include=body` 返回完整内容，仅供技能管理页（编辑/复制为草稿）。
+ * `?include=body` 返回完整内容，仅供技能管理页（编辑）。
  */
 export async function GET(request: Request) {
   const userId = await getUserId();

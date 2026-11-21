@@ -200,7 +200,7 @@ export async function POST(request: Request) {
 
   // 本条消息显式指定的技能（用户消息 metadata.skillId，随消息持久化；
   // assistant 续答轮由上一轮流的下发 metadata 恢复，见 messageMetadata）。
-  // 归属即权限：只能命中当前用户的预置/自定义技能；用户消息命中失败 → 400，
+  // 归属即权限：只能命中当前用户自己的技能；用户消息命中失败 → 400，
   // 续答轮技能已被删除时降级自动模式（不阻断已回答一半的提问）。
   const explicitSkillId = readExplicitSkillId(incomingMessage.metadata);
   const forcedSkill = explicitSkillId

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Icons } from '@/components/icons';
@@ -23,13 +22,12 @@ interface SkillPickerProps {
  *
  * 与旧的会话级 pill 的区别：选择只作用于下一条消息（发送后由 chat-window 清空），
  * 不写会话设置、不需要 settings 握手；不选时由 Agent 按目录描述自动 loadSkill。
- * 数据源为轻量目录（useSkillCatalog，不含正文），自定义技能带「自定义」标识，
- * 底部提供「管理技能…」入口跳转技能管理页。
+ * 数据源为轻量目录（useSkillCatalog，不含正文）；底部提供「管理技能…」入口跳转技能管理页。
  */
 export function SkillPicker({ value, onSelect, onClear, disabled }: SkillPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const { skills } = useSkillCatalog();
+  const { skills, isLoading, isError } = useSkillCatalog();
 
   // 每次打开重置搜索草稿
   useEffect(() => {
@@ -55,6 +53,15 @@ export function SkillPicker({ value, onSelect, onClear, disabled }: SkillPickerP
     onClear();
     setOpen(false);
   };
+
+  // 空态文案三态分开：请求失败不能伪装成「还没有技能」，否则会误导用户去新建
+  const emptyHint = isError
+    ? '技能目录加载失败，请稍后重试。'
+    : skills.length === 0
+      ? isLoading
+        ? '技能加载中…'
+        : '还没有技能。到「管理技能」新建，或从模板快速开始。'
+      : '没有匹配的技能，换个关键词试试。';
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -121,14 +128,7 @@ export function SkillPicker({ value, onSelect, onClear, disabled }: SkillPickerP
                 )}
               >
                 <span className='min-w-0'>
-                  <span className='flex items-center gap-1.5'>
-                    <span className='truncate font-medium'>{entry.name}</span>
-                    {entry.source === 'custom' && (
-                      <Badge variant='secondary' className='h-4 shrink-0 px-1.5 text-[10px]'>
-                        自定义
-                      </Badge>
-                    )}
-                  </span>
+                  <span className='block truncate font-medium'>{entry.name}</span>
                   <span className='text-muted-foreground mt-0.5 block'>{entry.description}</span>
                 </span>
                 {active && <Icons.check className='size-3.5 shrink-0' />}
@@ -136,8 +136,8 @@ export function SkillPicker({ value, onSelect, onClear, disabled }: SkillPickerP
             );
           })}
           {filtered.length === 0 && (
-            <div className='text-muted-foreground py-6 text-center text-xs'>
-              没有匹配的技能，换个关键词试试。
+            <div className='text-muted-foreground px-2 py-6 text-center text-xs leading-relaxed'>
+              {emptyHint}
             </div>
           )}
         </div>

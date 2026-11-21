@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { useMutation, useSuspenseQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertModal } from '@/components/modal/alert-modal';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -28,44 +27,37 @@ import { deleteSkillMutation } from '../../api/mutations';
 import { skillDetailsQueryOptions } from '../../api/queries';
 import type { SkillListItem } from '../../api/types';
 
-/** 编辑/复制对话框按需加载：未打开就不下载该 chunk（bundle-dynamic-imports） */
+/** 编辑对话框按需加载：未打开就不下载该 chunk（bundle-dynamic-imports） */
 const SkillEditDialog = dynamic(
   () => import('./skill-edit-dialog').then((module) => module.SkillEditDialog),
   { ssr: false }
 );
 
-/** 对话框状态：编辑现有自定义技能 / 以预置技能为模板新建 */
-type DialogState =
-  | { mode: 'edit'; skill: SkillListItem }
-  | { mode: 'create'; preset: SkillListItem }
-  | null;
-
 /**
- * 技能管理列表：预置（内置 badge，只读，可「复制为草稿」）+ 用户自定义（可编辑/删除）。
+ * 技能管理列表：所有行都是用户自建技能（可编辑 / 删除）。
  * 数据源为完整内容列表（skillDetailsQueryOptions，服务端已预取）；写操作按域失效自动刷新。
  */
 export function SkillsTable() {
   const { data } = useSuspenseQuery(skillDetailsQueryOptions());
-  const [dialog, setDialog] = useState<DialogState>(null);
+  const [editTarget, setEditTarget] = useState<SkillListItem | null>(null);
   const [dialogMounted, setDialogMounted] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SkillListItem | null>(null);
   const deleteMutation = useMutation(deleteSkillMutation);
 
-  const openDialog = (state: Exclude<DialogState, null>) => {
+  const openEdit = (skill: SkillListItem) => {
     setDialogMounted(true);
-    setDialog(state);
+    setEditTarget(skill);
   };
 
   return (
     <>
       {dialogMounted && (
         <SkillEditDialog
-          open={dialog !== null}
+          open={editTarget !== null}
           onOpenChange={(open) => {
-            if (!open) setDialog(null);
+            if (!open) setEditTarget(null);
           }}
-          editSkill={dialog?.mode === 'edit' ? dialog.skill : null}
-          presetDraft={dialog?.mode === 'create' ? dialog.preset : null}
+          editSkill={editTarget}
         />
       )}
       <AlertModal
@@ -93,7 +85,6 @@ export function SkillsTable() {
             <TableRow>
               <TableHead>名称</TableHead>
               <TableHead>描述</TableHead>
-              <TableHead>来源</TableHead>
               <TableHead>工具</TableHead>
               <TableHead>更新时间</TableHead>
               <TableHead className='w-12 text-right'>操作</TableHead>
@@ -105,13 +96,6 @@ export function SkillsTable() {
                 <TableCell className='font-medium whitespace-normal'>{skill.name}</TableCell>
                 <TableCell className='text-muted-foreground whitespace-normal'>
                   {skill.description}
-                </TableCell>
-                <TableCell>
-                  {skill.source === 'builtin' ? (
-                    <Badge variant='outline'>内置</Badge>
-                  ) : (
-                    <Badge variant='secondary'>自定义</Badge>
-                  )}
                 </TableCell>
                 <TableCell className='text-muted-foreground'>
                   {skill.tools === null ? '不限' : `${skill.tools.length} 个`}
@@ -128,27 +112,24 @@ export function SkillsTable() {
                       <Icons.ellipsis className='h-4 w-4' />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>
-                      {skill.source === 'custom' ? (
-                        <>
-                          <DropdownMenuItem onClick={() => openDialog({ mode: 'edit', skill })}>
-                            <Icons.edit className='mr-2 h-4 w-4' /> 编辑
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setDeleteTarget(skill)}>
-                            <Icons.trash className='mr-2 h-4 w-4' /> 删除
-                          </DropdownMenuItem>
-                        </>
-                      ) : (
-                        <DropdownMenuItem
-                          onClick={() => openDialog({ mode: 'create', preset: skill })}
-                        >
-                          <Icons.copy className='mr-2 h-4 w-4' /> 复制为草稿
-                        </DropdownMenuItem>
-                      )}
+                      <DropdownMenuItem onClick={() => openEdit(skill)}>
+                        <Icons.edit className='mr-2 h-4 w-4' /> 编辑
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setDeleteTarget(skill)}>
+                        <Icons.trash className='mr-2 h-4 w-4' /> 删除
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
               </TableRow>
             ))}
+            {data.skills.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className='text-muted-foreground h-24 text-center text-sm'>
+                  还没有技能。点右上角「从模板新建」快速开始，或「新建技能」从空白写起。
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>

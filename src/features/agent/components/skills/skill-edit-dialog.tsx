@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { createSkillMutation, updateSkillMutation } from '../../api/mutations';
 import { skillMutationSchema, type SkillListItem } from '../../api/types';
 import { AGENT_TOOL_LABELS, AGENT_TOOL_NAMES, type AgentToolName } from '../../constants/skills';
+import type { SkillTemplate } from '../../constants/skill-templates';
 
 const MAX_INSTRUCTIONS = 8000;
 const MAX_EXAMPLES = 2;
@@ -35,10 +36,10 @@ interface ExampleDraft {
 interface SkillEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 编辑目标（自定义技能）；传入即编辑模式（回填全部字段） */
+  /** 编辑目标；传入即编辑模式（回填全部字段） */
   editSkill?: SkillListItem | null;
-  /** 新建模式的预填来源（从预置技能「复制为草稿」）；编辑模式忽略 */
-  presetDraft?: SkillListItem | null;
+  /** 新建模式的预填来源（「从模板新建」）；编辑模式忽略 */
+  templateDraft?: SkillTemplate | null;
 }
 
 /**
@@ -51,10 +52,10 @@ export function SkillEditDialog({
   open,
   onOpenChange,
   editSkill,
-  presetDraft
+  templateDraft
 }: SkillEditDialogProps) {
   const isEdit = Boolean(editSkill);
-  const source = editSkill ?? presetDraft ?? null;
+  const source = editSkill ?? templateDraft ?? null;
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -67,18 +68,18 @@ export function SkillEditDialog({
   const updateMutation = useMutation(updateSkillMutation);
   const isPending = createMutation.isPending || updateMutation.isPending;
 
-  // 每次打开按来源初始化：编辑 = 回填；复制 = 预填并加「副本」；新建 = 空白 + 全量工具
+  // 每次打开按来源初始化：编辑 = 回填；模板 = 预填（名称照搬，可在提交前改）；新建 = 空白 + 全量工具
   useEffect(() => {
     if (!open) return;
     if (source) {
-      setName(isEdit ? source.name : `${source.name} 副本`);
+      setName(source.name);
       setDescription(source.description);
       setInstructions(source.instructions);
       setPlaceholder(source.placeholder ?? '');
       // 历史数据可能是 tools: []（旧 schema 允许）；运行时表示“无业务工具”，
       // 直接回填会让保存被 min(1) 拦住，归一为全选，让用户显式确认后保存。
       setTools(source.tools?.length ? [...source.tools] : [...ALL_TOOLS]);
-      setExamples(source.examples.map((example) => ({ ...example })));
+      setExamples((source.examples ?? []).map((example) => ({ ...example })));
     } else {
       setName('');
       setDescription('');
@@ -113,7 +114,7 @@ export function SkillEditDialog({
 
   const handleSubmit = async () => {
     if (isPending) return;
-    // 全勾 → null（全量，与预置未声明 tools 同语义）；空/半填示例组由下方校验拦截或丢弃
+    // 全勾 → null（全量，与技能未声明 tools 同语义）；空/半填示例组由下方校验拦截或丢弃
     const cleanedExamples = examples
       .map((example) => ({ input: example.input.trim(), output: example.output.trim() }))
       .filter((example) => example.input || example.output);

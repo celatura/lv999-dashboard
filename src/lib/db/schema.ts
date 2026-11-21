@@ -24,7 +24,7 @@ import type { AgentToolName, SkillExample } from '../../features/agent/constants
  *   文本内容存 content 列，二进制走 OSS 只存 storage_key；
  *   会话删除时 conversationId 置空（SET NULL）、资产保留；
  *   图片编辑（I2I）产出的新资产通过 sourceAssetId 指向源资产（源删除时置空）
- * - skills: 用户自定义技能（按需加载的专家工作流包，用户私有）；与代码内预置技能同构
+ * - skills: 用户技能（按需加载的专家工作流包，用户私有；代码内示例仅作「从模板新建」的表单预填）
  *
  * RAG 知识库（语义检索增强）
  * - knowledge_documents: 知识库文档（手动粘贴 source='manual' / 从文本资产导入 source='asset'）；
@@ -96,10 +96,10 @@ export const assets = pgTable(
 );
 
 /**
- * 用户自定义技能（按需加载的专家工作流包）：与代码内预置技能（SkillRegistryEntry）同构，
- * 用户私有（按 userId 隔离）。消息通过 metadata.skillId 显式指定技能，或由模型 loadSkill 按需加载；
- * 解析映射为 SkillRegistryEntry 后复用 buildAgent 的目录/加载/工具边界（零重复实现）。
- * tools 为 null = 全量（与预置技能未声明 tools 同语义）；examples null/空 = 无示例。
+ * 用户技能（按需加载的专家工作流包）：与运行时 SkillRegistryEntry 同构，用户私有（按 userId 隔离）。
+ * 消息通过 metadata.skillId 显式指定技能，或由模型 loadSkill 按需加载；
+ * 映射为 SkillRegistryEntry 后复用 buildAgent 的目录/加载/工具边界（零重复实现）。
+ * tools 为 null = 全量（未声明同语义）；examples null/空 = 无示例。
  */
 export const skills = pgTable(
   'skills',

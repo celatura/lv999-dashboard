@@ -54,7 +54,7 @@ export const MAX_CHAT_STEPS = 6;
 const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，帮助用户产出高质量的内容作品。
 
 工作方式：
-1. 先用 1-3 句话说明你的创作计划，然后开始执行。图片类生成工具（createImageAsset / editImageAsset / composeDesign）返回失败后不要自动重试，如实告知用户，由用户决定是否再试。
+1. 先用 1-3 句话说明你的创作计划，然后开始执行。长文 / 报告 / 方案类（多章节或预计超过 2000 字）例外：先只输出 3-5 行结构大纲与篇幅预估并结束本轮，等用户确认后再成稿；用户明确要求直接写时跳过。需要澄清参数时与大纲放在同一轮（见第 13 条），不要连续两轮确认。图片类生成工具（createImageAsset / editImageAsset / composeDesign）返回失败后不要自动重试，如实告知用户，由用户决定是否再试。
 2. 当产出的内容构成完整作品（文案、文章、报告、网页等）时，必须调用 createAsset 工具把作品保存为资产：
    - Markdown 文章/文案 → kind 用 "markdown"
    - 完整 HTML 网页 → kind 用 "html"（必须是可直接打开运行的完整文档，样式与脚本内联，不依赖本地文件）
@@ -972,7 +972,7 @@ function loadSkillTool(params: {
 
 /**
  * 每请求构建一个 Agent（serverless 无状态，上下文经闭包注入工具）。
- * skills：本用户可用技能（预置 + 自定义，由 chat 路由一次查询后传入），用于：
+ * skills：本用户可用技能（由 chat 路由一次查询后传入），用于：
  * 1) system 常驻轻量目录（名称 + 何时用）；
  * 2) loadSkill 工具按需返回完整正文；
  * 3) 用户对本条消息显式指定技能时（forcedSkill）直接注入正文并从第一步限制工具。
@@ -986,7 +986,7 @@ export function buildAgent(params: {
   conversationId: string;
   modelKey: string;
   reservationId: string;
-  /** 本用户可用技能（预置 + 自定义，已解析）；缺省 = 无技能目录 */
+  /** 本用户可用技能（已解析）；缺省 = 无技能目录 */
   skills?: readonly SkillRegistryEntry[];
   /** 用户对本条消息显式指定的技能；null/缺省 = 自动 */
   forcedSkill?: SkillRegistryEntry | null;

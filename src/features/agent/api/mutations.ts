@@ -126,7 +126,7 @@ export const createSkillMutation = mutationOptions({
   onSettled: invalidateSkills
 });
 
-/** 更新自定义技能（仅 uuid + 归属；预置只读） */
+/** 更新技能（仅 uuid + 归属） */
 export const updateSkillMutation = mutationOptions({
   mutationFn: ({ id, values }: { id: string; values: SkillMutationPayload }) =>
     apiClient<{ success: boolean }>(`/agent/skills/${id}`, {

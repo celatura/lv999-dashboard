@@ -224,35 +224,30 @@ export interface SkillCatalogItem {
   id: string;
   name: string;
   description: string;
-  /** builtin = 代码内预置（只读）；custom = 用户自定义（可编辑/删除） */
-  source: 'builtin' | 'custom';
   /** 选中后输入框引导语（可选，UI 用） */
   placeholder: string | null;
-  /** 自定义技能的更新时间；预置为 null（无 DB 行） */
+  /** 技能更新时间（管理页展示用） */
   updatedAt: string | null;
 }
 
 /**
- * SkillRegistryEntry → 轻量目录项：预置与自定义共用，避免目录映射在 service 与客户端兜底里
- * 各写一份、字段变更时漂移。source / updatedAt 由数据来源提供（预置无更新时间）。
+ * SkillRegistryEntry → 轻量目录项：service 与管理页共用，避免字段映射各写一份而漂移。
  */
 export function toCatalogItem(
   entry: SkillRegistryEntry,
-  source: SkillCatalogItem['source'],
   updatedAt: string | null
 ): SkillCatalogItem {
   return {
     id: entry.id,
     name: entry.name,
     description: entry.description,
-    source,
     placeholder: entry.placeholder ?? null,
     updatedAt
   };
 }
 
 /**
- * 技能完整内容（管理页编辑 / 复制为草稿用）：在目录项基础上带正文、工具边界与示例。
+ * 技能完整内容（管理页编辑用）：在目录项基础上带正文、工具边界与示例。
  * 正文由 Agent 在需要时经 loadSkill 按需读取，不再常驻 system。
  */
 export interface SkillDetail extends SkillCatalogItem {
@@ -282,7 +277,7 @@ export const skillExampleSchema = z.object({
 });
 
 /**
- * 创建/更新自定义技能的请求体校验（Route Handler 用）。
+ * 创建/更新技能的请求体校验（Route Handler 用）。
  * 约束见 docs/agent.md §5.1：instructions ≤8000 字（控按需加载正文体积）、tools 元素必须 ∈ AGENT_TOOL_NAMES
  * （防非法工具名进入 toolFactories 查找）且非 null 时至少 1 个、examples ≤2 条。tools null/缺省 = 全量。
  */
