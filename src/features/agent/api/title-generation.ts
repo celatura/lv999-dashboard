@@ -1,3 +1,4 @@
+import type { AlibabaLanguageModelChatOptions } from '@ai-sdk/alibaba';
 import { generateText } from 'ai';
 import { buildConversationTitle, DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
 import { DEFAULT_MODEL } from '../constants/models';
@@ -30,8 +31,11 @@ export async function generateConversationTitle(
       instructions: TITLE_INSTRUCTIONS,
       prompt,
       maxOutputTokens: TITLE_MAX_OUTPUT_TOKENS,
-      // 标题调用关闭思考：默认思考会把小额输出预算耗尽（reasoningTokens 占满、text 为空）
-      providerOptions: { alibaba: { enableThinking: false } },
+      // 标题调用关闭思考：默认思考会把小额输出预算耗尽（reasoningTokens 占满、text 为空）。
+      // satisfies 让选项名/类型对齐 provider schema：拼错在编译期报错，而不是被静默剥离。
+      providerOptions: {
+        alibaba: { enableThinking: false } satisfies AlibabaLanguageModelChatOptions
+      },
       abortSignal: AbortSignal.timeout(TITLE_TIMEOUT_MS)
     });
     if (usageSink) {
