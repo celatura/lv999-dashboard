@@ -1,6 +1,6 @@
 /* oxlint-disable no-console */
 /**
- * 图片生成通道冒烟脚本（Phase 2）：
+ * 图片生成通道冒烟脚本：
  * 对注册表中的图片模型各生成一张测试图，并完成「调用百炼 → 下载临时图 → 转存 OSS → 签名回读」全链路验证。
  *
  * 运行：bun scripts/image-smoke.ts

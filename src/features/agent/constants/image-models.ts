@@ -1,17 +1,16 @@
 /**
- * 图片模型注册表（Phase 2）—— 与 constants/models.ts（对话模型）隔离，不污染对话模型注册表。
+ * 图片模型注册表 —— 与 constants/models.ts（对话模型）隔离，不污染对话模型注册表。
  *
  * 图片生成直连百炼 REST（不经 AI SDK provider：@ai-sdk/alibaba 无图像模型），
  * 端点与参数结构以官方文档为准，并经 scripts/image-smoke.ts 于经典域名
  * （dashscope.aliyuncs.com）实测通过；官方新式端点为工作空间子域名
  * （{WorkspaceId}.cn-beijing.maas.aliyuncs.com），经典域名仍可正常使用。
  *
- * 2026-09-19 模型审计：升级为 3.0 系列（官方当前推荐），移除旧代条目
- * （qwen-image 首代 / qwen-image-2.0-pro / wan2.6-t2i）。实测（北京地域，经典域名）：
+ * 模型：3.0 系列（官方当前推荐）；旧代（qwen-image 首代 / qwen-image-2.0-pro / wan2.6-t2i）已移除。实测（北京地域，经典域名）：
  * - qwen-image-3.0：~25s、0.18 元/张（默认输出 2K 档，如 1792×2400）
  * - qwen-image-3.0-pro：~35s、0.5 元/张（旗舰，复杂版面/密集小字更强）
  *
- * 2026-09-20（Batch B 图生图迭代）：3.0 系列原生支持 I2I（图生图/图像编辑），与文生图共用同端点，
+ * 3.0 系列原生支持 I2I（图生图/图像编辑），与文生图共用同端点，
  * content = [{ image: <公网URL> }, { text: <指令> }]；实测（OSS 签名 URL 源图）：风格编辑 41.5s、
  * 改比例 size=1024*1024 13.3s。计费 = 编辑输入 0.02 元/张 + 输出同文生图价（≈0.20 元/次），
  * 无需引入 edit-plus / edit-max 系列（见方案对比）；I2I 输入上限 10MB。

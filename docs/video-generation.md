@@ -136,7 +136,7 @@ result = await generateVideo({
 
 ## 10. 手动验收清单
 
-- **P0 冒烟**（[`scripts/video-smoke.ts`](../scripts/video-smoke.ts)）：`bun scripts/video-smoke.ts` → wan3.0-video 生成 5s/720P/16:9 → 下载 → 转存 OSS → 签名 URL 播放（Range 返回 200/206 + `video/*`）→ OSS 视频截帧封面（200 + `image/*`）全链路通过；首要验证国内端点 `videoBaseURL`。
+- **冒烟验证**（[`scripts/video-smoke.ts`](../scripts/video-smoke.ts)）：`bun scripts/video-smoke.ts` → wan3.0-video 生成 5s/720P/16:9 → 下载 → 转存 OSS → 签名 URL 播放（Range 返回 200/206 + `video/*`）→ OSS 视频截帧封面（200 + `image/*`）全链路通过；首要验证国内端点 `videoBaseURL`。
 - **T2V**：对话「生成一段小猫奔跑的 5 秒视频」→ Agent 调 `createVideoAsset` → 1-5 分钟内对话出现可播放视频卡片（poster 封面 + 可拖动进度 + 有声）。
 - **I2V**：引用一张图片资产 →「把这张图做成动态视频」→ 产出视频资产，`sourceAssetId` 指向源图，预览弹窗显示「基于《源图标题》修改」。
 - **停止**：生成中点击停止 → `abortSignal` 透传 → 轮询与下载立即取消，卡片显示「已停止」，不产生残留资产。

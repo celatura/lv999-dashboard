@@ -1,6 +1,6 @@
 /* oxlint-disable no-console */
 /**
- * 知识库文件上传解析冒烟（P0 决定性闸门之一）：验证 @firecrawl/anydoc 原生二进制
+ * 知识库文件上传解析冒烟：验证 @firecrawl/anydoc 原生二进制
  * 在本地 nodejs 能加载，且 extractTextFromFile 对各格式样例提取到非空 Markdown/文本。
  *
  * 运行：bun run scripts/knowledge-file-smoke.ts（无需数据库与 API key，纯本地解析）

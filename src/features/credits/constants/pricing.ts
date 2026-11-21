@@ -6,7 +6,7 @@
  * 注意：视频档位按上游 API 成本定价（零毛利），未覆盖 OSS/DB/函数与失败吸收，
  * 「不亏损」仅指上游 API 调用本身（见 docs/credits.md）。
  *
- * P0 开工前置：以百炼控制台账单校准（尤其视频按分辨率×秒）。
+ * 以百炼控制台账单校准（尤其视频按分辨率×秒）。
  */
 
 import type { VideoResolutionTier } from '@/features/agent/constants/video-models';

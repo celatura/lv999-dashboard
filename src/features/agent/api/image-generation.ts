@@ -10,8 +10,8 @@ import { detectModelUnavailable } from './model-availability';
 /**
  * 图片生成通道（server-only）：直连百炼 REST API，不引入任何新依赖（fetch + Buffer 已足够）。
  *
- * 不使用 AI SDK provider——@ai-sdk/alibaba 无图像模型（Phase 3 视频可复用其 video 模型）。
- * 端点为经典域名 dashscope.aliyuncs.com（M0 实测可用；官方新式工作空间子域名亦可，暂不迁移）。
+ * 不使用 AI SDK provider——@ai-sdk/alibaba 无图像模型（视频通道另用其 videoModel()）。
+ * 端点为经典域名 dashscope.aliyuncs.com（实测可用；官方新式工作空间子域名亦可，暂不迁移）。
  *
  * 本模块内完成「调用 → 拿临时 URL → 立即下载」，临时 URL（24h 有效）不外泄（红线：
  * 任何持久化字段不得存临时 URL，必须转存 OSS）。
@@ -19,7 +19,7 @@ import { detectModelUnavailable } from './model-availability';
 
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com';
 
-/** 异步任务轮询间隔与总时长上限（决策 4：间隔 3s、上限 120s） */
+/** 异步任务轮询间隔与总时长上限（间隔 3s、上限 120s） */
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 120_000;
 

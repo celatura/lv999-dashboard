@@ -30,7 +30,7 @@ export const IMPORTABLE_ASSET_KINDS = 'markdown,html';
 
 // --- 切分参数（按字符数近似，中文场景够用） --------------------------------
 
-/** 单片段目标长度（PRD：约 500–800 字） */
+/** 单片段目标长度（约 500–800 字） */
 export const CHUNK_TARGET_CHARS = 700;
 
 /** 相邻片段重叠长度（保留跨片段上下文） */

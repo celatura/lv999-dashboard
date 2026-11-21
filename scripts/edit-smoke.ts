@@ -1,12 +1,12 @@
 /* oxlint-disable no-console */
 /**
- * 图像编辑（I2I）通道冒烟脚本（Batch B）：
+ * 图像编辑（I2I）通道冒烟脚本：
  * 验证「文生图 → OSS 签名 URL 作为源图 → 3.0 I2I 指令编辑 → 下载校验」全链路。
  *
  * 运行：bun scripts/edit-smoke.ts
  * 前置：.env.local 中配置 DASHSCOPE_API_KEY 与 OSS_*（Bun 自动加载）
  *
- * 背景（2026-09-20 预研结论）：
+ * 背景：
  * - 3.0 系列（qwen-image-3.0 / 3.0-pro）原生同时支持 T2I 与 I2I，与编辑消费同级价位
  *   （编辑输入 0.02 元/张 + 输出同文生图 0.18 元/张），无需引入 edit-plus / edit-max 系列；
  * - I2I 请求：同一同步端点，content = [{image: <公网URL|base64>}, {text: <指令>}]；

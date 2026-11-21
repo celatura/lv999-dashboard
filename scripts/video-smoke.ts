@@ -1,13 +1,13 @@
 /* oxlint-disable no-console */
 /**
- * 视频生成通道冒烟脚本（Phase 3 · P0 开工前置动作）：
+ * 视频生成通道冒烟脚本：
  * 走「真实生产代码路径」验证——generateVideoAsset（AI SDK experimental_generateVideo + 国内 videoBaseURL）
  * → 下载视频字节 → 转存 OSS → 签名 URL 播放验证 → OSS 视频截帧封面验证。
  *
  * 运行：bun scripts/video-smoke.ts
  * 前置：.env.local 中配置 DASHSCOPE_API_KEY 与 OSS_*（Bun 自动加载 .env.local）
  *
- * 首要验证项（PRD 风险 1）：@ai-sdk/alibaba 的 videoBaseURL 默认为 dashscope-intl（新加坡），
+ * 首要验证项：@ai-sdk/alibaba 的 videoBaseURL 默认为 dashscope-intl（新加坡），
  * 本项目为国内 key，provider.ts 已显式覆盖为 dashscope.aliyuncs.com（经典域名）。
  * 若此脚本报鉴权/地域错误 → 需切换直连百炼 REST 方案（仿 image-generation.ts 的 generateViaAsyncTask）。
  *
@@ -68,7 +68,7 @@ async function verifySnapshot(storageKey: string): Promise<void> {
   );
 }
 
-console.log('=== 视频生成通道冒烟（P0：验证国内地域端点）===');
+console.log('=== 视频生成通道冒烟（验证国内地域端点）===');
 console.log(`模型: wan3.0-video（默认）  参数: 5s / 720P / 16:9`);
 console.log(`提示词: ${PROMPT.slice(0, 40)}…\n`);
 

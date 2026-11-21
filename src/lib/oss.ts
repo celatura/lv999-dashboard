@@ -1,9 +1,9 @@
 import OSS from 'ali-oss';
 
 /**
- * 阿里云 OSS 封装（Phase 0 基建）。
+ * 阿里云 OSS 封装。
  *
- * Phase 1 的文本资产内容存 Postgres（阿里云 RDS）；Phase 2 起图片/视频等二进制资产使用本模块：
+ * 文本资产内容存 Postgres（阿里云 RDS）；图片/视频等二进制资产使用本模块：
  * 上传到 OSS，数据库仅存 storage_key，读取时用签名 URL 直连 OSS。
  */
 
