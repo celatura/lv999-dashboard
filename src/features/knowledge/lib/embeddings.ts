@@ -7,8 +7,9 @@ import { EMBED_BATCH_SIZE, EMBEDDING_DIM } from '@/features/agent/constants/embe
  * 向量化封装（server-only）：检索用单条 embed、摄取用分批 embedMany。
  *
  * 百炼 text-embedding-v4 走 @ai-sdk/alibaba 原生 embedding 端点，provider 的
- * maxEmbeddingsPerCall 为 10（单次超过即抛错），故这里显式按 EMBED_BATCH_SIZE 分批，
- * 并以 EMBED_MAX_CONCURRENCY 限制并发，避免触发服务端 QPS 限流。
+ * maxEmbeddingsPerCall 为 10；ai 的 embedMany 会按该上限自动分块，不会因条数超限抛错。
+ * 这里显式按 EMBED_BATCH_SIZE 分批的真实目的：以 EMBED_MAX_CONCURRENCY 限制并发
+ * （避免触发服务端 QPS 限流），并逐批累计 usage、统一透传 abortSignal。
  */
 
 /** 同时进行的批次数（个人规模下 3 路并发足够，且不易触发限流） */
