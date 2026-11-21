@@ -17,7 +17,7 @@ LV999 Dashboard 的**平台管理员后台**：管理员在 `/dashboard/admin/us
 
 ## 2. 单管理员模型（无多租户 / 组织）
 
-项目为个人自托管、单管理员模型：`src/features` 与 `src/app/api` 全量搜索 `orgId`/`organization` **0 匹配**，`proxy.ts`（Better Auth 乐观分流）与 `dashboard/layout.tsx`（`verifySession()`）均不涉及组织——组织功能零业务依赖。`NavItem.access` 类型保留（未来若启用 Better Auth `organization` 插件可复用，见 [docs/nav-rbac.md](./nav-rbac.md)）。
+项目为个人自托管、单管理员模型，业务代码无任何 `orgId` 依赖；`NavItem.access` 类型保留（未来若启用 Better Auth `organization` 插件可复用，见 [docs/nav-rbac.md](./nav-rbac.md)）。
 
 ---
 
@@ -44,22 +44,7 @@ export function isAdmin(userId: string | null | undefined): boolean {
 
 ### 4.1 列用户（查 Better Auth `user` 表 + 合并余额）
 
-```ts
-// 「最近登录」由 session 表派生（user 表无 lastSignInAt 列）
-const lastActive = db
-  .select({ userId: session.userId, lastSignInAt: max(session.createdAt).as('last_sign_in_at') })
-  .from(session).groupBy(session.userId).as('last_active');
-
-const [rows, totalRows] = await Promise.all([
-  db.select({ id: user.id, name: user.name, email: user.email, image: user.image,
-              createdAt: user.createdAt, lastSignInAt: lastActive.lastSignInAt })
-    .from(user).leftJoin(lastActive, eq(lastActive.userId, user.id))
-    .where(where).orderBy(orderBy).limit(limit).offset(offset),
-  db.select({ value: count() }).from(user).where(where)
-]);
-const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，避免 N+1
-```
-
+- **最近登录从 session 派生**：`user` 表无 `lastSignInAt` 列，用 `session` 表 `max(createdAt) group by userId` 左连接得出（从未登录为 null）。
 - 支持分页（`limit`/`offset`）、搜索（`query` → `ilike` email/name/id）、排序（前端 `sort` JSON 解析 → `createdAt` / `lastSignInAt`，默认 `createdAt` 倒序）。
 - **余额合并**：复用 credits 的 [`getBalancesByIds`](../src/features/credits/api/service.ts) 批量读取可用额度（账户总额减冻结额度），无账户行的用户按 0。管理员设定的也是可用额度，不影响进行中的冻结；见 [credits.md](./credits.md)。
 - `AdminUser` = `{ id, name, email, imageUrl, createdAt, lastSignInAt, balance }`；`imageUrl` 取 `user.image`（邮箱注册通常为 null）；`name` 缺省回退邮箱前缀 → userId；`lastSignInAt` 未命中（从未登录）为 null。
@@ -109,17 +94,7 @@ const balances = await getBalancesByIds(rows.map((r) => r.id)); // 批量查，�
 
 ---
 
-## 9. 关键约束与取舍
-
-- **服务端鉴权是唯一安全底线**：客户端下拉可见性仅 UX；页面 `notFound()`、端点 403 才是真拦截。
-- **`messages` 无 userId 列**：删用户消息只能经 `conversations` 的 cascade，不能直接 `delete messages where userId`。
-- **删除不可逆**：删 Better Auth 用户与业务表在**同一 DB 事务**内（级联 session/account 断登录）；OSS 失败仅告警；二次确认 + 防自删兜底。
-- **余额批量查**：`getBalancesByIds`（`where userId in`）避免逐用户 N+1。
-- **幂等**：删 user 影响 0 行时继续清理业务数据 / OSS，支持中断后重跑。
-
----
-
-## 10. 手动验收清单
+## 9. 手动验收清单
 
 - **鉴权**：非管理员访问 `/dashboard/admin/users` → notFound；调 admin 端点 → 403；账号下拉**不见**「用户管理」。`ADMIN_USER_IDS` 未配 → 所有人不可达。
 - **列表**：管理员进入 → 全部用户 + 正确余额；搜索 / 分页 / 排序可用；「最近登录」反映 session 活跃。

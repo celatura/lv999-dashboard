@@ -2,14 +2,14 @@
 
 > **LV999** —— lv = level。功能拉满、什么都有、完全体的多模态创作工作台。
 
-一个 AI 原生的多模态创作平台：用自然语言对话创作 **文本 / 图片 / 视频 / 设计**，以 **RAG 知识库**做语义增强，全部产出沉淀为可管理的资产——已接入真实后端（PostgreSQL + 对象存储 + Redis + 大模型）。它的底层是一套功能拉满的生产级**后台底座**（认证、权限、数据表格、表单、图表、主题……端到端可用），既能支撑本平台自身，也能直接长出其他真实业务。
+用自然语言对话创作 **文本 / 图片 / 视频 / 设计**，以 **RAG 知识库**做语义增强，全部产出沉淀为可管理的资产——后端为真实 PostgreSQL / 对象存储 / Redis / 大模型。底层是一套生产级**后台底座**（认证、权限、数据表格、表单、图表、主题，端到端可用），也能直接长出其他真实业务。
 
 ![LV999 预览](./public/lv999-dashboard.png)
 
 ## 功能特性
 
-- **AI Agent 创作**：自然语言对话驱动的创作工作台，产出 Markdown / HTML 文本、文生图 / 图生图、文生视频 / 图生视频与一句话整版设计；可恢复流式输出，刷新自动重连、支持跨实例停止；消息操作栏一键**复制回复（Markdown 源码）/ 重新生成最后一条**。详见 [docs/agent.md](./docs/agent.md)
-- **技能系统（按需加载的专家工作流）**：system 只常驻轻量技能目录，Agent 按任务自动 `loadSkill` 加载完整工作流；也可在输入区为**单条消息**指定技能。技能可声明工具边界（图文技能禁用视频工具，多技能叠加取交集）；技能由你在 `/dashboard/skills` 自建（可从模板一键新建），模板只做表单预填、不进入运行时目录
+- **AI Agent 创作**：自然语言对话驱动的创作工作台，产出 Markdown / HTML 文本、文生图 / 图生图、文生视频 / 图生视频与一句话整版设计；流式输出可恢复（刷新自动重连、可停止）；消息可复制 Markdown 源码、重新生成最后一条。详见 [docs/agent.md](./docs/agent.md)，视频另见 [docs/video-generation.md](./docs/video-generation.md)
+- **技能系统（按需加载的专家工作流）**：Agent 按任务自动加载完整工作流，也可为单条消息指定技能；技能可声明工具边界，支持从模板一键新建。管理入口 `/dashboard/skills`
 - **对话内资产引用**：从「我的资产」挑选资产随消息提交，让模型确定性拿到 assetId、无需再检索
 - **AI 原生设计画布**：Konva 画布摆放文字 / 图形 / 图片，画布内直接 AI 生图 / 改图、对话内一句话生成整版设计，支持多选 / 复制粘贴 / 吸附对齐，导出 PNG 并沉淀为可再编辑资产。详见 [docs/design-editor.md](./docs/design-editor.md)
 - **RAG 知识库**：文本与上传文件（PDF / Office / Markdown）切分向量化存入 pgvector，Agent 按语义检索作答并标注来源；页面可预览切分片段、做检索测试。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)
@@ -51,16 +51,13 @@
 | 路由 | 说明 |
 | --- | --- |
 | `/dashboard/overview` | 总览：统计卡片 + 图表（并行路由独立加载） |
-| `/dashboard/agent` | Agent 创作：新建会话与对话创作入口 |
-| `/dashboard/agent/[conversationId]` | Agent 会话：可恢复流式对话、工具调用与对话内资产卡片 |
-| `/dashboard/skills` | 技能管理：专属技能的 CRUD（可从模板一键新建） |
-| `/dashboard/assets` | 我的资产：资产表格（筛选 / 搜索 / 预览 / 下载 / 删除） |
-| `/dashboard/design` | 设计画布：新建空白画布 |
-| `/dashboard/design/[id]` | 设计画布：打开已存设计继续编辑 |
+| `/dashboard/agent`（含 `[conversationId]`） | Agent 创作：新建会话、可恢复流式对话、工具调用与资产卡片 |
+| `/dashboard/skills` | 技能管理：专属技能 CRUD（可从模板一键新建） |
+| `/dashboard/assets` | 我的资产：筛选 / 搜索 / 预览 / 下载 / 删除 |
+| `/dashboard/design`（含 `[id]`） | 设计画布：新建空白画布 / 打开已存设计继续编辑 |
 | `/dashboard/knowledge` | RAG 知识库：文档管理（新增 / 列表 / 删除 / 重试） |
-| `/dashboard/admin/users` | 用户管理（仅管理员）：列出全部用户、调整 Credits、级联删除账号 |
-| `/dashboard/profile` | 个人资料与安全设置（自定义头像 / 改名字 / 改密码 / 登出） |
-| `/dashboard/profile/credits` | 我的积分：Credits 余额与流水明细 |
+| `/dashboard/admin/users` | 用户管理（仅管理员）：列用户、调整 Credits、级联删除账号 |
+| `/dashboard/profile`（含 `/credits`） | 个人资料与安全设置；Credits 余额与流水明细 |
 | `/auth/sign-in`、`/auth/sign-up` | 登录 / 注册 |
 
 ## 快速开始
@@ -84,7 +81,7 @@ bun run dev
 
 访问 http://localhost:3000。
 
-> **关于数据库**：`drizzle/` 提供一条可完整重放的迁移链——`0000_baseline.sql` 建全部表（业务表 + Better Auth 表，开头已包含 `CREATE EXTENSION IF NOT EXISTS vector`），`0001_knowledge_hnsw.sql` 补 pgvector 的 HNSW 索引。空库直接 `bun run db:migrate` 即可建好。后续改 schema：`bun run db:generate` 生成增量 SQL → `bun run db:migrate` 应用；已应用状态记录在 `drizzle.__drizzle_migrations`，重复执行只跑未应用的部分。已有数据但尚无迁移记录的库，先 `bun run db:stamp`（默认 dry-run，确认后加 `--apply`）接入。RDS 下 `drizzle-kit push` 会静默失败，项目不提供 `db:push`。详见 [docs/agent.md](./docs/agent.md)。
+> **关于数据库**：`drizzle/` 是「单基线 + 增量」迁移链，空库 `bun run db:migrate` 一条命令建好全部表与索引（含 pgvector）；改 schema 后 `db:generate` → `db:migrate`。RDS 下 `drizzle-kit push` 会静默失败，项目不提供 `db:push`；已有数据的旧库用 `db:stamp` 接入。详见 [docs/agent.md](./docs/agent.md) §12。
 
 ### 关键环境变量
 
@@ -108,68 +105,38 @@ bun run dev
 | --- | --- |
 | `bun run dev` | 启动开发服务器 |
 | `bun run build` / `bun run start` | 生产构建 / 启动 |
-| `bun run db:generate` | 由 schema 生成增量迁移 SQL（无需连库） |
 | `bun run db:migrate` | 应用未执行的迁移到 `DATABASE_URL`（空库初始化也用它） |
-| `bun run db:check` | 校验迁移链快照（手动排查用，仅能发现快照损坏 / 冲突） |
-| `bun run db:stamp` | 为已有库补写已应用记录（默认 dry-run，`--apply` 写入） |
 | `bun run typecheck` | TypeScript 类型检查 |
-| `bun run skills:check` | 技能契约检查（引用解析 / 目录渲染上限 / 工具边界 / schema / 模板可一键新建） |
-| `bun run lint` | Oxlint 检查 + 弃用 API 守卫 |
-| `bun run lint:strict` | Oxlint 零警告 |
-| `bun run lint:deprecated` | 类型感知检查 `@deprecated` API 使用 |
-| `bun run lint:fix` | 自动修复并格式化 |
-| `bun run format` / `bun run format:check` | Oxfmt 格式化 / 校验 |
+
+db 系列（`db:generate` / `db:check` / `db:stamp`）、lint / format / `skills:check` 等完整命令见 [AGENTS.md](./AGENTS.md)。
 
 ## 项目结构
 
 ```plaintext
 src/
-├── app/                    # Next.js App Router
-│   ├── auth/               # 登录 / 注册页
-│   ├── dashboard/          # 后台路由
-│   │   ├── overview/       # 总览（并行路由：@area_stats、@bar_stats、@pie_stats、@sales）
-│   │   ├── agent/          # Agent 创作（会话列表 + [conversationId] 会话页）
-│   │   ├── skills/         # 技能管理（专属技能 CRUD，可从模板一键新建）
-│   │   ├── assets/         # 我的资产（资产表格）
-│   │   ├── design/         # 设计画布（新建 + [id] 编辑页）
-│   │   ├── knowledge/      # RAG 知识库（文档管理）
-│   │   ├── admin/          # 用户管理后台（仅管理员：列用户 / 调 Credits / 删号）
-│   │   └── profile/        # 个人资料
-│   └── api/                # Route Handlers：agent（chat / conversations / assets / knowledge）+ admin（用户管理）
-├── components/
-│   ├── ui/                 # shadcn/ui 组件库
-│   ├── layout/             # 布局（侧边栏、顶栏、Infobar 等）
-│   ├── forms/              # 表单字段组件（Field anatomy）
-│   ├── themes/             # 主题系统
-│   └── kbar/               # ⌘K 命令面板
-├── features/               # 按功能划分的模块（agent、design、knowledge、credits、admin、auth、overview、profile）
-│   └── <name>/
-│       ├── api/            # types.ts / service.ts (server-only) / queries.ts / mutations.ts
-│       ├── components/
-│       ├── schemas/        # Zod 校验
-│       └── constants/      # 筛选 / 选项配置
-├── config/                 # 导航配置（nav-config）、表格配置（data-table）
-├── hooks/                  # 自定义 hooks
-├── lib/                    # 工具（query-client、searchparams、api-client、oss、redis 等）
-│   └── db/                 # Drizzle schema（含 pgvector 向量列）与连接（getDb）
-├── styles/                 # 全局样式与主题 CSS
-└── types/                  # 类型定义
+├── app/           # Next.js App Router：auth / dashboard 路由 + api Route Handlers
+├── features/      # 按功能划分的业务模块（agent / design / knowledge / credits / admin ...）
+│   └── <name>/    #   api（types / service / queries / mutations）、components、schemas、constants
+├── components/    # 通用组件：ui（shadcn）、layout、forms、themes、kbar
+├── config/        # 导航（nav-config）与表格（data-table）配置
+├── hooks/         # 自定义 hooks
+├── lib/           # 工具（query-client / api-client / oss / redis / auth-session）与 db（schema + getDb）
+├── styles/        # 全局样式与主题 CSS
+└── types/         # 类型定义
 ```
+
+完整目录说明见 [AGENTS.md](./AGENTS.md)。
 
 ## 核心设计
 
-- **数据获取（TanStack Query SSR）**：服务端 `query().catch(noop)` 复用 queryKey 并直连 server-only `service.ts`（`void` 触发不阻塞）→ `HydrationBoundary` + `dehydrate` 注水 → 客户端 `useSuspenseQuery` 经 `apiClient` 消费，配合 `<Suspense>` 展示骨架屏。
-- **Service 层**：每个 feature 的 `api/` = `types.ts`（类型契约）/ `service.ts`（server-only 数据访问：Drizzle / 外部 API，由 Route Handler 与 Server Component 预取调用）/ `queries.ts` / `mutations.ts`（客户端经 `apiClient` → Route Handler）；支持 Server Actions、Route Handlers、BFF 代理、直连外部 API 多种接入。
-- **AI Agent 创作**：自然语言 → AI SDK v7 `ToolLoopAgent` → 文本 / 图片 / 视频作品统一沉淀为资产；后端为 PostgreSQL + Drizzle（`conversations` / `messages` / `assets` 三表）、OSS、Redis、百炼大模型。详见 [docs/agent.md](./docs/agent.md)。
-- **设计画布**：Konva 纯客户端孤岛，文档为可序列化 JSON、作为 `kind='design'` 资产落库（不新增表）；画布内直连 T2I / I2I 与 `composeDesign`，产出即时插入 / 替换并走 Credits 计费。详见 [docs/design-editor.md](./docs/design-editor.md)。
-- **RAG 知识库**：文本 / 上传文件经切分 → 百炼 `text-embedding-v4` → pgvector（`knowledge_documents` / `knowledge_chunks` 两表 + HNSW 索引）；Agent 经 `knowledgeSearch` 语义检索 topK 片段作答并标注来源。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)。
-- **视频产物**：AI SDK v7 `experimental_generateVideo` + `@ai-sdk/alibaba`（默认 `wan3.0-video`），作为 `kind='video'` 资产落库（不新增表），封面用 OSS 原生截帧经同源代理下发。详见 [docs/video-generation.md](./docs/video-generation.md)。
-- **Credits 成本管控**：调用部署者真实 API Key，故新用户默认 0 分、付费入口先 `checkBalance`（不足返回 402）；按真实 usage「发起后按结果扣」，依百炼「失败不计费」口径，`credits_accounts` + `credit_ledger` 两表原子扣费。详见 [docs/credits.md](./docs/credits.md)。
-- **用户管理后台**：管理员（`ADMIN_USER_IDS` + 服务端 `isAdmin`）列用户 / 调 Credits / 级联删号（Better Auth user → 7 表事务 → OSS）；多租户组织功能已移除、改为单管理员模型。详见 [docs/user-management.md](./docs/user-management.md)。
-- **URL 状态（nuqs）**：服务端 `searchParamsCache` 读、客户端 `useQueryState(shallow: true)` 写，表格分页 / 筛选零 RSC 往返、可分享还原。
-- **表单（TanStack Form + Zod）**：`createFormHook` + 可复用 Field 组件，提交走 `useMutation` + 查询键失效。详见 [docs/forms.md](./docs/forms.md)。
-- **权限**：`nav-config.ts` 声明导航、客户端 `useFilteredNavGroups()` 同步过滤（仅 UX）；真正鉴权是服务端 `isAdmin` 与 dashboard/layout 的 `verifySession()`（org-based RBAC 已退役）。详见 [docs/nav-rbac.md](./docs/nav-rbac.md)。
-- **主题系统**：`[data-theme]` + CSS 变量驱动，`active_theme` cookie 持久化。详见 [docs/themes.md](./docs/themes.md)。
+- **Service 层**：每个 feature 的 `api/` 分四文件——`types.ts` 契约 / `service.ts` 服务端数据访问 / `queries.ts` / `mutations.ts`；客户端只经 `apiClient` 调 Route Handler，不直接引用 `service.ts`。
+- **数据获取**：TanStack Query SSR——服务端预取直连 `service.ts` + `HydrationBoundary` 注水，客户端 `useSuspenseQuery` 消费；表格分页 / 筛选用 nuqs 走 URL 状态，零 RSC 往返。详见 [AGENTS.md](./AGENTS.md)。
+- **AI Agent 创作**：自然语言 → AI SDK v7 `ToolLoopAgent` → 文本 / 图片 / 视频 / 设计统一沉淀为资产；流式可恢复、可跨实例停止。详见 [docs/agent.md](./docs/agent.md)。
+- **设计画布**：Konva 纯客户端孤岛，文档为可序列化 JSON、作为 `kind='design'` 资产落库（不新增表）。详见 [docs/design-editor.md](./docs/design-editor.md)。
+- **RAG 知识库**：文本 / 文件 → 切分 → 百炼 embedding → pgvector（HNSW），Agent 语义检索并标注来源。详见 [docs/knowledge-base.md](./docs/knowledge-base.md)。
+- **Credits 成本管控**：调用部署者真实 API Key，新用户默认 0 分；付费入口先预留额度（不足 402）、按真实 usage 结算，超额由平台承担。详见 [docs/credits.md](./docs/credits.md)。
+- **权限**：客户端导航过滤仅 UX；真正鉴权是服务端 `isAdmin` 白名单与 `verifySession()`（单管理员模型，org RBAC 已退役）。详见 [docs/nav-rbac.md](./docs/nav-rbac.md)。
+- **表单 / 主题**：TanStack Form + Zod（详见 [docs/forms.md](./docs/forms.md)）；`[data-theme]` + CSS 变量多主题（详见 [docs/themes.md](./docs/themes.md)）。
 
 ## 部署
 

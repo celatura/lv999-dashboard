@@ -3,7 +3,7 @@
 LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然语言对话」转化为可沉淀、可管理的**内容资产**（Markdown / HTML / 图片 / 视频）。本文档描述其架构、数据模型、流式与停止机制、资产化设计、模型注册表与 API 契约。
 
 > 该模块已接入**真实后端**（PostgreSQL + 阿里云 OSS + Redis + 阿里云百炼），非 Mock。运行前需配置对应环境变量（见文末）。
-> 视频产物为 Phase 3 能力，架构与实现细节另见 [docs/video-generation.md](./video-generation.md)。
+> 视频产物的架构与实现细节另见 [docs/video-generation.md](./video-generation.md)。
 
 ---
 
@@ -11,7 +11,7 @@ LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然�
 
 - **入口**：`/dashboard/agent`（新建会话）与 `/dashboard/agent/[conversationId]`（会话页）；产出在 `/dashboard/assets`（我的资产）统一管理。
 - **编排**：AI SDK v7 `ToolLoopAgent`，每请求无状态构建，上下文经闭包注入工具。
-- **工具**：`createAsset`（Markdown / HTML）、`editAsset`（文本资产精确编辑）、`createImageAsset`（文生图 T2I）、`editImageAsset`（图生图 I2I）、`createVideoAsset`（文生视频 T2V）、`createVideoFromImageAsset`（图生视频 I2V）、`composeDesign`（一句话生成整版设计）、`findAssets` / `readAsset`（资产复用）、`knowledgeSearch`（知识库语义检索）、`askUser`（澄清提问，客户端回答后自动续答）。
+- **工具**：文本创作 / 图片 / 视频 / 整版设计 / 资产复用 / 知识库检索 / 技能加载 / 澄清提问共 12 个，完整契约见 §5。
 - **流式**：`resumable-stream` 可恢复 SSE，刷新 / 切回自动重连；停止走专用端点（跨实例真取消）。
 - **持久化**：Drizzle ORM + PostgreSQL，三张表 `conversations` / `messages` / `assets`；图片 / 视频二进制存 OSS，库里只存 `storageKey`。
 - **计费**：对话 / 生图 / 生视频 / 知识库摄取均在上游调用前原子预留 Credits，按实际结果结算；管理员可经 `/dashboard/admin/users` 发放 / 设定可用额度（仅 `ADMIN_USER_IDS` 白名单）；详见 [docs/credits.md](./credits.md)。
@@ -23,37 +23,22 @@ LV999 Dashboard 在后台骨架之上长出的核心业务模块：把「自然�
 ```plaintext
 src/features/agent/
 ├── api/
-│   ├── types.ts            # 类型契约（Conversation / ChatMessage / Asset / 过滤参数）
-│   ├── service.ts          # 数据访问层（服务端专用）：会话 / 消息 / 资产的 DB + OSS 操作
-│   ├── queries.ts          # TanStack Query options + 查询键工厂 agentKeys
-│   ├── mutations.ts        # 会话增删改的 mutation options
-│   ├── provider.ts         # resolveModel(key)：百炼直连（@ai-sdk/alibaba）
-│   ├── agent.ts            # buildAgent()、工具 execute 工厂、agentValidationTools 别名
-│   ├── tool-contracts.ts   # 工具契约单一来源（description / inputSchema / outputSchema）+ InferUITools 推导的 UI 类型
-│   ├── skill-service.ts    # 技能读取（skills 表，按用户隔离）与 CRUD
-│   ├── image-generation.ts # 图片生成通道（直连百炼 REST，T2I / I2I）
-│   ├── image-edit.ts       # 图生图核心流程（工具与直连端点复用）
-│   ├── video-generation.ts # 视频生成通道（AI SDK experimental_generateVideo + 内置轮询，T2V / I2V）
-│   ├── generation-error.ts # GenerationError（billable 计费分类）与错误链 haystack
-│   ├── model-availability.ts # 模型下线 / 不存在识别（403 access_denied / 404）
-│   ├── rate-limit.ts       # 固定窗口 Redis 限流
-│   └── stop-signal.ts      # 跨实例停止信号（Redis 标志 + 轮询）
-├── components/
-│   ├── chat/               # 对话窗口、消息项、工具 part 卡片、模型选择器
-│   ├── assets/             # 资产卡片、列表、预览弹窗、资产表格
-│   └── conversations/      # 会话列表
+│   ├── agent.ts / tool-contracts.ts   # ToolLoopAgent 构建 + 工具契约单一来源（schema + InferUITools 推导的 UI 类型）
+│   ├── service.ts / skill-service.ts  # 服务端数据访问：会话 / 消息 / 资产 / 技能（按 userId 隔离）
+│   ├── queries.ts / mutations.ts      # TanStack Query options + 查询键工厂 agentKeys
+│   ├── provider.ts                    # resolveModel(key)：百炼直连（@ai-sdk/alibaba）
+│   ├── title-generation.ts / attachment-urls.ts  # 会话标题 LLM 生成 / 图片附件 URL 重签
+│   ├── image-generation.ts / image-edit.ts       # 图片通道（T2I / I2I，工具与直连端点共用核心流程）
+│   ├── video-generation.ts            # 视频通道（experimental_generateVideo + 内置轮询，T2V / I2V）
+│   ├── generation-error.ts / model-availability.ts  # 计费分类错误 / 模型下线识别（403 access_denied / 404）
+│   └── rate-limit.ts / stop-signal.ts # 固定窗口 Redis 限流 / 跨实例停止信号
+├── components/                        # chat（对话与工具卡片）/ assets（资产）/ conversations（会话列表）
 ├── constants/
-│   ├── models.ts           # 对话模型注册表（4 个文本模型）
-│   ├── image-models.ts     # 图像模型注册表（2 个）+ 比例预设 ASPECT_PRESETS
-│   ├── video-models.ts     # 视频模型注册表（wan3.0-video 默认 + prime 优速）
-│   ├── skills.ts           # 技能引擎（目录渲染 / 引用解析 / 工具边界计算）
-│   ├── skill-templates.ts  # 「从模板新建」的表单预填（不进入运行时目录）
-│   ├── kinds.ts            # 资产类型展示元数据（label / icon），卡片 / 表格共用
-│   ├── asset-kinds.ts      # 资产类型枚举值（工具契约与消息类型共用，避免 contracts ↔ types 循环）
-│   ├── conversation.ts     # 默认标题与标题生成
-│   ├── embedding.ts        # RAG embedding 配置（模型 / 维度 / 批次）
-│   └── limits.ts           # 请求体上限 MAX_REQUEST_BYTES
-└── lib/                    # 前端辅助（如首条消息交接、资产引用块组装/解析）
+│   ├── models.ts / image-models.ts / video-models.ts  # 三个模型注册表
+│   ├── skills.ts / skill-templates.ts # 技能引擎（目录 / 引用解析 / 工具边界）/「从模板新建」预填
+│   ├── kinds.ts / asset-kinds.ts      # 资产类型展示元数据 / 枚举值（避免 contracts ↔ types 循环）
+│   └── conversation.ts / embedding.ts / limits.ts     # 标题生成 / RAG embedding 配置 / 请求体上限
+└── lib/                               # 前端辅助（首条消息交接、资产引用块组装/解析）
 
 src/app/api/agent/          # Route Handlers（REST / SSE）
 src/lib/db/                 # Drizzle schema.ts 与 getDb()
@@ -142,7 +127,7 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 3. 生成路由每 2 秒轮询该标志，命中后 `abort` 底层生成（真取消）。
 4. 校验后清理 `activeStreamId`（仅当仍指向同一流，避免误清之后启动的新流）。
 
-客户端在发起请求前生成流 id，即使还未收到首个流消息也可请求停止。停止请求可先于生成路由登记流；生成路由在登记前和调用模型前检查已排队的停止信号，登记后的信号由轮询处理。登记使用比较并更新，较晚到达的旧请求不会覆盖其他页面已经启动的新流；竞争失败返回 `stream_changed`。客户端等待 stop 端点确认信号已登记，再断开本地流；这不是上游取消已完成的保证。请求失败或超时会提示生成可能仍在继续；消息快照超过请求体上限时，仅发送流 id 并提醒用户以服务端保存结果为准。停止已发起的付费任务仍可能产生费用，见 [credits.md](./credits.md)。
+客户端发起请求前即生成流 id，未收到首个流消息也可停止；停止信号可先于登记到达（生成路由在登记前与调用模型前检查已排队信号）。登记用比较并更新：较晚到达的旧请求不覆盖新流，竞争失败返回 `stream_changed`。stop 端点确认信号已登记后客户端才断开本地流，但这不保证上游已取消——请求失败 / 超时会提示生成可能仍在继续，快照超限时仅发流 id；已发起的付费任务停止后仍可能产生费用（见 [credits.md](./credits.md)）。
 
 > **离开页面 / 卸载 ≠ 停止**：离开属于断开，应保持可恢复；只有点击停止按钮才真取消。
 
@@ -172,20 +157,20 @@ Drizzle schema 定义于 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts)，共
 
 ### 4.6 消息操作栏（复制 / 重新生成）
 
-assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操作栏（hover / 键盘聚焦淡入，触屏 `[@media(hover:none)]` 常显），承载两个高频动作：
+assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操作栏承载两个动作：
 
-- **复制**（[`copy-button.tsx`](../src/features/agent/components/copy-button.tsx)）：复制该消息所有 text part 的 **Markdown 源码**（`join('\n\n')`，非渲染态，粘走可再编辑）；✓ 态 1.5s + toast。[`clipboard.ts`](../src/features/agent/lib/clipboard.ts) `copyText` 主路径 `navigator.clipboard`（部署 https 可用）+ `execCommand` 兜底（权限拒绝 / 老浏览器），失败 toast 不静默。资产预览弹窗（markdown/html）复用同一 CopyButton 复制 `content`。
-- **重新生成**（仅**最后一条** assistant 消息）：调 `useChat` 的 `regenerate()`（无参 = 末尾消息）；tooltip 明示「将再次消耗 Credits」（重roll = 新一轮模型调用）。**不对历史中间消息提供**——`regenerate(messageId)` 会截断其后所有对话。
+- **复制**（[`copy-button.tsx`](../src/features/agent/components/copy-button.tsx)）：复制该消息所有 text part 的 **Markdown 源码**（非渲染态，可再编辑）；资产预览弹窗复用同一 CopyButton 复制 `content`。[`clipboard.ts`](../src/features/agent/lib/clipboard.ts) `copyText` 主路径 `navigator.clipboard` + `execCommand` 兜底，失败不静默。
+- **重新生成**（仅**最后一条** assistant 消息）：调 `useChat` 的 `regenerate()`（重roll = 新一轮模型调用、再次计费）；**不对历史中间消息提供**——`regenerate(messageId)` 会截断其后所有对话。
 - **流式禁用**：`isActive` 时两按钮禁用（内容未完整 / 防并发重roll）。
-- **memo 纪律**：[`message-item.tsx`](../src/features/agent/components/chat/message-item.tsx) 是 memo 化的（Streamdown 解析贵）；操作栏新增 props 仅稳定回调（`onRegenerate` 为 chat-window 的 useCallback）+ 布尔（`isLastAssistant`），复制 ✓ 态自持 CopyButton 内部；**不传 `isGenerating`**（每轮生成翻转两次会击穿 memo、重渲染全部历史）——流式只发生在末尾，`isActive` 已等价覆盖禁用语义。
+- **memo 纪律**：[`message-item.tsx`](../src/features/agent/components/chat/message-item.tsx) 是 memo 化的（Streamdown 解析贵）；新增 props 仅稳定回调 + 布尔（`isLastAssistant`）；**不传 `isGenerating`**（每轮生成翻转两次会击穿 memo、重渲染全部历史）——流式只发生在末尾，`isActive` 已等价覆盖禁用语义。
 
 ### 4.7 会话设置、列表与限制
 
-- 新会话空态提供写内容、做图片、生成视频、设计封面四种示例；点击只填入输入框，不自动发送。资产库非空时另提供复用作品示例；空态从顶部显示，已有消息则保持末条消息锚点与自动滚动。空态另提供「按技能开始」入口：只选中技能（作用于下一条消息），不自动发送。
-- 模型切换等待服务端保存后才更新显示，期间暂停发送；保存和读取各有 10 秒超时。保存失败时重新读取权威设置，无法读取时须手动重试同步。对话请求携带当前显示的模型，若与服务端不一致返回 `settings_changed`，客户端可同步后重试。
+- 新会话空态示例点击只填入输入框、不自动发送（「按技能开始」只选中技能，作用于下一条消息）；空态从顶部显示，已有消息则保持末条消息锚点与自动滚动。
+- 模型切换等待服务端保存后才更新显示，期间暂停发送（保存 / 读取各 10s 超时）；保存失败时重新读取权威设置，无法读取时须手动重试。对话请求携带当前显示的模型，不一致返回 `settings_changed`，客户端同步后重试。
 - 技能不写会话设置：输入区的选择只作用于**下一条消息**（消息 metadata.skillId），发送后自动清除；不选时由 Agent 按技能目录自动匹配（见 §5.1）。
-- 侧边栏每次加载 50 个会话，按不可变的创建时间和 id 倒序游标分页，避免活跃会话更新时间改变时遗漏记录；界面注明排序方式。会话更新或生成结束仅刷新包含该会话的已加载页，新建和删除则刷新整个列表。
-- 对话请求只含一条增量消息（单条 ≤500 个 part、请求体 ≤4 MB）；服务端合并后的历史最多 200 条消息。触及限制时可编辑失败消息，或将输入与资产引用带到新会话；后者通过客户端内存一次性交接，页面刷新会丢弃未交接草稿。
+- 侧边栏每次加载 50 个会话，按不可变的创建时间 + id 倒序游标分页（避免活跃会话更新时间变化时遗漏记录），界面注明排序方式；会话更新 / 生成结束只刷新包含该会话的已加载页，新建 / 删除刷新整个列表。
+- 对话请求只含一条增量消息（单条 ≤500 个 part、请求体 ≤4 MB），服务端合并后的历史 ≤200 条消息；触及限制时可编辑失败消息，或经客户端内存一次性交接把输入与资产引用带到新会话（页面刷新会丢弃未交接草稿）。
 
 ### 4.8 会话标题（LLM 并行生成）
 
@@ -209,12 +194,12 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 4.10 思考过程展示（reasoning）
 
-百炼对话模型默认思考：reasoning parts 由 AI SDK 随流下发（`toUIMessageStream` 默认 `sendReasoning`），本项目原样持久化在 `messages.parts`，其 token 已计入 `outputTokens` 计费。此前渲染层只处理 text 与已知 tool part，思考内容不可见；[`message-reasoning.tsx`](../src/features/agent/components/chat/message-reasoning.tsx) 把多个 reasoning part 合并为一个折叠块：
+百炼对话模型默认思考：reasoning parts 由 AI SDK 随流下发（`sendReasoning` 默认开启），本项目原样持久化在 `messages.parts`，token 已计入 `outputTokens` 计费；[`message-reasoning.tsx`](../src/features/agent/components/chat/message-reasoning.tsx) 把多个 reasoning part 合并为一个折叠块：
 
-- 思考中自动展开并跟随滚动，结束后 1s 自动收起；显示累计思考时长。时长由服务端在 `messageMetadata` 中按 `reasoning-start` / `reasoning-end` 计时，下发 `reasoningDurations`（key = 该消息内 reasoning part 序号）并随消息 metadata 持久化——刷新 / 切回历史会话后仍显示「思考了 N 秒」；客户端本地计时仅在无持久化值时兜底（如中止未收到 reasoning-end）。续答轮复用同一 assistant 消息时，以已有 reasoning part 数作为索引偏移，避免覆盖上一段时长。
-- 「思考中」仅当消息仍处于流式末尾且存在 `state === 'streaming'` 的 reasoning part——中止后 part 不落终态（AI SDK 中止语义），避免历史消息永久停在「思考中」。
-- `submitted` 阶段（首个 chunk 到达前）在消息列表尾部显示「正在思考…」占位，覆盖思考模型的静默等待窗口。
-- 不改变流协议与计费；时长经现有 `messageMetadata` 通道随消息 metadata 持久化（不新增 data part）。`MessageItem` 的 memo 纪律不受影响（展开/计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
+- **时长持久化**：服务端在 `messageMetadata` 中按 `reasoning-start` / `reasoning-end` 计时，下发 `reasoningDurations`（key = 该消息内 reasoning part 序号）随消息持久化（不新增 data part）——刷新 / 切回后仍显示「思考了 N 秒」；客户端本地计时仅在无持久化值时兜底（如中止未收到 reasoning-end）。续答轮复用同一 assistant 消息时，以已有 reasoning part 数作索引偏移，避免覆盖上一段时长。
+- **「思考中」判定**：仅当消息仍处流式末尾且存在 `state === 'streaming'` 的 reasoning part——中止后 part 不落终态（AI SDK 中止语义），避免历史消息永久停在「思考中」。
+- `submitted` 阶段（首个 chunk 到达前）列表尾部显示「正在思考…」占位，覆盖思考模型的静默等待窗口。
+- `MessageItem` 的 memo 纪律不受影响（展开 / 计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
 
 ### 4.11 澄清提问（askUser，客户端工具）
 
@@ -266,19 +251,14 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **名称唯一**：`loadSkill` 先按 id、再按 name 查找；`createSkill` / `updateSkill` 校验当前用户内名称唯一（trim + 大小写不敏感，`SkillNameConflictError` → 409 `skill_name_conflict`），避免加载到不可预期的技能。
 - **工具名常量** `AGENT_TOOL_NAMES` / `AgentToolName` 定义在 skills.ts（与 agent.ts 注册的工具 key 一一对应）：agent.ts → skills.ts 单向依赖，避免循环 import。新增工具时需同步追加到本常量与中文名表 `AGENT_TOOL_LABELS`；已声明 `tools` 的技能不会自动获得新工具（预期的能力边界）。
 - **读取分档**（[`skill-service.ts`](../src/features/agent/api/skill-service.ts)，服务端专用）：`listSkillEntriesForUser`（完整条目，服务端目录 / loadSkill / 显式技能校验）、`listSkillCatalogForUser`（轻量目录，客户端选择器 / 空态）、`listSkillDetailsForUser`（完整内容，管理页），三者均按 `userId` 过滤、按创建时间倒序。**`buildAgent` 保持纯函数不碰 DB**：入参为已解析的 `skills: SkillRegistryEntry[]` + `forcedSkill?: SkillRegistryEntry | null` + `preloadedSkillIds?: readonly string[]`，由 chat 路由一次查询后传入。
-- **CRUD 端点**（`/api/agent/skills*`，归属即权限、限流 scope `skills` 30/分、纯管理不计费）：`GET /api/agent/skills`（轻量目录 `{ skills }`，选择器/空态用）/ `GET /api/agent/skills?include=body`（完整内容，管理页用）/ `POST`（创建，Zod 校验 + 名称唯一 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**）/ `DELETE /api/agent/skills/[id]`（删除；历史消息里的技能引用保留，界面按名称展示）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000` / `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES 且非空?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
+- **CRUD 端点**（`/api/agent/skills*`，归属即权限、纯管理不计费，限流见 §10）：`GET /api/agent/skills`（轻量目录 `{ skills }`，选择器/空态用）/ `GET /api/agent/skills?include=body`（完整内容，管理页用）/ `POST`（创建，Zod 校验 + 名称唯一 → `{ id }`）/ `PATCH /api/agent/skills/[id]`（更新，**仅 uuid + 归属**）/ `DELETE /api/agent/skills/[id]`（删除；历史消息里的技能引用保留，界面按名称展示）。校验：`name 1..50` / `description 1..200` / `instructions 1..8000` / `placeholder ≤100?` / `tools ⊆ AGENT_TOOL_NAMES 且非空?` / `examples ≤2 { input 1..300, output 1..500 }`；服务端返回通用英文信封，中文提示由客户端表单校验（同一 `skillMutationSchema`）给出。
 - **UI**：输入区 [`skill-picker.tsx`](../src/features/agent/components/chat/skill-picker.tsx)（`SkillPicker`）为「下一条消息」选择技能，选中后输入框出现技能 chip，发送后由 chat-window 清空；不选 = 自动匹配。空态在存在技能时提供「按技能开始」入口（技能全部来自自建，零技能时不展示 chips）。消息流：用户消息按 metadata 显示技能 chip；assistant 的 `tool-loadSkill` 渲染为「已加载技能：X」。管理页 `/dashboard/skills`（[`components/skills/`](../src/features/agent/components/skills/)）= 列表（全部为用户自建，可编辑 / 删除）+ 头部「新建技能」与「从模板新建」+ 编辑对话框（名称 / 描述 / 工作流正文 + 撰写提示 / 引导语 / 工具边界 / 0-2 组示例）；无技能时列表给出模板入口提示。
 - **防御**：显式技能 id 非法 / 越权 / 已删除 → 400 `unknown_skill`（客户端提示重选）；自动加载名称未命中 → 工具报错让模型回到目录重选；`agentValidationTools` 恒为全量（含 `loadSkill`），历史消息仍可被校验。已加载技能在续答前被删除 / id 无法解析时，该技能不参与边界计算（降级为全量），与显式技能删除时的降级一致。
 - **编写规范与兼容性**（对齐 Agent Skills 开放格式）：
-  - `id` 是技能 uuid（DB 生成），也是历史消息 / 续答回灌的解析依据；改名不影响已持久化的引用。
-  - `name` 是展示名，同一用户内唯一（loadSkill 先按 id、再按名称解析，同名会让模型加载到不可预期的技能）。
-  - `description` 是唯一路由信号：写清「做什么 + 何时用 + 不用于什么」，建议包含触发关键词；限 200 字。
-  - `instructions` 是加载后整段进入上下文的正文：建议 <500 行 / <5000 tokens（硬上限 8000 字），过长请精简或拆技能。
-  - `examples` ≤2 条，随正文按需返回。
-  - `tools` 是成本/能力提示，不是安全边界；多个技能同时加载取交集，真正的兜底是 Credits + 工具级限流。
-  - 一次回复尽量只加载一个技能；多技能工具边界取交集，可能裁掉必需工具；交集为空时先澄清或换技能。
+  - `id`（uuid）是历史消息 / 续答回灌的解析依据，改名不影响引用；`name` 展示名同一用户内唯一（同名会导致加载到不可预期的技能）。
+  - `description` 是唯一路由信号：写清「做什么 + 何时用 + 不用于什么」，含触发关键词（限 200 字）；`instructions` 加载后整段进入上下文，建议 <5000 tokens（硬上限 8000 字）；`examples` ≤2 条随正文返回。
+  - `tools` 是成本 / 能力提示，不是安全边界——多个技能同时加载取交集，可能裁掉必需工具（交集为空时先澄清或换技能），真正的兜底是 Credits + 工具级限流。
   - 目录上限 `MAX_CATALOG_SKILLS=16`，超出部分不参与自动路由（选择器仍可见）。
-  - 允许并鼓励把常用套路先写成「模板」再一键新建：模板不进入运行时目录，避免示例被自动路由、也避免与基座指令重复后漂移。
   - `bun run skills:check` 校验引用解析 / 目录渲染上限 / 工具边界交集 / mutation schema / 模板可一键新建（纯静态，不依赖 DB）。
   - 不采用 provider 级 `uploadSkill`：百炼不支持 SkillsV4，且会把执行权交给 provider、绕开 Credits 与工具边界。
 
@@ -287,15 +267,15 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 ## 6. 资产化
 
 - **五类资产**：`markdown` / `html` / `image` / `design` / `video`（元数据统一在 [`constants/kinds.ts`](../src/features/agent/constants/kinds.ts)，对话卡片 / 预览弹窗 / 表格列共用）。`design`（设计画布产物）由设计模块写入，见 [docs/design-editor.md](./design-editor.md)；`video`（视频产物）见 [docs/video-generation.md](./video-generation.md)。
-- **文本资产**：正文直接存 `content` 列（Phase 1 决策：MVP 不引入 OSS，`storageKey` / `mime` / `sizeBytes` 字段已预留）。
+- **文本资产**：正文直接存 `content` 列（MVP 不引入 OSS，`storageKey` / `mime` / `sizeBytes` 字段已预留）。
 - **图片 / 视频资产**：应用层预生成 `assetId` → 转存 OSS → 一次性 insert 全字段；`content` 列存生成 prompt（可溯源 / 可重试）。视频封面经 OSS 原生截帧（`videoSnapshotUrl`）动态生成，经 `/raw?snapshot=1` 同源代理下发（列表不渲染 `<video>`）。图片/设计的**缩略图**经 `/raw?thumb=1`（OSS 原生图片处理 `image/resize,w_320`，只等比缩放不裁切；处理不可用时回退原图）下发，避免 36~150px 格子拉 1~2MB 原图；仅 design 额外带 `&v=updatedAt` 破缓存（它的预览会被覆盖写，image 内容不可变），见 [docs/design-editor.md](./design-editor.md) 第 5 节。
 - **血缘**：I2I 产物与 I2V 产物通过 `sourceAssetId` 指向源图；预览弹窗展示「基于《源标题》修改」；源图删除后 `SET NULL`，派生资产仍可访问。
-- **收藏**（`favorite` boolean 列）：任意 kind 可收藏；列表支持「仅看收藏」筛选（`AssetFilters.favorite`）；切换走 `POST /api/agent/assets/[id]/favorite`（限流 60 次/分）。
+- **收藏**（`favorite` boolean 列）：任意 kind 可收藏；列表支持「仅看收藏」筛选（`AssetFilters.favorite`）；切换走 `POST /api/agent/assets/[id]/favorite`。
 - **下载**（[`assets/[id]/download`](../src/app/api/agent/assets/[id]/download/route.ts)）：有 `storageKey` → 302 跳转带附件名的短期签名 URL（TTL 300s）；文本资产直接返回 `content`；**无预览的 design**（`composeDesign` 首轮产出）返回 501（`content` 是文档 JSON，不能当 PNG 下发），前端相应隐藏下载入口。
 - **删除**：删 DB 行的同时顺带删 OSS 对象（失败仅告警不阻塞）。
-- **批量删除**（[`assets/batch-delete`](../src/app/api/agent/assets/batch-delete/route.ts)）：单次最多 100 个 uuid，逐个走 `deleteAsset`（含所有权校验与 OSS 清理）；不存在的 id 静默跳过，返回实际删除计数；全部未命中时 404。限流 10 次/分。
-- **直连图片编辑**（[`assets/[id]/edit`](../src/app/api/agent/assets/[id]/edit/route.ts)）：图片资产行操作「继续修改」与设计画布「AI 修改」直连 I2I（不经聊天），核心流程与聊天内 `editImageAsset` 工具复用（[`image-edit.ts`](../src/features/agent/api/image-edit.ts) 的 `editImageAssetCore`）；产出派生资产（`sourceAssetId` 记录血缘），返回新资产 id。限流 20 次/分（I2I 是付费模型调用 ≈0.20 元/次）。
-- **直连图片生成**（[`assets/generate`](../src/app/api/agent/assets/generate/route.ts)）：设计画布「AI 生成图片」直连 T2I（不经聊天），与聊天内 `createImageAsset` 工具同核（`generateImage` + `createImageAsset`）；产出 `conversationId=null`、`content=prompt`、`source='agent'` 的图片资产（title 缺省按 prompt 截断），返回新资产 id。限流 scope `image-generate` 20 次/分，`maxDuration=300`。
+- **批量删除**（[`assets/batch-delete`](../src/app/api/agent/assets/batch-delete/route.ts)）：单次最多 100 个 uuid，逐个走 `deleteAsset`（含所有权校验与 OSS 清理）；不存在的 id 静默跳过，返回实际删除计数；全部未命中时 404。
+- **直连图片编辑**（[`assets/[id]/edit`](../src/app/api/agent/assets/[id]/edit/route.ts)）：图片资产行操作「继续修改」与设计画布「AI 修改」直连 I2I（不经聊天），核心流程与聊天内 `editImageAsset` 工具复用（[`image-edit.ts`](../src/features/agent/api/image-edit.ts) 的 `editImageAssetCore`）；产出派生资产（`sourceAssetId` 记录血缘），返回新资产 id（I2I 是付费模型调用，限流见 §10）。
+- **直连图片生成**（[`assets/generate`](../src/app/api/agent/assets/generate/route.ts)）：设计画布「AI 生成图片」直连 T2I（不经聊天），与聊天内 `createImageAsset` 工具同核（`generateImage` + `createImageAsset`）；产出 `conversationId=null`、`content=prompt`、`source='agent'` 的图片资产（title 缺省按 prompt 截断），返回新资产 id，`maxDuration=300`，限流见 §10。
 
 ---
 
@@ -358,7 +338,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ## 9. API 端点一览
 
-所有端点在开头经 DAL 的 `getUserId()` 校验 userId（未登录 401）；错误统一走 `apiError()` 信封。
+所有端点在开头经 DAL 的 `getUserId()` 校验 userId（未登录 401）；错误统一走 `apiError()` 信封；限流额度统一见 §10。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -369,22 +349,17 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 | POST | `/api/agent/conversations` | 创建会话（标题/模型；技能随消息 metadata 指定，见 §5.1）|
 | PATCH / DELETE | `/api/agent/conversations/[id]` | 更新（标题 / 模型）/ 删除会话 |
 | GET | `/api/agent/assets` | 资产列表（分页 / 搜索 / kind 筛选 / `favorite` 筛选 / 排序）|
-| POST | `/api/agent/assets` | 创建 design 资产（限流 scope `design` 30/分）——详见 design-editor.md |
-| POST | `/api/agent/assets/upload` | 本地图片上传（multipart；魔数校验 PNG/JPEG/WebP ≤10MB → OSS + `source='upload'` 资产；限流 30/分，不计费）——聊天附件与设计画布共用 |
+| POST | `/api/agent/assets` | 创建 design 资产——详见 design-editor.md |
+| POST | `/api/agent/assets/upload` | 本地图片上传（multipart；魔数校验 PNG/JPEG/WebP ≤10MB → OSS + `source='upload'` 资产；不计费）——聊天附件与设计画布共用 |
 | GET / DELETE | `/api/agent/assets/[id]` | 资产详情（有 `storageKey` 时附 3600s 签名 previewUrl，覆盖 image / video / design 预览；design 无预览 PNG 时为 null）/ 删除 |
 | PATCH | `/api/agent/assets/[id]` | 更新 design 资产（归属且 `kind==='design'`）|
-| POST | `/api/agent/assets/[id]/favorite` | 收藏 / 取消收藏（任意 kind，限流 60/分）|
-| POST | `/api/agent/assets/[id]/edit` | 直连图片编辑 I2I（不经聊天，限流 20/分，`maxDuration=300`）|
-| POST | `/api/agent/assets/generate` | 直连图片生成 T2I（设计画布「AI 生成图片」，限流 scope `image-generate` 20/分，`maxDuration=300`）——详见 design-editor.md |
+| POST | `/api/agent/assets/[id]/favorite` | 收藏 / 取消收藏（任意 kind）|
+| POST | `/api/agent/assets/[id]/edit` | 直连图片编辑 I2I（不经聊天，`maxDuration=300`）|
+| POST | `/api/agent/assets/generate` | 直连图片生成 T2I（设计画布「AI 生成图片」，`maxDuration=300`）——详见 design-editor.md |
 | GET | `/api/agent/assets/[id]/download` | 下载（image / design / video 有 `storageKey` 走 302 签名 URL，扩展名按 kind/mime 映射：image→png/jpg/webp、design→png、video→mp4；文本直接返回）|
 | GET | `/api/agent/assets/[id]/raw` | 资产字节同源代理（供设计画布加载图片规避 canvas 跨域污染；带 `?snapshot=1` 且 video 时回 OSS 截帧封面）|
-| POST | `/api/agent/assets/batch-delete` | 批量删除（单次 ≤100 uuid，限流 10/分）|
-| GET / POST | `/api/agent/knowledge/documents` | 知识库文档列表 / 新增（同步摄取，限流 scope `knowledge` 30/分）——见 knowledge-base.md |
-| POST | `/api/agent/knowledge/documents/upload` | 上传文件新增文档（multipart；anydoc 解析 PDF/Office/Markdown 为结构化文本后同步摄取）——见 knowledge-base.md §4.1 |
-| DELETE | `/api/agent/knowledge/documents/[id]` | 删除文档（片段级联删除）|
-| POST | `/api/agent/knowledge/documents/[id]/retry` | 重新摄取（失败文档重试）|
-| GET | `/api/agent/knowledge/documents/[id]` | 文档详情（**预览用**：元信息 + 入库原文 + 片段列表，不 select embedding）——见 knowledge-base.md §7 |
-| POST | `/api/agent/knowledge/search` | **检索测试**（复用 `searchKnowledgeByText` 同链路同阈值；零计费；限流 scope `knowledge` 30/分）——见 knowledge-base.md §5 |
+| POST | `/api/agent/assets/batch-delete` | 批量删除（单次 ≤100 uuid）|
+| * | `/api/agent/knowledge/*` | 文档列表 / 新增 / 文件上传 / 详情 / 删除 / 重新摄取 / 检索测试——完整端点表见 [knowledge-base.md](./knowledge-base.md) §6 |
 
 ---
 
@@ -400,13 +375,15 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ### 限流（固定窗口 Redis）
 
-[`rate-limit.ts`](../src/features/agent/api/rate-limit.ts) 复用 Upstash Redis 计数；Redis 异常时 **fail-open**（放行并记录）：
+[`rate-limit.ts`](../src/features/agent/api/rate-limit.ts) 复用 Upstash Redis 计数；Redis 异常时 **fail-open**（放行并记录）。下表汇总 agent 模块全部限流 scope（额度以此为准）：
 
 | scope | 限额 | 窗口 | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 20 次 | 60s / 用户 | 对话生成 |
 | `stop` | 60 次（从宽，保证停止始终可用）| 60s / 用户 | 停止生成 |
+| `skills` | 30 次 | 60s / 用户 | 技能 CRUD（纯管理，不计费）|
 | `design` | 30 次 | 60s / 用户 | 设计画布保存 |
+| `upload` | 30 次 | 60s / 用户 | 图片上传（聊天附件 / 设计画布共用，不计费）|
 | `knowledge` | 30 次 | 60s / 用户 | 知识库文档新增 |
 | `favorite` | 60 次 | 60s / 用户 | 收藏切换（轻量 DB 写）|
 | `image-edit` | 20 次 | 60s / 用户 | 直连 I2I（付费模型调用 ≈0.20 元/次）|
@@ -424,14 +401,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 ## 11. 环境变量
 
-| 变量 | 说明 |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL 连接串；密码特殊字符需 URL 编码（`@`→`%40`）|
-| `DASHSCOPE_API_KEY` | 阿里云百炼 API Key（对话 / 图片 / 视频 / 嵌入模型共用）|
-| `OSS_REGION` / `OSS_BUCKET` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS（私有 bucket；图片 / 视频等二进制资产，视频封面需桶开通视频截帧能力）|
-| `REDIS_URL` | Redis 连接串（需 pub/sub 支持的 TLS 连接，推荐 Upstash）|
-
-完整清单见 [`env.example.txt`](../env.example.txt)。
+本模块需要 `DATABASE_URL`（密码特殊字符需 URL 编码）、`DASHSCOPE_API_KEY`（对话 / 图片 / 视频 / 嵌入共用）、`OSS_*`（私有 bucket，视频封面需开通截帧）、`REDIS_URL`（需 pub/sub 的 TLS 连接，推荐 Upstash）。完整清单见 [`env.example.txt`](../env.example.txt)。
 
 ---
 
@@ -452,6 +422,6 @@ bun run db:check
 
 ### 冒烟脚本
 
-`scripts/` 下保留可复跑的外部连通性 / 回归脚本：`models-smoke.ts`（对话模型）、`skills-smoke.ts`（技能契约检查：引用解析 / 目录渲染上限 / 工具边界 / schema / 模板可一键新建）、`model-audit.ts`（全通道可用性自查与「模型已下线」识别，见 §7）、`image-smoke.ts`（文生图）、`edit-smoke.ts`（图生图）、`video-smoke.ts`（文生视频 + OSS 截帧封面）、`oss-smoke.ts`（OSS 读写）、`resumable-smoke.ts`（流恢复）、`favorite-smoke.ts`（收藏）、`overview-smoke.ts`（总览统计）、`knowledge-smoke.ts`（知识库检索）、`knowledge-file-smoke.ts`（知识库文件解析 / 上传）、`credit-smoke.ts`（Credits 发放 / 预留 / 结算）、`credit-admin.ts`（Credits 管理 CLI，见 [docs/credits.md](./credits.md)）、`db-stamp.ts`（为已有库补写迁移记录）。
+`scripts/` 下保留可复跑的外部连通性 / 回归脚本，按域分组：对话与流恢复（`models-smoke` / `resumable-smoke`）、图片（`image-smoke` / `edit-smoke`）、视频（`video-smoke`）、OSS（`oss-smoke`）、知识库（`knowledge-smoke` / `knowledge-file-smoke`）、Credits（`credit-smoke` / `credit-admin` CLI，见 [docs/credits.md](./credits.md)）、技能契约（`skills-smoke`，即 `bun run skills:check`）、模型可用性（`model-audit`，见 §7）、资产与总览（`favorite-smoke` / `overview-smoke`）、迁移（`db-stamp`）。
 
 > 真实外部调用测试须显式设置超时，否则默认超时中断会遗留测试数据。

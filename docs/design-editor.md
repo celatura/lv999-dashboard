@@ -10,7 +10,7 @@ LV999 Dashboard 的可视化创作模块：一个 Canva/Figma 式的**设计画�
 
 - **入口**：`/dashboard/design`（新建空白画布）与 `/dashboard/design/[id]`（打开已存设计）；产出在 `/dashboard/assets`（我的资产）统一管理，行操作有「编辑」直达编辑器。
 - **技术形态**：react-konva 纯客户端组件，经 `next/dynamic({ ssr: false })` 挂载（canvas 无法 SSR），**不走**项目的 SSR+Suspense 数据范式。
-- **能力**：加文字 / 矩形 / 圆 / 图片（从资产选 **或本地上传**）、**画布内 AI 生图（工具栏）/ AI 改图（属性面板，替换当前对象或作为新对象插入）**、**对话内一句话生成整版（`composeDesign` 产出直接在本画布打开）**、选中/移动/缩放/旋转、**多选（Shift 点选）**、**复制粘贴（Ctrl+C/V/D）**、**拖拽吸附对齐 + 参考线**、删除、图层前后、批量对齐、**文字水平对齐（左/中/右，需换行宽度）**、**加粗/斜体、换行宽度、矩形圆角（属性面板）**、撤销重做、缩放平移、文字 overlay 编辑（中文 IME 安全）、属性面板（单选编辑 / 多选批量）、保存 / 打开 / 导出 PNG / 回存资产。
+- **能力**：文字 / 矩形 / 圆 / 图片（资产选择或本地上传）对象的增删改；选中 / 移动 / 缩放 / 旋转、多选、复制粘贴、拖拽吸附对齐 + 参考线、图层与批量对齐、撤销重做、缩放平移、中文 IME 安全的文字编辑、属性面板（字体样式 / 换行宽度 / 对齐 / 圆角）；画布内 **AI 生图（工具栏）与 AI 改图（属性面板，替换或新增对象）**；对话内一句话生成整版（`composeDesign` 产出直接在本画布打开）；保存 / 导出 PNG / 回存资产。
 
 **核心设计原则（Konva 官方铁律）**：Konva 节点只是交互层，文档是独立的可序列化纯数据；拖拽/变换只在**操作结束**（`onDragEnd`/`onTransformEnd`）提交回 React；图片对象只存**资产引用 `assetId`**，不存图片字节。
 
@@ -101,19 +101,19 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 ## 6. 编辑器前端 `src/features/design/`
 
-- `lib/editor-context.tsx`：`EditorProvider` —— 组合 reducer + 相机（zoom/position）+ 文字编辑态 + save/export + **会话内剪贴板**（`clipboardRef` 快照 + `pasteCountRef` 累加偏移 + `clipboardCount` 供按钮 disabled）；暴露多选（`select(ids)`/`toggleSelect`/`clearSelection`）、批量提交（`commitObjects`/`removeObjects`）、复制粘贴（`copy`/`paste`/`duplicate`）、`insertImage(assetId, natural)`（AI 生图/改图与选图/上传共用插入入口）；latest-ref 保持回调稳定。**快捷键让位**：除了输入框/文字编辑态，存在 `[role="dialog"]` 弹层（插入图片 / AI 生成 / AI 修改 / 命令面板）时整体跳过画布快捷键，避免焦点在弹层内时 Delete/方向键误改（误删）画布。**预览按需导出**：`save()` 仅在「文档真有改动」或「打开时无预览」（`dirty || !initialHasPreview`）时才导出并附带 `previewPng`——预览上传是 2.5MB 级且 `toDataURL` 同步阻塞主线程，只改标题或重复保存不必重做（服务端 `updateDesignAsset` 按 `previewPng` 存在性更新，不传则不动 storageKey/sizeBytes）；注意不能整体早退（title 不在 document 里，`isDirty` 不反映标题变化）。`hasPreviewRef` 的语义是「预览与已存文档一致」：仅当本次尝试过导出才由结果决定（尝试了但失败/超预算 → false，下次保存补导）。另有 `savingRef` 并发闸门：工具栏按钮有 `disabled={isSaving}` 但 Ctrl/Cmd+S 的 keydown 没有，按住连发会重复导出/重复上传，**新建页上还会开出两条资产**。`isDirty` 已 memo 化（避免每次滚轮/平移都 stringify 整份文档），保存成功后写回 `savedSnapshot` state 触发重算（快照用 state 而非 ref，memo 依赖才与读取值一致）。
-- `hooks/use-editor-reducer.ts`：`{ past, present(document), future, selectedIds[] }`（原单选 `selectedId` 已废弃）；action 含批量 `update-objects`/`remove-objects`/`reorder-many`/`duplicate-objects`/`paste-objects` + `select`/`toggle-select`/`clear-select`；**一次完整操作（含批量）提交一条历史**。`ObjectPatch` 含 **`assetId`**（仅 image 对象有意义），使「AI 改图 → 替换当前对象」就是一次 `update-object`（一条历史，undo 可回退替换）；亦含 **`align`**（仅 text 对象有意义，属性面板的对齐切换就是一次 `update-object`）。
-- `lib/document.ts`：对象工厂 / `reorderObject`·`reorderObjects`（图层）/ `objectBounds`（对象→AABB；rect/image 取旋转后的真实 AABB，text 为估算框，circle 旋转不变）/ `unionBox`（多框并集）/ `cloneObjectWithOffset`（克隆 + 新 `generateObjectId` + 偏移）/ **`imageReplacePatch`（AI 改图替换：只换 `assetId` 引用 + 按新图自然尺寸 contain 等比适配原外接框、保持视觉中心（含旋转：Konva 绕节点原点旋转，按旋转后中心反推新原点），绝不拉伸变形；natural 缺省时沿用原框）** / `parseDesignDocument`（读库 JSON，损坏回退空白）。
+- `lib/editor-context.tsx`：`EditorProvider` —— reducer + 相机（zoom/position）+ 文字编辑态 + save/export + 会话内剪贴板，统一暴露选中 / 批量提交 / 复制粘贴 / `insertImage`（AI 与选图共用插入入口），latest-ref 保持回调稳定。**快捷键让位**：存在 `[role="dialog"]` 弹层时整体跳过画布快捷键，避免焦点在弹层内时 Delete/方向键误删画布对象。**预览按需导出**：`save()` 仅在「文档真有改动」或「打开时无预览」（`dirty || !initialHasPreview`）时导出 `previewPng`——预览是 2.5MB 级且 `toDataURL` 同步阻塞主线程；但 title 不在 document 里，`isDirty` 不反映标题变化，不能整体早退。`hasPreviewRef` 语义是「预览与已存文档一致」（尝试过导出但失败/超预算 → false，下次保存补导）。**`savingRef` 并发闸门**：Ctrl/Cmd+S 的 keydown 不走按钮 `disabled`，按住连发会重复导出/上传，新建页还会开出两条资产。`isDirty` 已 memo 化（避免滚轮/平移都 stringify 整份文档）。
+- `hooks/use-editor-reducer.ts`：`{ past, present(document), future, selectedIds[] }`；**一次完整操作（含批量）提交一条历史**。`ObjectPatch` 含 `assetId`（image）与 `align`（text）——「AI 改图替换」和「对齐切换」都各是一次 `update-object`，undo 可回退。
+- `lib/document.ts`：对象工厂、图层排序、`objectBounds`（rect/image 取旋转后真实 AABB，text 估算）、`unionBox`、`cloneObjectWithOffset`、`parseDesignDocument`（损坏回退空白）；**`imageReplacePatch`**（AI 改图替换：只换 `assetId`，按新图自然尺寸 contain 适配原外接框并保持视觉中心（含旋转），绝不拉伸变形）。
 - `lib/snap.ts`：`computeSnap`（移动框的 left/center-x/right × top/center-y/bottom 对齐到其他对象 + 画布，阈值内取最近，返回吸附坐标 + 参考线）/ `snapThreshold`（屏幕px / zoom）/ `sameGuides`（避免拖拽中频繁 setState）。纯函数无 Konva 依赖。
 - `lib/layouts.ts`：**版式模板（服务端纯函数，无 Konva / 无 IO，不进客户端 bundle）**——见 6.1。
-- `lib/export.ts`：`exportStageToDataURL` —— 导出前隐藏 Transformer、临时把相机归一并将 Stage 尺寸设为文档尺寸，`pixelRatio` 按最长边上限折算（默认 maxDimension 2560）。**`maxPixelRatio` 默认 1（只缩不放）**：上采样不增细节只增体积，且保存用预览 PNG 同时是「我的资产」的**下载产物**（`sizeBytes` 口径 = 下载体积），缩边会让下载图小于画布。`exportPreviewBase64` 按 `maxDimension 1920 × pixelRatio 1` 导出并校验是否落在 `PREVIEW_BASE64_BUDGET`（3MB base64 ≈ 2.25MB PNG，留出文档 JSON 与 4MB 请求体余量）内，**超预算则返回 undefined 丢预览保文档**（带超限载荷必撞 413、整次保存含文档都存不下；不传 previewPng 只是本次不刷新预览，下次保存再试）——**5 个预设画布均 1:1 原尺寸导出**（1920×1080 不再是 1280×720）；当前 UI 只提供预设尺寸（最长边 ≤1920），1920 上限是为未来自定义尺寸预留的缩边兜底（届时如需体积降级再恢复降档阶梯）。工具栏「导出」同口径（2560 上限、不上采样）。
-- `constants/canvas.ts`：画布尺寸预设 `CANVAS_PRESETS`、默认画布、填充色 `FILL_SWATCHES`、字号预设、圆角预设 `CORNER_RADIUS_PRESETS`、换行宽度预设 `TEXT_WRAP_WIDTH_PRESETS`、缩放范围、`createEmptyDocument()`。
+- `lib/export.ts`：`exportStageToDataURL` —— 导出前隐藏 Transformer、归一相机、Stage 设为文档尺寸，`pixelRatio` 按最长边上限折算（工具栏导出 maxDimension 2560）。**`maxPixelRatio` 默认 1（只缩不放）**：上采样不增细节只增体积，且预览 PNG 同时是下载产物（`sizeBytes` 口径 = 下载体积），缩边会让下载图小于画布。`exportPreviewBase64` 按 1920 × 1 导出并校验落在 `PREVIEW_BASE64_BUDGET`（3MB base64 ≈ 2.25MB PNG，为文档 JSON 与 4MB 请求体留余量）内，**超预算返回 undefined 丢预览保文档**（带超限载荷必撞 413、整次保存都存不下；下次保存再试）——**预设画布均 1:1 原尺寸导出**。
+- `constants/canvas.ts`：画布尺寸 / 填充色 / 字号 / 圆角 / 换行宽度预设、缩放范围与 `createEmptyDocument()`。
 - 组件：
   - `design-editor-island.tsx`（`next/dynamic(ssr:false)` 包装，客户端边界）、`design-editor.tsx`（根组件：Provider + 布局）
-  - `editor-canvas.tsx`：**共享 Transformer 单例**（canvas 层）+ `shapeRegistry`(id→Konva.Shape) + `registerShape` 回调；`selectedIds`/`objects`/`editingTextId` 变化时 `transformer.nodes(选中节点)` + batchDraw（文字编辑态 nodes=[])；拖拽三段（Start 预计算 groupBox/otherBoxes/canvasBox → Move `computeSnap` 修正节点位置 + setGuides → End 提交吸附后坐标）；多选拖选中项整体移动；`onTransformEnd` 逐节点 `foldScale` 折算回尺寸一次 commit；参考线 `Line`（listening=false，strokeWidth/dash 随 zoom 归一，拖拽结束清空，不入导出）。
-  - `editable-object.tsx`：按 type 渲染 + 主 shape 设 `id={object.id}` + ref 回调 `registerShape` 上报节点；**不再内置 Transformer**（移至 canvas 层共享）；onClick 带 `shiftKey` → toggleSelect；onDragStart/Move/End 委托 canvas；`memo` 化。
-  - `editor-toolbar.tsx`：加图形/文字/图片、**AI 生成图片**（`Icons.sparkles` → `AiGenerateDialog`）、**复制/粘贴**（`Icons.copy`/`Icons.clipboard`，disabled 依选中/剪贴板）、撤销重做、缩放、保存、导出。
-  - `properties-panel.tsx`：单选 → 对象属性编辑（填充色 / 字号 / **加粗·斜体（fontStyle 标记切换）** / **换行宽度（360/540/720/不限——清除 width 的补丁为 `width: undefined`，JSON.stringify 天然丢键、schema 可选仍合法；对齐组随设宽出现）** / **矩形圆角预设（0/8/12/24/48，含新建默认值 12）**；**单选 image 时额外给「AI 修改」按钮** → `AiEditDialog`（换图只走这条 AI 路径，**不提供「从资产库替换」独立入口**——已决策不做：`imageReplacePatch` 仅服务 AI 改图，手动换图走删除重插）；面板以对象 id 为 key，切换选中即重建并重置弹层状态；**单选带换行宽度的 text 时给「对齐」左/中/右**）；**多选 → 「已选 N 个」+ 批量删除/图层/对齐**（左中右·上中下，以选区 unionBox 为基准）；图层镜像列表支持 Shift 多选。
+  - `editor-canvas.tsx`：**共享 Transformer 单例**（canvas 层）+ shape 注册表；选中 / 对象 / 编辑态变化时挂 `transformer.nodes()`；拖拽三段（Start 预计算吸附候选 → Move `computeSnap` 修正视觉位置 + 参考线 → End 提交最终坐标，拖拽中不入文档）；`onTransformEnd` 逐节点折算 scale 回尺寸一次 commit；参考线 `listening=false`、随 zoom 归一、不进导出。
+  - `editable-object.tsx`：按 type 渲染主 shape 并上报节点引用（不内置 Transformer）；Shift 点选切换、拖拽委托 canvas；`memo` 化。
+  - `editor-toolbar.tsx`：加图形/文字/图片、AI 生成（→ `AiGenerateDialog`）、复制/粘贴（disabled 依选中/剪贴板）、撤销重做、缩放、保存、导出。
+  - `properties-panel.tsx`：单选 → 填充色 / 字号 / 加粗斜体 / 换行宽度（360-720，清除为 `width: undefined`，对齐组随设宽出现）/ 矩形圆角（新建默认 12）；单选 image 额外给「AI 修改」→ `AiEditDialog`——**不提供「从资产库替换」入口**（已决策：`imageReplacePatch` 仅服务 AI 改图，手动换图走删除重插）；面板以对象 id 为 key，切换选中即重建；多选 → 「已选 N 个」+ 批量删除 / 图层 / 对齐（以选区 unionBox 为基准）；图层镜像列表支持 Shift 多选。
   - `ai-generate-dialog.tsx`：**画布内 AI 生图**——prompt textarea（必填 1-2000 + 计数）+ 比例 Select（`ASPECT_KEYS`，默认自动）→ `aiGenerateImageMutation` → `loadNaturalSize` → `insertImage`（等比居中插入并选中）+ toast + 失效资产域。
   - `ai-edit-dialog.tsx`：**画布内 AI 改图**——instruction textarea（必填 1-2000）+ 可选比例 + **结果处置 RadioGroup**（「替换当前对象」默认 / 「作为新对象插入」）→ agent 域 `editImageAssetMutation`（以对象 `assetId` 为源，血缘由端点记录）→ `loadNaturalSize` → 替换走 `commitObject(id, imageReplacePatch(...))`、新增走 `insertImage`。
   - 两个 AI 对话框共同约束：生成中（10-60s）**锁定弹层**（spinner + 「请勿关闭」提示、禁重复提交、禁关闭、禁改输入，MVP 不提供 abort）；失败**保留输入**并就地（`role='alert'`）+ toast 展示中文错误（`resolveAiImageError`）；每次打开重置草稿。
@@ -149,19 +149,14 @@ design 本质是一种 asset，故复用现有资产 API 命名空间（`/api/ag
 
 ---
 
-## 8. Konva 官方最佳实践（本模块遵循项）
+## 8. Konva 最佳实践与官方参考
 
-1. 文档数据与 Konva 节点分离；读值只在拖拽/变换结束时。
-2. Transformer 用改变 scale 缩放——提交前把 scale 折算回对象自身的 width/height/radius/fontSize。
-3. 历史边界：一次完整用户操作记一条 undo。
-4. 导出前隐藏 Transformer；有相机变换时归一相机与 Stage 尺寸再导出，`pixelRatio` 归一。
-5. 跨域图片会污染画布——本模块用同源 `/raw` 代理规避。
-6. 可达性：canvas 内部对辅助技术不可见，属性面板提供图层镜像列表（支持 Shift 多选）。
-7. 图片只存资产引用，绝不放进历史数组（复制亦然，只克隆 `assetId`）。
-8. **多选用 canvas 层共享 Transformer 单例**（`transformer.nodes([...])` 挂多个选中节点），非每对象一个；变换结束逐节点把 scale 折算回自身尺寸并归一。
-9. **拖拽吸附遵循“拖拽中不入文档”铁律**：`onDragMove` 只改节点视觉位置（吸附修正）+ 渲染参考线，`onDragEnd` 才提交最终坐标；参考线 `listening=false` 且拖拽结束清空，绝不进导出 PNG。
+与正文重复的通用铁律（文档/节点分离、scale 折算、历史边界、导出前隐藏 Transformer、同源代理规避污染、拖拽中不入文档）已在各节落地说明，此处只列两条容易被忽略的：
 
-官方文档参考：react-konva 入口 <https://konvajs.org/docs/react/index.html>、Canvas Editor 范式 <https://konvajs.org/docs/sandbox/Canvas_Editor.html>、高质量导出 <https://konvajs.org/docs/data_and_serialization/High-Quality-Export.html>。
+- **可达性**：canvas 内部对辅助技术不可见，属性面板提供图层镜像列表（支持 Shift 多选）。
+- **多选变换**：canvas 层共享 Transformer 单例（`transformer.nodes([...])`），变换结束逐节点把 scale 折算回自身尺寸并归一。
+
+官方文档参考：react-konva <https://konvajs.org/docs/react/index.html>、Canvas Editor 范式 <https://konvajs.org/docs/sandbox/Canvas_Editor.html>、高质量导出 <https://konvajs.org/docs/data_and_serialization/High-Quality-Export.html>。
 
 ---
 

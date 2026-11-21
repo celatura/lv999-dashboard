@@ -46,13 +46,9 @@ bun scripts/credit-admin.ts resolve <reservationId> <actualCost> --confirm-stopp
 
 不要对仍在运行的任务人工结算，否则可能提前释放额度，允许重复使用。失败后是否应收取费用由管理员结合任务结果和既有失败规则决定。结算会保留预留 ID、费用和人工处理标记；重复结算相同结果无副作用，不同结果会报错。
 
-## 迁移与部署
-
-`drizzle/` 的迁移链可完整重放：`0000_baseline.sql` 建全部表（含 Credits 结构与约束），`0001_knowledge_hnsw.sql` 补 pgvector HNSW 索引。空库执行 `bun run db:migrate` 即可建好；已应用状态记录在 `drizzle.__drizzle_migrations`，不会重复执行。
-
-今后修改 schema 时，先备份并确认目标数据库，再运行 `bun run db:generate` 生成增量 SQL、`bun run db:migrate` 应用。迁移前停止旧版写入和在途任务，迁移成功后再启动对应版本。已有数据但尚无迁移记录的旧库，先执行 `bun run db:stamp`（默认 dry-run，确认后加 `--apply`）接入。
-
 ## 验证
+
+迁移流程与全局一致（见 [docs/agent.md](./agent.md) §12）。
 
 在**已迁移的隔离测试库**运行 `bun run scripts/credit-smoke.ts`，覆盖并发预留、父子预留、幂等结算、释放、超额承担、管理员调整及待对账预留。`scripts/knowledge-smoke.ts` 会调用真实 embedding API，需测试数据库及有效 API Key，会产生上游费用。
 

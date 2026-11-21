@@ -92,7 +92,7 @@ result = await generateVideo({
 
 ## 6. Agent 集成（改 `src/features/agent/api/agent.ts`）
 
-新增 2 个工具，**同时**登记到 `agentValidationTools` 与 `buildAgent.tools`（与现有 7 个工具并列，共 9 个）：
+新增 2 个工具，**同时**登记到 `agentValidationTools` 与 `buildAgent.tools`（与其余业务工具并列；全量工具清单见 [docs/agent.md](./agent.md) §5）：
 
 | 工具 | 输入 | 行为 |
 | --- | --- | --- |
@@ -120,8 +120,8 @@ result = await generateVideo({
 - **对话内视频卡片**（[`tool-video-part.tsx`](../src/features/agent/components/chat/tool-video-part.tsx)）：进行中（1-5 分钟）→ 状态条「正在生成视频…（预计 1-5 分钟；离开页面也会继续）」；完成 → `<video controls preload='metadata' poster='/raw?snapshot=1' src={previewUrl}>`（src 走详情端点签发的 `previewUrl` 直连 OSS，原生支持 Range 可拖动进度；poster 走同源截帧代理）；失败 → 中文错误条。**保留 wan3.0 原生音频，不静音**。非流式（`active=false`）时进行中 part 渲染中性「已停止」收尾（与图片卡片同理，避免残留转圈）。
 - **消息渲染**（[`message-item.tsx`](../src/features/agent/components/chat/message-item.tsx)）：`tool-createVideoAsset` / `tool-createVideoFromImageAsset` 两个 part 类型均路由到 `ToolVideoPart`。
 - **预览弹窗**（[`asset-preview-dialog.tsx`](../src/features/agent/components/assets/asset-preview-dialog.tsx)）：video 分支 `<video controls autoPlay muted playsInline preload='metadata' poster='/raw?snapshot=1' src={previewUrl}>`（autoPlay+muted 保证可靠自动播放，可手动取消静音）；I2V 派生视频显示「基于《源图标题》修改」。
-- **资产表格缩略图**（[`asset-tables/columns.tsx`](../src/features/agent/components/assets/asset-tables/columns.tsx) 的 `AssetThumb`）：视频经 `/raw?snapshot=1` 加载 36px 截帧封面 + 播放图标 overlay（`Icons.play`）；kind 筛选下拉自动含「视频」（`ASSET_KINDS` 单一来源）。
-- **下载**（[`assets/[id]/download`](../src/app/api/agent/assets/[id]/download/route.ts)）：video 有 `storageKey`，走 302 签名 URL，扩展名映射 `video → mp4`。
+- **资产表格缩略图**（`AssetThumb`）：经 `/raw?snapshot=1` 加载 36px 截帧封面 + 播放图标 overlay；kind 筛选下拉自动含「视频」（`ASSET_KINDS` 单一来源）。
+- **下载**：video 走 302 签名 URL，扩展名映射 `video → mp4`（见 agent.md §6）。
 
 ---
 

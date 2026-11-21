@@ -56,7 +56,7 @@ if (!verified) redirect('/auth/sign-in');
 
 ## 4. 数据模型与 userId 语义
 
-Better Auth 五表（`auth-schema.ts`）：`user`（id/email/name/image/emailVerified/createdAt/updatedAt）、`session`、`account`、`verification`、`rate_limit`（rateLimit storage=database 用）。
+Better Auth 五表（`auth-schema.ts`）：`user` / `session` / `account` / `verification` / `rate_limit`（`rateLimit storage=database` 用），列结构以文件为准。
 
 - **业务表 userId 语义**：conversations / assets / knowledge / credits / skills 的 `userId`(text) 为 **Better Auth user id**（列类型不变）。
 - **`ADMIN_USER_IDS`**：值为 Better Auth user id（注册后从 `user` 表或用户管理页取）；机制为 env 白名单 + [`isAdmin`](../src/lib/admin.ts)。
@@ -92,17 +92,15 @@ Better Auth 注册不带头像，`user.image` 恒空 → 全站首字母占位�
 | 服务端处理 | [`features/profile/lib/avatar.ts`](../src/features/profile/lib/avatar.ts) | `normalizeAvatar`（sharp 256×256 cover → png）+ `commitUserImage`（updateUser 写回 + 转发 cookie） |
 | 上传 / 删除 | [`POST` / `DELETE /api/user/avatar`](../src/app/api/user/avatar/route.ts) | userId **只取自会话**（`getUserIdAuthoritative`，防越权）；限流 scope `avatar` 10/分 |
 | 代理展示 | [`GET /api/avatar/[userId]`](../src/app/api/avatar/%5BuserId%5D/route.ts) | 登录即可（头像半公开）；签名拉 OSS → 同源回传字节 + `Cache-Control: private, max-age=300`；无对象 → 404 |
-| 前端入口 | [`avatar-card.tsx`](../src/features/profile/components/avatar-card.tsx) | 预览 + 上传 / 更换 + 删除（确认）；成功后乐观更新 src（`?v=` 破缓存）+ `router.refresh()` |
+| 前端入口 | [`avatar-card.tsx`](../src/features/profile/components/avatar-card.tsx) | 自动乐观更新 src（`?v=` 破缓存）+ `router.refresh()` |
 
-**上传流程**：`formData` 取 file → 校验（`File` 实例 / ≤5MB / mime 粗筛 / `detectImageType` 魔数防改扩展名）→ sharp 规格化 → `putObject` 覆盖写 → `commitUserImage('/api/avatar/{userId}')` → 返回 `{ image }`。
+**上传流程**：`formData` 取 file → 校验（`File` 实例 / ≤5MB / mime 粗筛 / `detectImageType` 魔数防改扩展名）→ sharp 规格化 → `putObject` 覆盖写 → `commitUserImage('/api/avatar/{userId}')` → 返回 `{ image }`。设置与删除对称走 `updateUser`（原生支持 `image: null`），删除即时生效、各处一致回退首字母，无需绕 Drizzle。
 
 **`user.image` 存同源代理路径**（`/api/avatar/{userId}`）而非 OSS 签名 URL：签名 URL 会过期、且需对象公开读（安全风险）；代理路径永不过期、桶保持私有，复用资产 `/raw` 成熟模式。
 
 **即时生效的关键（规避 ≤60s cookieCache）**：`updateUser` 内部 `setSessionCookie` 会重签携带新 user 数据的 session cookie，但从 Route Handler 直接调用只拿到返回体、**拿不到 cookie**——故 `commitUserImage` 以 `asResponse: true` 取出响应并**转发其 `Set-Cookie`** 给浏览器，浏览器才立即用新值覆盖 cookieCache。若绕开 Better Auth 直接 Drizzle 改库，则服务端 `verifySession()`（读 cookieCache）最长 ≤60s 仍旧值。
 
-**设置 / 删除对称走 `updateUser`**：`updateUser` 原生支持 `image: null`（透传 `internalAdapter.updateUser` 置空），故删除同样即时、各处一致回退首字母，无需为 null 语义绕 Drizzle。
-
-**展示零改动**：侧边栏 [`user-avatar-profile.tsx`](../src/components/user-avatar-profile.tsx)、管理页 [`users-table/columns.tsx`](../src/features/admin/components/users-table/columns.tsx)、[`dashboard/layout.tsx`](../src/app/dashboard/layout.tsx) 服务端注入均读 `user.image`（`AvatarImage` + 首字母回退）——写入后全部自动生效；代理 404 时 `AvatarImage` 自然回退 `AvatarFallback`。
+**展示链路由 `user.image` 自动生效**（侧边栏 / 管理页 / layout 均 `AvatarImage` + 首字母回退）；代理 404 时自然回退 `AvatarFallback`。
 
 ---
 
@@ -129,22 +127,7 @@ Better Auth 注册不带头像，`user.image` 恒空 → 全站首字母占位�
 
 ## 8. 环境变量
 
-```env
-# 认证
-BETTER_AUTH_SECRET=        # openssl rand -base64 32
-BETTER_AUTH_URL=           # 生产 HTTPS；本地 http://localhost:3000
-
-# SMTP（密码重置邮件；未配置则重置不可用，不影响登录/注册）
-SMTP_HOST=
-SMTP_PORT=465
-SMTP_SECURE=true
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=
-
-# 管理员白名单（Better Auth user id，逗号分隔；留空 = 无管理员）
-ADMIN_USER_IDS=
-```
+`BETTER_AUTH_SECRET`（`openssl rand -base64 32` 生成）、`BETTER_AUTH_URL`（生产 HTTPS；本地 http://localhost:3000）、`SMTP_*`（未配置则密码重置不可用，不影响登录/注册）、`ADMIN_USER_IDS`（Better Auth user id，逗号分隔；留空 = 无管理员）。完整注释清单见 [`env.example.txt`](../env.example.txt)。
 
 ---
 
