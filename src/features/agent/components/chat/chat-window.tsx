@@ -34,7 +34,6 @@ import {
   attachmentsToFileParts,
   MAX_ATTACHMENTS_PER_MESSAGE,
   type AgentChatMessage,
-  type AgentMessageMetadata,
   type AssetKind,
   type ChatAttachment,
   type Conversation,
@@ -63,7 +62,6 @@ import { ChatComposer } from './chat-composer';
 import { ChatEmptyState } from './chat-empty-state';
 import { MessageItem } from './message-item';
 import { QuestionCard } from './question-card';
-import type { AskUserToolPart } from './ask-user-part';
 
 interface ChatWindowProps {
   conversation?: Conversation;
@@ -213,12 +211,11 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
   // 待回答的澄清提问：仅最后一条 assistant 消息可承载（QuestionCard 吸附在滚动区底部）
   const pendingQuestion =
     lastMessage?.role === 'assistant'
-      ? (lastMessage.parts.find(
+      ? lastMessage.parts.find(
           (part) =>
-            isToolUIPart(part) &&
             part.type === 'tool-askUser' &&
             (part.state === 'input-streaming' || part.state === 'input-available')
-        ) as AskUserToolPart | undefined)
+        )
       : undefined;
   // 首个 chunk 到达前（submitted 阶段）没有 assistant 消息，思考模型可能静默 10-30s：
   // 用「正在思考…」占位表明请求已发出；出现实际内容（正文 / 思考正文 / 工具调用）后
@@ -412,7 +409,7 @@ export function ChatWindow({ conversation, initialMessages }: ChatWindowProps) {
     }
     // 技能从失败消息 metadata 还原（编辑重发时保持同一技能，与 regenerate 语义一致）；
     // 但 unknown_skill 说明技能已删除，不能还原（否则重发必然再次 400）
-    const messageMeta = message.metadata as AgentMessageMetadata | undefined;
+    const messageMeta = message.metadata;
     const skill =
       chatError?.code !== 'unknown_skill' && messageMeta?.skillId && messageMeta.skillName
         ? { id: messageMeta.skillId, name: messageMeta.skillName }

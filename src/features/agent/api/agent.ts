@@ -1,5 +1,4 @@
-import { ToolLoopAgent, isStepCount, tool, type InferUITools, type Tool, type UIMessage } from 'ai';
-import { z } from 'zod';
+import { ToolLoopAgent, isStepCount, tool, type Tool } from 'ai';
 import { DEFAULT_MODEL, isModelKey } from '../constants/models';
 import {
   AGENT_TOOL_NAMES,
@@ -12,7 +11,7 @@ import {
 } from '../constants/skills';
 import { ASPECT_KEYS, ASPECT_PRESETS, type AspectKey } from '../constants/image-models';
 import { IMAGE_RATE_LIMIT, IMAGE_RATE_WINDOW_SECONDS } from '../constants/limits';
-import { DEFAULT_I2V_MODEL, VIDEO_ASPECT_KEYS } from '../constants/video-models';
+import { DEFAULT_I2V_MODEL } from '../constants/video-models';
 import { resolveModel } from './provider';
 import { generateImage } from './image-generation';
 import { editImageAssetCore, MAX_EDIT_SOURCE_BYTES } from './image-edit';
@@ -32,11 +31,10 @@ import {
   searchAssets,
   updateTextAsset
 } from './service';
-import { ASSET_KIND_VALUES } from './types';
+import { agentToolContracts } from './tool-contracts';
 import { searchKnowledgeByText } from '@/features/knowledge/lib/search';
 import {
   DEFAULT_LAYOUT_ASPECT,
-  LAYOUT_KEYS,
   composeDesignDocument,
   imageRegionRatio
 } from '@/features/design/lib/layouts';
@@ -44,7 +42,8 @@ import { readImageDimensions } from '../lib/upload-image';
 import { chargeOnGenerationResult } from '@/features/credits/lib/billing';
 import { priceImage, priceVideo } from '@/features/credits/lib/pricing';
 import { getSignedUrl } from '@/lib/oss';
-import type { AssetKind } from './types';
+
+export type { AgentValidationUIMessage } from './tool-contracts';
 
 /** 单个资产的内容上限（字符数按 UTF-8 字节计算） */
 export const MAX_ASSET_SIZE_BYTES = 200 * 1024;
@@ -106,285 +105,18 @@ const AGENT_INSTRUCTIONS = `你是「Agent 创作工作台」的编排 Agent，�
     - 一次对话最多提问一轮；用户回答后直接执行，不要重复确认同一信息
     - 能从上下文推断、用户已明确指定、或只是常规确认时不要提问，直接执行`;
 
-const CREATE_ASSET_DESCRIPTION =
-  '把一份完整作品保存为结构化资产。Markdown 文章/文案用 kind=markdown；完整 HTML 网页用 kind=html（必须是可以直接打开运行的完整文档，样式与脚本内联）。';
-
-const createAssetInputSchema = z.object({
-  title: z.string().min(1).max(100).describe('资产标题'),
-  kind: z.enum(['markdown', 'html']).describe('资产类型'),
-  content: z.string().min(1).describe('资产完整内容')
-});
-
-const EDIT_ASSET_DESCRIPTION =
-  '对已有文本资产（markdown / html）做精确的局部编辑：按 old_string → new_string 原文替换，assetId 保持不变。小改（改标题、换措辞、调段落、删片段）优先用本工具，不要整篇重写；整篇改写或扩展成新作品时才用 createAsset。old_string 必须与正文逐字一致（含空格换行），默认要求唯一命中，多处相同文本用 replace_all。';
-
-const editAssetInputSchema = z.object({
-  assetId: z
-    .uuid()
-    .describe(
-      '要编辑的文本资产 id（markdown / html；来自 readAsset / findAssets 结果、上文工具返回值或消息中的 [引用资产] 块）'
-    ),
-  old_string: z
-    .string()
-    .min(1)
-    .describe('要替换的原文片段：逐字复制（含空格与换行），带 3-5 行前后文确保唯一命中'),
-  new_string: z.string().describe('替换后的文本（空字符串 = 删除该片段）'),
-  replace_all: z
-    .boolean()
-    .optional()
-    .describe('替换全部命中（默认 false；false 时 old_string 必须在正文中恰好出现一次）'),
-  title: z.string().min(1).max(100).optional().describe('可选：编辑后的新资产标题')
-});
-
-const aspectFieldSchema = z
-  .enum(ASPECT_KEYS)
-  .optional()
-  .describe(
-    '可选：输出比例。竖版小红书封面用 "3:4"，方形 "1:1"，横版 "16:9" 等；不传由模型自动推荐分辨率'
-  );
-
-const CREATE_IMAGE_ASSET_DESCRIPTION =
-  '用文生图模型生成一张图片并保存为图片资产。适合封面、海报、配图、插画等场景。prompt 必须完整自包含地描述画面（主体、风格、构图、色调、氛围），不依赖对话上下文；画面中需要出现文字（如标题）时，在 prompt 中写明文字内容与位置；需要竖版（如小红书封面）时用 aspect 指定 "3:4"。';
-
-const createImageAssetInputSchema = z.object({
-  title: z.string().min(1).max(100).describe('资产标题'),
-  prompt: z.string().min(1).max(2000).describe('文生图提示词：完整自包含的画面描述（中文优先）'),
-  aspect: aspectFieldSchema
-});
-
-const EDIT_IMAGE_ASSET_DESCRIPTION =
-  '在已有图片资产的基础上按用户要求进行图像编辑（图生图），产出新的图片资产。sourceAssetId 必须是真实存在的图片资产 id：来自上文 createImageAsset / editImageAsset 的返回值、findAssets 的检索结果，或用户消息中 [引用资产] 块给出的 id；instruction 描述修改要求（如"背景换成夜晚""改成水墨淡彩风格"）；title 反映修改后的结果。';
-
-const editImageAssetInputSchema = z.object({
-  sourceAssetId: z
-    .uuid()
-    .describe(
-      '被修改的源图片资产 id（来自上文 createImageAsset / editImageAsset 返回值、findAssets 结果或消息中的 [引用资产] 块）'
-    ),
-  title: z.string().min(1).max(100).describe('修改后新资产的标题'),
-  instruction: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe('修改指令：描述如何修改这张图（如"背景换成夜晚""改成水墨淡彩风格"）'),
-  aspect: z
-    .enum(ASPECT_KEYS)
-    .optional()
-    .describe('可选：改变输出比例（不传则延续源图构图；需要竖版封面用 "3:4"）')
-});
-
-const COMPOSE_DESIGN_DESCRIPTION =
-  '一句话产出「整版设计」（封面 / 海报 / 头图）：内部先文生图，再按版式模板把主图与标题 / 副标题排好版，产出可在设计画布继续编辑的 design 资产（文字为可编辑对象，非烧录到图里）。用户要「做一张…封面，标题是…」这类图文整版需求时用本工具；只要一张图时用 createImageAsset。imagePrompt 只描述画面（不要要求在图里写标题文字）；调用前先想好版式与文案；一次对话不要多次调用。';
-
-const composeDesignInputSchema = z.object({
-  title: z.string().min(1).max(100).describe('设计资产标题'),
-  imagePrompt: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe(
-      '主图文生图提示词：完整自包含的画面描述（中文优先，主体/风格/构图/色调/氛围）。不要要求画面里出现标题文字，文字由版式排上去'
-    ),
-  heading: z.string().max(60).optional().describe('可选：主标题文字（排入版面）；不传则用 title'),
-  subheading: z.string().max(120).optional().describe('可选：副标题 / 一句话说明；不需要时省略'),
-  layout: z
-    .enum(LAYOUT_KEYS)
-    .describe(
-      '版式："top-image" 上图下文（封面常用）；"full-image-bar" 全图 + 底部半透明标题条（图为主视觉）；"left-image" 左图右文（横版头图，竖版自动退化为上图下文）'
-    ),
-  aspect: z
-    .enum(ASPECT_KEYS)
-    .optional()
-    .describe('可选：画布比例。竖版小红书封面 "3:4"、横版头图 "16:9"、方形 "1:1"；不传默认 "3:4"')
-});
-
-const videoAspectFieldSchema = z
-  .enum(VIDEO_ASPECT_KEYS)
-  .optional()
-  .describe('可选：视频宽高比。横版用 "16:9"，竖版短视频用 "9:16"，方形 "1:1"；不传默认 "16:9"');
-
-const videoDurationFieldSchema = z
-  .int()
-  .min(2)
-  .max(10)
-  .optional()
-  .describe('可选：视频时长（秒，2-10）；不传默认 5 秒');
-
-const CREATE_VIDEO_ASSET_DESCRIPTION =
-  '用文生视频模型生成一段短视频并保存为视频资产。适合产品演示、动态封面、短广告、动画场景。视频生成通常需要 1-5 分钟，耗时远高于图片，调用前先告知用户等待；prompt 必须自包含描述画面（主体、动作、场景、氛围、镜头运动）；一次对话不要生成多个视频（成本高）。';
-
-const createVideoAssetInputSchema = z.object({
-  title: z.string().min(1).max(100).describe('资产标题'),
-  prompt: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe('文生视频提示词：完整自包含的画面与动作描述（中文优先，含镜头运动）'),
-  aspect: videoAspectFieldSchema,
-  duration: videoDurationFieldSchema
-});
-
-const CREATE_VIDEO_FROM_IMAGE_ASSET_DESCRIPTION =
-  '在已有图片资产的基础上生成动态视频（图生视频），产出新的视频资产。sourceAssetId 必须是真实存在的图片资产 id（来自上文 createImageAsset / findAssets / [引用资产] 块）；prompt 描述希望的画面动作与镜头运动（如“镜头缓慢推进，花瓣随风飘落”）；title 反映结果。视频生成通常需要 1-5 分钟，调用前先告知用户等待。';
-
-const createVideoFromImageAssetInputSchema = z.object({
-  sourceAssetId: z
-    .uuid()
-    .describe(
-      '作为首帧的源图片资产 id（来自上文 createImageAsset / findAssets 结果或消息中的 [引用资产] 块）'
-    ),
-  title: z.string().min(1).max(100).describe('新视频资产的标题'),
-  prompt: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe('画面动作与镜头运动描述（如“镜头缓慢推进，花瓣随风飘落”）'),
-  aspect: videoAspectFieldSchema,
-  duration: videoDurationFieldSchema
-});
-
-const FIND_ASSETS_DESCRIPTION =
-  '检索当前用户的资产库（「我的资产」），按标题关键词与类型查找可复用的已有作品，返回候选的元信息（assetId / title / kind / createdAt），不返回正文与图片。当用户提到"我之前那张""这篇文案""上次的封面"等指向已有作品时，先用它确认 assetId：文本资产接着用 readAsset 取正文，图片资产接着用 editImageAsset 修改。消息中已有 [引用资产] 块时不需要调用本工具。';
-
-const findAssetsInputSchema = z.object({
-  query: z
-    .string()
-    .max(100)
-    .optional()
-    .describe('标题关键词（模糊匹配），如"秋天""开学文案"；不确定时可省略以列出最近资产'),
-  kind: z
-    .enum(ASSET_KIND_VALUES)
-    .optional()
-    .describe('限定资产类型：markdown / html / image / design / video；不确定时可省略'),
-  limit: z.int().min(1).max(20).optional().describe('返回条数上限，默认 8')
-});
-
-const READ_ASSET_DESCRIPTION =
-  '读取指定资产的可用内容，用于"基于它再创作"（改写、扩展、总结、写配套文案等）。markdown / html 返回正文 content；image / video 返回其生成提示词 prompt（不返回图像/视频本身，要改图请用 editImageAsset）；design 为结构化数据，不支持读取正文。assetId 必须来自 findAssets 结果、上文工具返回值或消息中的 [引用资产] 块。';
-
-const readAssetInputSchema = z.object({
-  assetId: z.uuid().describe('要读取的资产 id（必须归属当前用户）')
-});
-
-const KNOWLEDGE_SEARCH_DESCRIPTION =
-  '在用户的知识库（RAG）中按内容语义检索资料片段，返回 results: [{ documentId, documentTitle, chunkIndex, content, score }]（score 为相似度，越大越相关）。当用户说"我知识库里…""根据我的资料/笔记""基于我沉淀的文档写一版"，或问题需要引用用户自有资料才能作答时使用。只依据返回片段作答并用 documentTitle 标注来源；results 为空表示知识库中没有相关资料，应如实告知。与 findAssets 的区别：findAssets 按标题关键词找"作品"（用于复用/改写），knowledgeSearch 按语义找"资料"（用于问答/综述）。';
-
-const knowledgeSearchInputSchema = z.object({
-  query: z
-    .string()
-    .min(1)
-    .max(500)
-    .describe('检索问句：用自然语言描述要找的内容（包含关键概念词效果更好）'),
-  topK: z.int().min(1).max(8).optional().describe('返回片段数上限，默认 5')
-});
-
-const ASK_USER_DESCRIPTION =
-  '向用户提出 1-3 个澄清问题并等待回答（客户端会弹出选项卡，用户也可自行输入）。当关键创作参数缺失或有歧义、且显著影响产出结果时使用（如图片比例/风格、封面标题文案、视频方向/时长）。一次对话最多提问一轮；能从上下文推断或用户已明确指定时不要提问。';
-
-const askUserInputSchema = z.object({
-  questions: z
-    .array(
-      z.object({
-        question: z.string().min(1).max(200).describe('要问用户的问题（简短明确）'),
-        choices: z
-          .array(z.string().min(1).max(40))
-          .min(2)
-          .max(4)
-          .describe('2-4 个简短、互斥的回答选项（用户也可自行输入其他答案）')
-      })
-    )
-    .min(1)
-    .max(3)
-    .describe('要问的问题列表')
-});
-
-const askUserOutputSchema = z
-  .array(
-    z.object({
-      question: z.string(),
-      answer: z.string()
-    })
-  )
-  .describe('用户对每个问题的回答');
-
-const LOAD_SKILL_DESCRIPTION =
-  '加载一个专家技能（工作流/风格包）的完整指令。技能名称必须来自 system 中「可用技能」列表；当用户任务明显匹配某技能时，先加载再执行。若本会话历史中已加载过同一技能，可直接沿用，不必重复调用。加载后本次回复内按该技能的指令与工具边界工作；不要凭空假设技能内容。';
-
-const loadSkillInputSchema = z.object({
-  name: z.string().min(1).max(50).describe('技能名称（必须与「可用技能」列表中的名称完全一致）')
-});
-
 /**
- * 客户端工具：无 execute。模型调用后本轮流即结束（part 停留 input-available），
- * 由客户端弹出选项卡收集回答，经 addToolOutput 回传 output 后自动续答
- * （客户端 sendAutomaticallyWhen + 路由的 assistant 续答分支协同，见 docs/agent.md）。
+ * 全量工具契约（历史校验 + UI 类型推导）——定义在 tool-contracts.ts。
+ * 恒为全量：历史消息可能含任意技能的工具调用，不能随技能过滤。
  */
-const askUserTool = tool({
-  description: ASK_USER_DESCRIPTION,
-  inputSchema: askUserInputSchema,
-  outputSchema: askUserOutputSchema
-});
-
-/** 服务端校验历史消息使用（无需 execute，与 Agent 内工具共享同一 schema） */
-export const agentValidationTools = {
-  createAsset: tool({
-    description: CREATE_ASSET_DESCRIPTION,
-    inputSchema: createAssetInputSchema
-  }),
-  editAsset: tool({
-    description: EDIT_ASSET_DESCRIPTION,
-    inputSchema: editAssetInputSchema
-  }),
-  createImageAsset: tool({
-    description: CREATE_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: createImageAssetInputSchema
-  }),
-  editImageAsset: tool({
-    description: EDIT_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: editImageAssetInputSchema
-  }),
-  createVideoAsset: tool({
-    description: CREATE_VIDEO_ASSET_DESCRIPTION,
-    inputSchema: createVideoAssetInputSchema
-  }),
-  createVideoFromImageAsset: tool({
-    description: CREATE_VIDEO_FROM_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: createVideoFromImageAssetInputSchema
-  }),
-  findAssets: tool({
-    description: FIND_ASSETS_DESCRIPTION,
-    inputSchema: findAssetsInputSchema
-  }),
-  readAsset: tool({
-    description: READ_ASSET_DESCRIPTION,
-    inputSchema: readAssetInputSchema
-  }),
-  knowledgeSearch: tool({
-    description: KNOWLEDGE_SEARCH_DESCRIPTION,
-    inputSchema: knowledgeSearchInputSchema
-  }),
-  composeDesign: tool({
-    description: COMPOSE_DESIGN_DESCRIPTION,
-    inputSchema: composeDesignInputSchema
-  }),
-  loadSkill: tool({
-    description: LOAD_SKILL_DESCRIPTION,
-    inputSchema: loadSkillInputSchema
-  }),
-  askUser: askUserTool
-};
-
-/** 与 agentValidationTools 对齐的 UI 消息类型（供 validateUIMessages 泛型推导 tools 校验类型） */
-export type AgentValidationUIMessage = UIMessage<
-  unknown,
-  never,
-  InferUITools<typeof agentValidationTools>
->;
+export const agentValidationTools = agentToolContracts;
 
 function createAssetTool(params: { userId: string; conversationId: string }) {
+  const contract = agentToolContracts.createAsset;
   return tool({
-    description: CREATE_ASSET_DESCRIPTION,
-    inputSchema: createAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ title, kind, content }) => {
       const sizeBytes = Buffer.byteLength(content, 'utf8');
       if (sizeBytes > MAX_ASSET_SIZE_BYTES) {
@@ -396,7 +128,7 @@ function createAssetTool(params: { userId: string; conversationId: string }) {
         userId: params.userId,
         conversationId: params.conversationId,
         title,
-        kind: kind as AssetKind,
+        kind,
         content
       });
       return { assetId: asset.id, title, kind, sizeBytes: asset.sizeBytes };
@@ -411,9 +143,11 @@ function createAssetTool(params: { userId: string; conversationId: string }) {
  * 避免 new_string 中的 $& 等被 String.replace 解释为替换模式。
  */
 function editAssetTool(params: { userId: string }) {
+  const contract = agentToolContracts.editAsset;
   return tool({
-    description: EDIT_ASSET_DESCRIPTION,
-    inputSchema: editAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ assetId, old_string, new_string, replace_all, title }) => {
       const asset = await getAsset(params.userId, assetId);
       if (!asset) {
@@ -452,8 +186,14 @@ function editAssetTool(params: { userId: string }) {
       if (!result) {
         throw new Error('资产更新失败（可能已被删除），请用 findAssets 重新检索。');
       }
-      // 返回结构与 createAsset 对齐，复用对话内资产卡片渲染
-      return { assetId, title: result.title, kind: result.kind, sizeBytes: result.sizeBytes };
+      // 返回结构与 createAsset 对齐，复用对话内资产卡片渲染；
+      // kind 已由 updateTextAsset 的 WHERE 限定为 markdown / html，收窄仅用于输出 schema 类型
+      return {
+        assetId,
+        title: result.title,
+        kind: result.kind as 'markdown' | 'html',
+        sizeBytes: result.sizeBytes
+      };
     }
   });
 }
@@ -465,9 +205,11 @@ interface PaidToolContext {
 }
 
 function createImageAssetTool(params: PaidToolContext) {
+  const contract = agentToolContracts.createImageAsset;
   return tool({
-    description: CREATE_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: createImageAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ title, prompt, aspect }, { abortSignal }) => {
       // 限流：付费模型调用（与直连端点同 scope、同额度），命中直接拒绝、不发起上游
       const allowed = await checkRateLimit(
@@ -515,9 +257,11 @@ function createImageAssetTool(params: PaidToolContext) {
 }
 
 export function editImageAssetTool(params: PaidToolContext) {
+  const contract = agentToolContracts.editImageAsset;
   return tool({
-    description: EDIT_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: editImageAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ sourceAssetId, title, instruction, aspect }, { abortSignal }) => {
       // 限流：付费模型调用（与直连编辑端点同 scope、同额度），命中直接拒绝、不发起上游
       const allowed = await checkRateLimit(
@@ -576,9 +320,11 @@ export function editImageAssetTool(params: PaidToolContext) {
  * abortSignal 透传：停止时同步取消轮询与下载（已提交的百炼任务自然完成，无副作用）。
  */
 function createVideoAssetTool(params: PaidToolContext) {
+  const contract = agentToolContracts.createVideoAsset;
   return tool({
-    description: CREATE_VIDEO_ASSET_DESCRIPTION,
-    inputSchema: createVideoAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ title, prompt, aspect, duration }, { abortSignal }) => {
       const allowed = await checkRateLimit(
         'video',
@@ -647,9 +393,11 @@ function createVideoAssetTool(params: PaidToolContext) {
  * 源图经短期签名 URL（TTL 900s，覆盖生成全程）作首帧；产出派生视频资产（sourceAssetId 记录血缘）。
  */
 function createVideoFromImageAssetTool(params: PaidToolContext) {
+  const contract = agentToolContracts.createVideoFromImageAsset;
   return tool({
-    description: CREATE_VIDEO_FROM_IMAGE_ASSET_DESCRIPTION,
-    inputSchema: createVideoFromImageAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ sourceAssetId, title, prompt, aspect, duration }, { abortSignal }) => {
       const allowed = await checkRateLimit(
         'video',
@@ -742,9 +490,11 @@ function createVideoFromImageAssetTool(params: PaidToolContext) {
  * 不回传 content / storageKey / 签名 URL：避免工具输出膨胀，也避免图片地址流入模型上下文。
  */
 function findAssetsTool(params: { userId: string }) {
+  const contract = agentToolContracts.findAssets;
   return tool({
-    description: FIND_ASSETS_DESCRIPTION,
-    inputSchema: findAssetsInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ query, kind, limit }) => {
       const hits = await searchAssets(params.userId, { query, kind, limit });
       return { assets: hits };
@@ -758,9 +508,11 @@ function findAssetsTool(params: { userId: string }) {
  * 归属校验复用 getAsset（越权与不存在同样返回 undefined，不泄漏存在性）。
  */
 function readAssetTool(params: { userId: string }) {
+  const contract = agentToolContracts.readAsset;
   return tool({
-    description: READ_ASSET_DESCRIPTION,
-    inputSchema: readAssetInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ assetId }) => {
       const asset = await getAsset(params.userId, assetId);
       if (!asset) {
@@ -776,7 +528,7 @@ function readAssetTool(params: { userId: string }) {
       }
       if (asset.kind === 'image') {
         return {
-          kind: asset.kind,
+          kind: 'image' as const,
           title: asset.title,
           prompt: asset.content ?? '',
           hint: `这是图片资产（prompt 为其生成提示词）；若要在其基础上修改，请调用 editImageAsset 并把 ${assetId} 作为 sourceAssetId。`
@@ -784,17 +536,21 @@ function readAssetTool(params: { userId: string }) {
       }
       if (asset.kind === 'video') {
         return {
-          kind: asset.kind,
+          kind: 'video' as const,
           title: asset.title,
           prompt: asset.content ?? '',
           hint: '这是视频资产（prompt 为其生成提示词）；视频暂不支持在其基础上直接编辑。'
         };
       }
-      return {
-        kind: asset.kind,
-        title: asset.title,
-        hint: '设计文档为结构化数据，暂不支持读取正文。'
-      };
+      if (asset.kind === 'design') {
+        return {
+          kind: 'design' as const,
+          title: asset.title,
+          hint: '设计文档为结构化数据，暂不支持读取正文。'
+        };
+      }
+      // AssetKind 是封闭联合，此处仅防御数据库中出现未来类型
+      throw new Error('暂不支持读取该类型的资产。');
     }
   });
 }
@@ -805,9 +561,11 @@ function readAssetTool(params: { userId: string }) {
  * 空结果时额外给出"如实告知"提示，降低模型臆造概率。
  */
 function knowledgeSearchTool(params: { userId: string }) {
+  const contract = agentToolContracts.knowledgeSearch;
   return tool({
-    description: KNOWLEDGE_SEARCH_DESCRIPTION,
-    inputSchema: knowledgeSearchInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ query, topK }) => {
       const results = await searchKnowledgeByText(params.userId, query, topK);
       return {
@@ -853,9 +611,11 @@ function nearestAspect(targetRatio: number): AspectKey {
  * 主图仍沉淀为独立 image 资产（可在「我的资产」复用）；design 落库为纯 JSON 组装、不调付费 API → 不额外计费。
  */
 function composeDesignTool(params: PaidToolContext) {
+  const contract = agentToolContracts.composeDesign;
   return tool({
-    description: COMPOSE_DESIGN_DESCRIPTION,
-    inputSchema: composeDesignInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async (
       { title, imagePrompt, heading, subheading, layout, aspect },
       { abortSignal }
@@ -952,9 +712,11 @@ function loadSkillTool(params: {
   skills: readonly SkillRegistryEntry[];
   loadedSkills: Set<SkillRegistryEntry>;
 }) {
+  const contract = agentToolContracts.loadSkill;
   return tool({
-    description: LOAD_SKILL_DESCRIPTION,
-    inputSchema: loadSkillInputSchema,
+    description: contract.description,
+    inputSchema: contract.inputSchema,
+    outputSchema: contract.outputSchema,
     execute: async ({ name }) => {
       const requested = name.trim();
       const skill = findSkillByRef(params.skills, requested);
@@ -1036,7 +798,7 @@ export function buildAgent(params: {
     allowedTools.map((name) => [name, toolFactories[name]()])
   ) as Record<string, Tool>;
   // 澄清提问是跨技能的通用能力：不受技能工具边界过滤（专家模式下也可先问清需求）
-  tools.askUser = askUserTool;
+  tools.askUser = agentToolContracts.askUser;
   // 显式技能不提供 loadSkill：用户已选定边界，避免模型再加载另一个技能绕过
   if (!forcedSkill && skills.length > 0) {
     tools.loadSkill = loadSkillTool({ skills, loadedSkills });

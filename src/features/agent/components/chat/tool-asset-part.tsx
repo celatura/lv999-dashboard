@@ -1,16 +1,11 @@
 'use client';
 
 import { AssetCard } from '../assets/asset-card';
-import type { AssetKind } from '../../api/types';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
-export interface CreateAssetToolPart {
-  state: string;
-  input?: { title?: string } | undefined;
-  output?: { assetId: string; title: string; kind: AssetKind; sizeBytes: number } | undefined;
-  errorText?: string;
-}
+/** createAsset / editAsset 的输出结构一致，共用同一资产卡片 */
+type AssetToolPart = AgentToolPart<'createAsset' | 'editAsset'>;
 
 /**
  * createAsset / editAsset 工具的调用状态渲染：
@@ -24,7 +19,7 @@ export function ToolAssetPart({
   active,
   mode = 'create'
 }: {
-  part: CreateAssetToolPart;
+  part: AssetToolPart;
   active: boolean;
   /** edit = editAsset 精确编辑（文案用「更新」）；create = createAsset 新建（文案用「保存」） */
   mode?: 'create' | 'edit';

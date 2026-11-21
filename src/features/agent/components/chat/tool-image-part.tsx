@@ -1,16 +1,11 @@
 'use client';
 
 import { AssetCard } from '../assets/asset-card';
-import type { AssetKind } from '../../api/types';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
-export interface ImageAssetToolPart {
-  state: string;
-  input?: { title?: string } | undefined;
-  output?: { assetId: string; title: string; kind: AssetKind; sizeBytes: number } | undefined;
-  errorText?: string;
-}
+/** createImageAsset / editImageAsset 共用同一渲染（edit 的 output 额外带血缘 id） */
+type ImageAssetToolPart = AgentToolPart<'createImageAsset' | 'editImageAsset'>;
 
 /**
  * 图片工具（createImageAsset 文生图 / editImageAsset 图生图）的调用状态渲染：

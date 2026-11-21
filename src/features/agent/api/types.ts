@@ -1,5 +1,6 @@
 import type { FileUIPart, UIMessage } from 'ai';
 import { z } from 'zod';
+import { ASSET_KIND_VALUES, type AssetKind } from '../constants/asset-kinds';
 import { ASPECT_KEYS } from '../constants/image-models';
 import {
   AGENT_TOOL_NAMES,
@@ -7,6 +8,9 @@ import {
   type SkillExample,
   type SkillRegistryEntry
 } from '../constants/skills';
+import type { AgentChatTools } from './tool-contracts';
+
+export { ASSET_KIND_VALUES, type AssetKind };
 
 export interface Conversation {
   id: string;
@@ -37,6 +41,11 @@ export interface AgentMessageMetadata {
   streamId?: string;
   skillId?: string;
   skillName?: string;
+  /**
+   * 服务端计时的 reasoning 时长（毫秒），key 为该消息内 reasoning part 的序号。
+   * 随消息 metadata 持久化：刷新 / 切回历史会话后仍能显示「思考了 N 秒」。
+   */
+  reasoningDurations?: Record<number, number>;
 }
 
 /** 客户端「本条消息技能」选择：只需 id + name（正文/描述由技能目录查询补齐） */
@@ -50,8 +59,21 @@ export type AgentDataParts = {
   'conversation-title': { title: string };
 };
 
-/** Agent 聊天 UI 消息类型（客户端 useChat 与服务端流共用） */
-export type AgentChatMessage = UIMessage<AgentMessageMetadata, AgentDataParts>;
+/**
+ * Agent 聊天 UI 消息类型（客户端 useChat 与服务端流共用）。
+ * 第三个泛型由工具契约推导：工具输入 / 输出字段改名会直接成为编译错误，
+ * 消息渲染层无需再手写 ToolPart 接口或双重断言。
+ */
+export type AgentChatMessage = UIMessage<AgentMessageMetadata, AgentDataParts, AgentChatTools>;
+
+/** 单条消息的 part（含具体工具 part 的输入 / 输出类型） */
+export type AgentMessagePart = AgentChatMessage['parts'][number];
+
+/** 按模型可见工具名取对应 part 类型（可传联合，如 'createAsset' | 'editAsset'） */
+export type AgentToolPart<NAME extends keyof AgentChatTools> = Extract<
+  AgentMessagePart,
+  { type: `tool-${NAME}` }
+>;
 
 /** 单条消息的图片附件上限 */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
@@ -85,11 +107,6 @@ export interface ConversationsResponse {
   conversations: Conversation[];
   nextCursor: string | null;
 }
-
-/** 资产类型枚举值（单一来源：Agent 工具的 Zod enum 与展示元数据均以此为准） */
-export const ASSET_KIND_VALUES = ['markdown', 'html', 'image', 'design', 'video'] as const;
-
-export type AssetKind = (typeof ASSET_KIND_VALUES)[number];
 
 /** 资产来源：agent 生成 / 用户上传 */
 export type AssetSource = 'agent' | 'upload';

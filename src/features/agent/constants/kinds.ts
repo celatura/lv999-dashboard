@@ -1,5 +1,5 @@
 import { Icons, type Icon } from '@/components/icons';
-import type { AssetKind } from '../api/types';
+import type { AssetKind } from './asset-kinds';
 
 export interface AssetKindMeta {
   label: string;

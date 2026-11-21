@@ -10,15 +10,10 @@ import {
   TraceLine,
   TraceTitle
 } from '@/components/ui/trace';
+import type { AgentToolPart } from '../../api/types';
 
-/** 供消息渲染层断言使用：只声明渲染需要的字段，避免双重断言抹掉结构 */
-export interface AskUserToolPart {
-  state: string;
-  toolCallId: string;
-  input?: { questions?: { question: string; choices: string[] }[] } | undefined;
-  output?: { question: string; answer: string }[] | undefined;
-  errorText?: string;
-}
+/** 由 askUser 工具契约推导（input.questions / output 回答数组均有完整类型） */
+export type AskUserToolPart = AgentToolPart<'askUser'>;
 
 /**
  * askUser 的已回答状态：折叠展示「问题 → 用户回答」。

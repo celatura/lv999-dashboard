@@ -1,7 +1,6 @@
 'use client';
 
-import type { FileUIPart, TextUIPart, UIMessage } from 'ai';
-import { isReasoningUIPart, isToolUIPart } from 'ai';
+import type { FileUIPart, TextUIPart } from 'ai';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
 import { Icons } from '@/components/icons';
@@ -10,19 +9,19 @@ import { Button } from '@/components/ui/button';
 import { Message, MessageContent, MessageFooter } from '@/components/ui/message';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getAssetKindMeta } from '../../constants/kinds';
-import type { AgentMessageMetadata } from '../../api/types';
+import type { AgentChatMessage } from '../../api/types';
 import { imageThumbnailUrl } from '../../lib/asset-url';
 import { parseAssetReferenceBlock, type ParsedAssetReference } from '../../lib/asset-reference';
 import { STREAMDOWN_PLUGINS } from '../../lib/streamdown-plugins';
 import { CopyButton } from '../copy-button';
-import { AskUserPart, type AskUserToolPart } from './ask-user-part';
+import { AskUserPart } from './ask-user-part';
 import { MessageReasoning } from './message-reasoning';
-import { ToolAssetPart, type CreateAssetToolPart } from './tool-asset-part';
-import { ToolDesignPart, type DesignAssetToolPart } from './tool-design-part';
-import { ToolImagePart, type ImageAssetToolPart } from './tool-image-part';
-import { ToolVideoPart, type VideoAssetToolPart } from './tool-video-part';
-import { ToolKnowledgePart, type KnowledgeSearchToolPart } from './tool-knowledge-part';
-import { ToolSkillPart, type LoadSkillToolPart } from './tool-skill-part';
+import { ToolAssetPart } from './tool-asset-part';
+import { ToolDesignPart } from './tool-design-part';
+import { ToolImagePart } from './tool-image-part';
+import { ToolVideoPart } from './tool-video-part';
+import { ToolKnowledgePart } from './tool-knowledge-part';
+import { ToolSkillPart } from './tool-skill-part';
 
 /**
  * 消息项：memo 化（props 全为稳定值：message 引用 + 两个布尔 + useCallback 回调）。
@@ -45,7 +44,7 @@ export const MessageItem = memo(function MessageItem({
   isLastAssistant = false,
   onRegenerate
 }: {
-  message: UIMessage;
+  message: AgentChatMessage;
   isActive?: boolean;
   /** 是否为最后一条 assistant 消息：只有它提供「重新生成」 */
   isLastAssistant?: boolean;
@@ -58,7 +57,7 @@ export const MessageItem = memo(function MessageItem({
       (part): part is FileUIPart => part.type === 'file' && part.mediaType.startsWith('image/')
     );
     // 本条消息显式指定的技能（随消息 metadata 持久化；名称仅用于展示）
-    const skillName = (message.metadata as AgentMessageMetadata | undefined)?.skillName;
+    const skillName = message.metadata?.skillName;
     return (
       <Message align='end'>
         <MessageContent>
@@ -129,14 +128,20 @@ export const MessageItem = memo(function MessageItem({
   // reasoning 已随流下发并持久化（token 已计入计费），此处仅展示；isThinking 要求
   // 当前消息仍是流式末尾且存在 streaming 状态的 reasoning part——中止后 part 不会
   // 落终态（AI SDK 中止语义），用 isActive 兜底避免历史消息永久停在「思考中」
-  const reasoningParts = message.parts.filter(isReasoningUIPart);
+  const reasoningParts = message.parts.filter((part) => part.type === 'reasoning');
   const reasoningText = reasoningParts
     .map((part) => part.text)
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
+  // 服务端按 reasoning part 分别计时并持久化；这里合并为一个折叠块，求和展示总时长
+  const persistedDurations = message.metadata?.reasoningDurations;
+  const reasoningDurationMs =
+    persistedDurations && Object.keys(persistedDurations).length > 0
+      ? Object.values(persistedDurations).reduce((total, ms) => total + ms, 0)
+      : undefined;
   // 合并块只渲染一次：定位首个有正文的 reasoning part 作为插入点
   const firstReasoningIndex = message.parts.findIndex(
-    (part) => isReasoningUIPart(part) && part.text.trim().length > 0
+    (part) => part.type === 'reasoning' && part.text.trim().length > 0
   );
   const isThinking = isActive && reasoningParts.some((part) => part.state === 'streaming');
 
@@ -145,9 +150,16 @@ export const MessageItem = memo(function MessageItem({
     <Message align='start' className='flex-col gap-0.5'>
       <MessageContent>
         {message.parts.map((part, index) => {
-          if (isReasoningUIPart(part)) {
+          if (part.type === 'reasoning') {
             if (index !== firstReasoningIndex) return null;
-            return <MessageReasoning key={index} text={reasoningText} isThinking={isThinking} />;
+            return (
+              <MessageReasoning
+                key={index}
+                text={reasoningText}
+                isThinking={isThinking}
+                durationMs={reasoningDurationMs}
+              />
+            );
           }
           if (part.type === 'text') {
             if (!part.text) return null;
@@ -159,74 +171,43 @@ export const MessageItem = memo(function MessageItem({
               </div>
             );
           }
-          if (isToolUIPart(part) && part.type === 'tool-askUser') {
-            return <AskUserPart key={index} part={part as unknown as AskUserToolPart} />;
+          if (part.type === 'tool-askUser') {
+            return <AskUserPart key={part.toolCallId} part={part} />;
           }
-          if (
-            isToolUIPart(part) &&
-            (part.type === 'tool-createAsset' || part.type === 'tool-editAsset')
-          ) {
+          if (part.type === 'tool-createAsset' || part.type === 'tool-editAsset') {
             return (
               <ToolAssetPart
-                key={index}
-                part={part as unknown as CreateAssetToolPart}
+                key={part.toolCallId}
+                part={part}
                 active={isActive}
                 mode={part.type === 'tool-editAsset' ? 'edit' : 'create'}
               />
             );
           }
-          if (
-            isToolUIPart(part) &&
-            (part.type === 'tool-createImageAsset' || part.type === 'tool-editImageAsset')
-          ) {
+          if (part.type === 'tool-createImageAsset' || part.type === 'tool-editImageAsset') {
             return (
               <ToolImagePart
-                key={index}
-                part={part as unknown as ImageAssetToolPart}
+                key={part.toolCallId}
+                part={part}
                 active={isActive}
                 mode={part.type === 'tool-editImageAsset' ? 'edit' : 'create'}
               />
             );
           }
           if (
-            isToolUIPart(part) &&
-            (part.type === 'tool-createVideoAsset' ||
-              part.type === 'tool-createVideoFromImageAsset')
+            part.type === 'tool-createVideoAsset' ||
+            part.type === 'tool-createVideoFromImageAsset'
           ) {
-            return (
-              <ToolVideoPart
-                key={index}
-                part={part as unknown as VideoAssetToolPart}
-                active={isActive}
-              />
-            );
+            return <ToolVideoPart key={part.toolCallId} part={part} active={isActive} />;
           }
-          if (isToolUIPart(part) && part.type === 'tool-composeDesign') {
-            return (
-              <ToolDesignPart
-                key={index}
-                part={part as unknown as DesignAssetToolPart}
-                active={isActive}
-              />
-            );
+          if (part.type === 'tool-composeDesign') {
+            return <ToolDesignPart key={part.toolCallId} part={part} active={isActive} />;
           }
-          if (isToolUIPart(part) && part.type === 'tool-knowledgeSearch') {
-            return (
-              <ToolKnowledgePart
-                key={index}
-                part={part as unknown as KnowledgeSearchToolPart}
-                active={isActive}
-              />
-            );
+          if (part.type === 'tool-knowledgeSearch') {
+            return <ToolKnowledgePart key={part.toolCallId} part={part} active={isActive} />;
           }
-          if (isToolUIPart(part) && part.type === 'tool-loadSkill') {
-            return (
-              <ToolSkillPart
-                key={index}
-                part={part as unknown as LoadSkillToolPart}
-                active={isActive}
-              />
-            );
+          if (part.type === 'tool-loadSkill') {
+            return <ToolSkillPart key={part.toolCallId} part={part} active={isActive} />;
           }
           return null;
         })}

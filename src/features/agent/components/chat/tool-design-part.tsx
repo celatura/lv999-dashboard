@@ -5,15 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
-export interface DesignAssetToolPart {
-  state: string;
-  input?: { title?: string; layout?: string } | undefined;
-  output?: { assetId: string; title: string } | undefined;
-  errorText?: string;
-}
+type DesignAssetToolPart = AgentToolPart<'composeDesign'>;
 
 /** 版式键 → 中文标签（加载态展示模型选了哪个版式，让等待有信息量） */
 const LAYOUT_LABELS: Record<string, string> = {

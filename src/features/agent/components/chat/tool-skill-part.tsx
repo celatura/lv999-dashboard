@@ -2,15 +2,10 @@
 
 import { Icons } from '@/components/icons';
 import { Trace, TraceIcon, TraceLine, TraceTitle } from '@/components/ui/trace';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：只声明渲染需要的字段 */
-export interface LoadSkillToolPart {
-  state: string;
-  input?: { name?: string } | undefined;
-  output?: { id?: string; name?: string } | undefined;
-  errorText?: string;
-}
+type LoadSkillToolPart = AgentToolPart<'loadSkill'>;
 
 /**
  * loadSkill 工具渲染：加载中 → 步骤行；完成 → 「已加载技能：X」；

@@ -10,21 +10,10 @@ import {
   TraceLine,
   TraceTitle
 } from '@/components/ui/trace';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：只声明渲染需要的字段，避免双重断言抹掉结构 */
-export interface KnowledgeSearchToolPart {
-  state: string;
-  input?: { query?: string } | undefined;
-  output?:
-    | {
-        results?:
-          | { documentId: string; documentTitle: string; chunkIndex: number; score: number }[]
-          | undefined;
-      }
-    | undefined;
-  errorText?: string;
-}
+type KnowledgeSearchToolPart = AgentToolPart<'knowledgeSearch'>;
 
 /**
  * knowledgeSearch 工具的调用状态渲染：

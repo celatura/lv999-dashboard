@@ -6,6 +6,7 @@ import {
   type DesignObject
 } from '../api/types';
 import { generateObjectId, type Box } from './document';
+import { LAYOUT_KEYS, type LayoutKey } from '../constants/layouts';
 
 /**
  * 版式模板（服务端纯函数，无 Konva / 无 IO）。
@@ -19,10 +20,8 @@ import { generateObjectId, type Box } from './document';
  * 本文件只被服务端（Agent 工具 composeDesign）引用，不进客户端 bundle。
  */
 
-/** 版式键（composeDesign 工具的 layout 枚举） */
-export const LAYOUT_KEYS = ['top-image', 'full-image-bar', 'left-image'] as const;
-
-export type LayoutKey = (typeof LAYOUT_KEYS)[number];
+/** 版式键（composeDesign 工具的 layout 枚举）；定义在 constants 供客户端安全的工具契约复用 */
+export { LAYOUT_KEYS, type LayoutKey };
 
 /**
  * 支持的画布比例 → 画布尺寸（与 constants/canvas.ts 的 CANVAS_PRESETS、

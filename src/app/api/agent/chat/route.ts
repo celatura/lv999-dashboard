@@ -410,6 +410,17 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  // 思考时长：AI SDK 不提供 reasoning 持续时间，这里在流内按 reasoning-start/end 计时，
+  // 通过 messageMetadata 下发（key = 该消息内 reasoning part 的序号），随消息 metadata 持久化。
+  // askUser 续答轮会复用同一条 assistant 消息，已有 reasoning part 数作为起始偏移，
+  // 避免新时长覆盖上一段（与 chatbot 模板的索引计算一致）。
+  const lastMessage = messages.at(-1);
+  let reasoningCount =
+    lastMessage?.role === 'assistant'
+      ? lastMessage.parts.filter((part) => part.type === 'reasoning').length
+      : 0;
+  const reasoningStarts = new Map<string, { index: number; time: number }>();
+
   const abortController = new AbortController();
   const stopWatching = watchAgentStop(conversationId, streamId, () => {
     abortController.abort();
@@ -447,13 +458,26 @@ export async function POST(request: Request) {
             // 把本轮流 id 随响应消息的 metadata 下发（客户端停止时据此携带最新流 id）；
             // 显式技能也随 assistant 消息下发：askUser 续答只发 assistant 消息，
             // 服务端据此在续答轮恢复「本条消息指定技能」的正文注入与工具边界。
-            messageMetadata: ({ part }) =>
-              part.type === 'start'
-                ? {
-                    streamId,
-                    ...(forcedSkill ? { skillId: forcedSkill.id, skillName: forcedSkill.name } : {})
-                  }
-                : undefined,
+            // reasoning-end 额外下发该段思考耗时（毫秒），供历史消息展示「思考了 N 秒」。
+            messageMetadata: ({ part }) => {
+              if (part.type === 'start') {
+                return {
+                  streamId,
+                  ...(forcedSkill ? { skillId: forcedSkill.id, skillName: forcedSkill.name } : {})
+                };
+              }
+              if (part.type === 'reasoning-start') {
+                reasoningStarts.set(part.id, { index: reasoningCount++, time: Date.now() });
+                return undefined;
+              }
+              if (part.type === 'reasoning-end') {
+                const started = reasoningStarts.get(part.id);
+                if (!started) return undefined;
+                reasoningStarts.delete(part.id);
+                return { reasoningDurations: { [started.index]: Date.now() - started.time } };
+              }
+              return undefined;
+            },
             // 流内错误映射：模型已下线/未开通时百炼返回 403（文案不含「已下线」），
             // 给出可操作的中文；文本必须与 constants/models.ts 的 MODEL_UNAVAILABLE_MESSAGES
             // 字面一致（客户端精确匹配后原样透传，见 chat-window.tsx）；

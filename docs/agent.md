@@ -28,7 +28,8 @@ src/features/agent/
 │   ├── queries.ts          # TanStack Query options + 查询键工厂 agentKeys
 │   ├── mutations.ts        # 会话增删改的 mutation options
 │   ├── provider.ts         # resolveModel(key)：百炼直连（@ai-sdk/alibaba）
-│   ├── agent.ts            # buildAgent()、工具定义、agentValidationTools
+│   ├── agent.ts            # buildAgent()、工具 execute 工厂、agentValidationTools 别名
+│   ├── tool-contracts.ts   # 工具契约单一来源（description / inputSchema / outputSchema）+ InferUITools 推导的 UI 类型
 │   ├── skill-service.ts    # 技能读取（skills 表，按用户隔离）与 CRUD
 │   ├── image-generation.ts # 图片生成通道（直连百炼 REST，T2I / I2I）
 │   ├── image-edit.ts       # 图生图核心流程（工具与直连端点复用）
@@ -47,7 +48,8 @@ src/features/agent/
 │   ├── video-models.ts     # 视频模型注册表（wan3.0-video 默认 + prime 优速）
 │   ├── skills.ts           # 技能引擎（目录渲染 / 引用解析 / 工具边界计算）
 │   ├── skill-templates.ts  # 「从模板新建」的表单预填（不进入运行时目录）
-│   ├── kinds.ts            # 资产类型元数据（markdown / html / image / design / video）
+│   ├── kinds.ts            # 资产类型展示元数据（label / icon），卡片 / 表格共用
+│   ├── asset-kinds.ts      # 资产类型枚举值（工具契约与消息类型共用，避免 contracts ↔ types 循环）
 │   ├── conversation.ts     # 默认标题与标题生成
 │   ├── embedding.ts        # RAG embedding 配置（模型 / 维度 / 批次）
 │   └── limits.ts           # 请求体上限 MAX_REQUEST_BYTES
@@ -209,10 +211,10 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 百炼对话模型默认思考：reasoning parts 由 AI SDK 随流下发（`toUIMessageStream` 默认 `sendReasoning`），本项目原样持久化在 `messages.parts`，其 token 已计入 `outputTokens` 计费。此前渲染层只处理 text 与已知 tool part，思考内容不可见；[`message-reasoning.tsx`](../src/features/agent/components/chat/message-reasoning.tsx) 把多个 reasoning part 合并为一个折叠块：
 
-- 思考中自动展开并跟随滚动，结束后 1s 自动收起；显示累计思考时长（客户端计时，历史消息无时长时显示「思考过程」）。
+- 思考中自动展开并跟随滚动，结束后 1s 自动收起；显示累计思考时长。时长由服务端在 `messageMetadata` 中按 `reasoning-start` / `reasoning-end` 计时，下发 `reasoningDurations`（key = 该消息内 reasoning part 序号）并随消息 metadata 持久化——刷新 / 切回历史会话后仍显示「思考了 N 秒」；客户端本地计时仅在无持久化值时兜底（如中止未收到 reasoning-end）。续答轮复用同一 assistant 消息时，以已有 reasoning part 数作为索引偏移，避免覆盖上一段时长。
 - 「思考中」仅当消息仍处于流式末尾且存在 `state === 'streaming'` 的 reasoning part——中止后 part 不落终态（AI SDK 中止语义），避免历史消息永久停在「思考中」。
 - `submitted` 阶段（首个 chunk 到达前）在消息列表尾部显示「正在思考…」占位，覆盖思考模型的静默等待窗口。
-- 纯渲染层改动：不改变流协议、持久化与计费；`MessageItem` 的 memo 纪律不受影响（展开/计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
+- 不改变流协议与计费；时长经现有 `messageMetadata` 通道随消息 metadata 持久化（不新增 data part）。`MessageItem` 的 memo 纪律不受影响（展开/计时状态自持在折叠块内部，新增 props 仅为稳定原语）。
 
 ### 4.11 澄清提问（askUser，客户端工具）
 
@@ -247,7 +249,9 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 
 > 区分：`findAssets` 按标题找「作品」（复用/改写/改图）；`knowledgeSearch` 按语义找「资料」（基于内容作答并标注来源）。对话中的 `[引用资产]` 块给出的 id 可直接使用，无需再检索。
 
-工具校验用 `agentValidationTools`（与执行工具共享同一 Zod schema，**恒为全量 12 工具（10 业务 + loadSkill + askUser）、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的工具边界过滤注册（见 §5.1）——两者必须分离：历史消息可能含任意技能的工具调用，若校验工具也过滤会导致历史校验 400。`askUser` 例外：它恒被注册（工具边界只约束业务工具）。
+**工具契约（[`tool-contracts.ts`](../src/features/agent/api/tool-contracts.ts)）**：description / inputSchema / outputSchema 的唯一来源。`agentValidationTools` 直接复用全量契约，`agent.ts` 的工厂只从契约取 schema 并挂 `execute`，避免同一工具各写一遍导致漂移。`AgentChatMessage` 经 `InferUITools<typeof agentToolContracts>` 推导工具 part 的 input / output，渲染层不再手写 `ToolPart` 接口或双重断言——工具字段改名会直接成为编译错误。`outputSchema` 同时让 `validateUIMessages` 校验历史 tool output（结构漂移在请求入口 400，而非 UI 读到 `undefined`）；新增 / 修改工具输出时必须同步更新对应 outputSchema，并覆盖所有分支（如 `readAsset` 的四种返回）。
+
+工具校验用 `agentValidationTools`（即全量工具契约，**恒为全量 12 工具（10 业务 + loadSkill + askUser）、不随技能过滤**），配合 `validateUIMessages` 对历史消息做进入模型前的校验（畸形历史 → 400 而非 500）。`buildAgent.tools` 则按当前技能的工具边界过滤注册（见 §5.1）——两者必须分离：历史消息可能含任意技能的工具调用，若校验工具也过滤会导致历史校验 400。`askUser` 例外：它恒被注册（工具边界只约束业务工具）。
 
 ### 5.1 技能系统（按需加载的专家工作流包）
 
@@ -256,7 +260,7 @@ assistant 消息底部 [`MessageFooter`](../src/components/ui/message.tsx) 操�
 - **数据结构** `SkillRegistryEntry`（[`constants/skills.ts`](../src/features/agent/constants/skills.ts)）：`{ id, name, description, instructions, placeholder?, tools?, examples? }`。`instructions` 是技能完整正文（专家人设 + 工作流），按需加载；`placeholder` 是选中后输入框引导语；`tools` 是工具边界（`AgentToolName[]`，**未声明 / null = 全量；非 null 时至少 1 个，空数组由 schema 拒绝**，加载后本次回复内生效）；`examples` 是 few-shot 示范（`{ input, output }[]`，随正文经 `renderSkillBody` 按需返回，每技能 ≤2 条）。服务端 `listSkillEntriesForUser` 把 DB 行映射为该结构，零重复复用目录 / 加载 / 工具边界逻辑。
 - **两条入口**：
   1. **自动**：`buildAgent` 把轻量目录（名称 + description，最多 `MAX_CATALOG_SKILLS=16` 个）拼进 system；无技能时不渲染目录、也不注册 `loadSkill`。模型调用 `loadSkill({ name })`，正文与稳定 `id` 以 tool result 进入消息历史；`prepareStep` 在加载后按技能 `tools` **取交集**收窄后续步骤的 `activeTools`（每步重新计算；未声明 tools = 全量，不额外放宽）。
-  2. **显式**：用户消息 `metadata: { skillId, skillName }`（`sendMessage` 的 metadata，随消息持久化）。chat 路由从 `listSkillEntriesForUser` 中按 id 解析（归属过滤），直接注入正文并从第一步限制工具；**不注册 `loadSkill`**，避免模型再加载另一个技能绕过用户选定的边界。找不到 → 400 `unknown_skill`。askUser 续答时从上一轮 `tool-loadSkill` 的 `output.id` 回灌已加载技能（旧历史回退名称），自定义技能改名不影响边界恢复。
+  2. **显式**：用户消息 `metadata: { skillId, skillName }`（`sendMessage` 的 metadata，随消息持久化）。chat 路由从 `listSkillEntriesForUser` 中按 id 解析（归属过滤），直接注入正文并从第一步限制工具；**不注册 `loadSkill`**，避免模型再加载另一个技能绕过用户选定的边界。找不到 → 400 `unknown_skill`。askUser 续答时从上一轮 `tool-loadSkill` 的 `output.id` 回灌已加载技能（缺 id 时按名称兜底），自定义技能改名不影响边界恢复。
 - **技能模板** `SKILL_TEMPLATES`（[`constants/skill-templates.ts`](../src/features/agent/constants/skill-templates.ts)）：只服务管理页「从模板新建」的表单预填（当前 2 个：电商套图设计专家 / 小红书图文专家），不落库、不进入自动路由、不参与工具边界；点「从模板新建」后按普通技能入库，可改可删。模板内容只写基座指令表达不出来的领域知识（平台惯例 / 广告法 / 封面策略），与 `AGENT_INSTRUCTIONS` 和工具 description 不重复，避免工具演进后模板正文漂移。
 - **自定义技能表** `skills`（[`schema.ts`](../src/lib/db/schema.ts)）：用户私有（`userId` 隔离），列 `name / description / instructions / placeholder? / tools(jsonb) / examples(jsonb) / createdAt / updatedAt`，`id` 为 uuid。`tools` 为 null = 全量；非 null 时至少 1 个。
 - **名称唯一**：`loadSkill` 先按 id、再按 name 查找；`createSkill` / `updateSkill` 校验当前用户内名称唯一（trim + 大小写不敏感，`SkillNameConflictError` → 409 `skill_name_conflict`），避免加载到不可预期的技能。

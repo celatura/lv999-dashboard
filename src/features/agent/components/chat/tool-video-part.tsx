@@ -7,24 +7,11 @@ import { cn } from '@/lib/utils';
 import { assetQueryOptions } from '../../api/queries';
 import { downloadAsset } from '../../lib/asset-download';
 import { formatBytes } from '../../lib/format';
-import type { AssetKind } from '../../api/types';
+import type { AgentToolPart } from '../../api/types';
 import { ToolStep } from './tool-step';
 
-/** 供消息渲染层断言使用：保留 output 等完整字段类型，避免双重断言抹掉结构 */
-export interface VideoAssetToolPart {
-  state: string;
-  input?: { title?: string } | undefined;
-  output?:
-    | {
-        assetId: string;
-        title: string;
-        kind: AssetKind;
-        sizeBytes: number;
-        sourceAssetId?: string;
-      }
-    | undefined;
-  errorText?: string;
-}
+/** createVideoAsset / createVideoFromImageAsset 共用同一播放卡片 */
+type VideoAssetToolPart = AgentToolPart<'createVideoAsset' | 'createVideoFromImageAsset'>;
 
 /**
  * 完成态：对话内可播放视频卡片。
